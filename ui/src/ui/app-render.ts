@@ -127,6 +127,11 @@ const lazyLogs = createLazy(() => import("./views/logs.ts"));
 const lazyNodes = createLazy(() => import("./views/nodes.ts"));
 const lazySessions = createLazy(() => import("./views/sessions.ts"));
 const lazySkills = createLazy(() => import("./views/skills.ts"));
+const lazyCompanyOverview = createLazy(() => import("./views/company-overview.ts"));
+const lazyCompanyTeams = createLazy(() => import("./views/company-teams.ts"));
+const lazyCompanyFleet = createLazy(() => import("./views/company-fleet.ts"));
+const lazyCompanyOrgChart = createLazy(() => import("./views/company-org-chart.ts"));
+const lazyCompanyOffice = createLazy(() => import("./views/company-office.ts"));
 
 function lazyRender<M>(getter: () => M | null, render: (mod: M) => unknown) {
   const mod = getter();
@@ -451,10 +456,10 @@ export function renderApp(state: AppViewState) {
                   navCollapsed
                     ? nothing
                     : html`
-                        <img class="sidebar-brand__logo" src="${agentLogoUrl(basePath)}" alt="OpenClaw" />
+                        <img class="sidebar-brand__logo" src="${agentLogoUrl(basePath)}" alt="ClawDock" />
                         <span class="sidebar-brand__copy">
-                          <span class="sidebar-brand__eyebrow">${t("nav.control")}</span>
-                          <span class="sidebar-brand__title">OpenClaw</span>
+                          <span class="sidebar-brand__eyebrow">CONTROL PLANE</span>
+                          <span class="sidebar-brand__title">ClawDock</span>
                         </span>
                       `
                 }
@@ -1904,6 +1909,38 @@ export function renderApp(state: AppViewState) {
                   onExport: (lines, label) => state.exportLogs(lines, label),
                   onScroll: (event) => state.handleLogsScroll(event),
                 }),
+              )
+            : nothing
+        }
+
+        ${
+          state.tab === "companyOverview"
+            ? lazyRender(lazyCompanyOverview, (m) => m.renderCompanyOverview({}))
+            : nothing
+        }
+
+        ${
+          state.tab === "companyTeams"
+            ? lazyRender(lazyCompanyTeams, (m) => m.renderCompanyTeams({}))
+            : nothing
+        }
+
+        ${
+          state.tab === "companyFleet"
+            ? lazyRender(lazyCompanyFleet, (m) => m.renderCompanyFleet({}))
+            : nothing
+        }
+
+        ${
+          state.tab === "companyOrgChart"
+            ? lazyRender(lazyCompanyOrgChart, (m) => m.renderCompanyOrgChart({}))
+            : nothing
+        }
+
+        ${
+          state.tab === "companyOffice"
+            ? lazyRender(lazyCompanyOffice, (m) =>
+                m.renderCompanyOffice({ requestUpdate: requestHostUpdate }),
               )
             : nothing
         }

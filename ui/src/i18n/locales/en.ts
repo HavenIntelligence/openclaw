@@ -21,6 +21,7 @@ export const en: TranslationMap = {
     chat: "Chat",
     control: "Control",
     agent: "Agent",
+    company: "Company",
     settings: "Settings",
     expand: "Expand sidebar",
     collapse: "Collapse sidebar",
@@ -45,6 +46,11 @@ export const en: TranslationMap = {
     aiAgents: "AI & Agents",
     debug: "Debug",
     logs: "Logs",
+    companyOverview: "Company",
+    companyTeams: "Teams",
+    companyFleet: "Fleet",
+    companyOrgChart: "Org Chart",
+    companyOffice: "Office",
   },
   subtitles: {
     agents: "Workspaces, tools, identities.",
@@ -65,6 +71,11 @@ export const en: TranslationMap = {
     aiAgents: "Agents, models, skills, tools, memory, session.",
     debug: "Snapshots, events, RPC.",
     logs: "Live gateway logs.",
+    companyOverview: "One-person company control plane.",
+    companyTeams: "Departments, supervision trees, strategies.",
+    companyFleet: "All agents, health, and live activity.",
+    companyOrgChart: "Topology graph: reporting lines and team structure.",
+    companyOffice: "Animated live office — watch your agents at work.",
   },
   overview: {
     access: {
