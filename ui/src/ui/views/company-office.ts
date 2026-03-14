@@ -33,6 +33,15 @@ type FlyingMessage = {
   label: string;
 };
 
+// Floating output bubble that appears above an agent on canvas
+type CanvasBubble = {
+  id: string;
+  agentId: string;
+  text: string;
+  timer: number; // countdown frames until it fades
+  color: string;
+};
+
 // ── Execution log entry ────────────────────────────────────────────────────
 type LogEntry = {
   id: string;
@@ -56,7 +65,7 @@ type Project = {
 };
 
 // ── Demo data ──────────────────────────────────────────────────────────────
-const TILE = 48;
+const TILE = 62;
 const COLS = 14;
 const ROWS = 9;
 
@@ -391,6 +400,8 @@ let _rightTab: "log" | "output" | "human" = "log";
 // ── Animation state ────────────────────────────────────────────────────────
 let _agents: OfficeAgent[] = INITIAL_AGENTS.map((a) => ({ ...a }));
 let _messages: FlyingMessage[] = [];
+let _canvasBubbles: CanvasBubble[] = [];
+let _bubbleIdCounter = 0;
 let _tick = 0;
 let _msgIdCounter = 0;
 let _scriptIdx = 0;
@@ -419,6 +430,21 @@ function addLog(
   if (_execLog.length > 80) {
     _execLog = _execLog.slice(-60);
   }
+  // Spawn canvas bubble for output and thinking entries
+  if (type === "output" || type === "thinking" || type === "tool_call") {
+    const shortText = content.length > 60 ? content.slice(0, 57) + "…" : content;
+    const color = type === "output" ? "var(--ok)" : type === "tool_call" ? "#a78bfa" : "#60a5fa";
+    _canvasBubbles.push({
+      id: `bubble-${_bubbleIdCounter++}`,
+      agentId: agent,
+      text: shortText,
+      timer: 220,
+      color,
+    });
+    if (_canvasBubbles.length > 6) {
+      _canvasBubbles = _canvasBubbles.slice(-6);
+    }
+  }
 }
 
 function spawnMessage(fromId: string, toId: string, emoji: string, label: string) {
@@ -446,11 +472,17 @@ function simulationStep() {
   _tick++;
 
   for (const msg of _messages) {
-    msg.progress += 0.025;
+    msg.progress += 0.012;
   }
   _messages = _messages.filter((m) => m.progress < 1.0);
 
-  if (_tick % 90 === 0) {
+  // Tick canvas bubbles
+  for (const b of _canvasBubbles) {
+    b.timer--;
+  }
+  _canvasBubbles = _canvasBubbles.filter((b) => b.timer > 0);
+
+  if (_tick % 140 === 0) {
     const script = MESSAGE_SCRIPTS[_scriptIdx % MESSAGE_SCRIPTS.length];
     spawnMessage(script.from, script.to, script.emoji, script.label);
     addLog(
@@ -468,7 +500,7 @@ function simulationStep() {
     }
   }
 
-  if (_tick % 150 === 0) {
+  if (_tick % 220 === 0) {
     const activeAgents = _agents.filter((a) => a.status !== "crashed");
     if (activeAgents.length > 0) {
       const a = activeAgents[Math.floor(Math.random() * activeAgents.length)];
@@ -508,7 +540,7 @@ function simulationStep() {
       }
     }
 
-    if (_tick % 200 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 200) {
+    if (_tick % 300 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 300) {
       const goMeet = Math.random() < 0.3;
       if (goMeet) {
         agent.targetX = 5 + Math.floor(Math.random() * 3);
@@ -526,7 +558,7 @@ function simulationStep() {
     const dy = agent.targetY - agent.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > 0.1) {
-      const speed = 0.06;
+      const speed = 0.035;
       agent.x += (dx / dist) * speed;
       agent.y += (dy / dist) * speed;
     } else {
@@ -770,6 +802,30 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   <div class="cd-office-msg-bubble" style="left:${px - 16}px;top:${py - 16}px;opacity:${opacity}">
                     ${msg.emoji}
                     <span class="cd-office-msg-label">${msg.label}</span>
+                  </div>
+                `;
+              })}
+
+              <!-- Canvas output bubbles -->
+              ${_canvasBubbles.map((bubble) => {
+                const agent = _agents.find((a) => a.id === bubble.agentId);
+                if (!agent) {
+                  return "";
+                }
+                const fadeIn = (220 - bubble.timer) / 20;
+                const fadeOut = bubble.timer < 40 ? bubble.timer / 40 : 1;
+                const opacity = Math.min(fadeIn, fadeOut);
+                const offsetY = -TILE * 1.2 - (220 - bubble.timer) * 0.12;
+                return html`
+                  <div class="cd-canvas-bubble" style="
+                    left:${agent.x * TILE - 60}px;
+                    top:${agent.y * TILE + offsetY}px;
+                    opacity:${opacity};
+                    border-color:${bubble.color}40;
+                    box-shadow: 0 0 12px ${bubble.color}30;
+                  ">
+                    <div class="cd-canvas-bubble__bar" style="background:${bubble.color}"></div>
+                    <div class="cd-canvas-bubble__text">${bubble.text}</div>
                   </div>
                 `;
               })}
