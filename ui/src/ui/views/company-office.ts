@@ -829,6 +829,32 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
               )}
 
+              <!-- SVG edge network (static connections between agents) -->
+              <svg class="cd-office-network" style="width:${W}px;height:${H}px" viewBox="0 0 ${W} ${H}">
+                ${MESSAGE_SCRIPTS.map((script) => {
+                  const from = _agents.find((a) => a.id === script.from);
+                  const to = _agents.find((a) => a.id === script.to);
+                  if (!from || !to) {
+                    return "";
+                  }
+                  const x1 = from.x * TILE + TILE / 2;
+                  const y1 = from.y * TILE + 20;
+                  const x2 = to.x * TILE + TILE / 2;
+                  const y2 = to.y * TILE + 20;
+                  const cpX = (x1 + x2) / 2;
+                  const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
+                  const hasActiveMsg = _messages.some(
+                    (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
+                  );
+                  return html`
+                    <g class="cd-office-edge ${hasActiveMsg ? "cd-office-edge--active" : ""}">
+                      <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__line"/>
+                      ${hasActiveMsg ? html`<path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>` : ""}
+                    </g>
+                  `;
+                })}
+              </svg>
+
               <!-- Flying messages -->
               ${_messages.map((msg) => {
                 const t = msg.progress;
@@ -876,26 +902,22 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   Math.abs(agent.y - agent.targetY) > 0.15;
                 return html`
                   <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${isMoving ? "cd-office-agent--moving" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
-                    style="left:${agent.x * TILE}px;top:${agent.y * TILE}px;border-color:${agent.color}">
-                    <div class="cd-office-agent__avatar">${agent.emoji}</div>
-                    <div class="cd-office-agent__status-dot" style="background:${
+                    style="left:${agent.x * TILE}px;top:${agent.y * TILE}px;--agent-accent:${agent.color}">
+                    <span class="cd-office-agent__status-dot" style="background:${
                       agent.status === "working" || agent.status === "thinking"
-                        ? "var(--ok)"
+                        ? "#22c55e"
                         : agent.status === "messaging"
-                          ? "var(--accent)"
+                          ? "#3b82f6"
                           : agent.status === "idle"
                             ? "#f59e0b"
-                            : "var(--destructive)"
-                    }"></div>
+                            : "#ef4444"
+                    }"></span>
+                    <span class="cd-office-agent__avatar-shell">
+                      <span class="cd-office-agent__avatar">${agent.emoji}</span>
+                    </span>
+                    <span class="cd-office-agent__name-pill">${agent.name}</span>
+                    <span class="cd-office-agent__role-text">${agent.team}</span>
                     ${agent.thoughtBubble ? html`<div class="cd-office-thought">${agent.thoughtBubble}</div>` : ""}
-                    <div class="cd-office-agent__tag" style="background:${agent.color}20;border-color:${agent.color}40">${agent.name}</div>
-                    ${
-                      agent.status === "working" || agent.status === "thinking"
-                        ? html`
-                            <div class="cd-office-agent__work-anim"><span></span><span></span><span></span></div>
-                          `
-                        : ""
-                    }
                     ${
                       agent.status === "crashed"
                         ? html`

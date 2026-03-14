@@ -286,6 +286,7 @@ const DEMO_TASKS: Task[] = [
 
 // ── UI State ───────────────────────────────────────────────────────────────
 let _filter = "All";
+let _filterAgent = "All";
 let _newTaskOpen = false;
 let _newTask = {
   title: "",
@@ -344,10 +345,14 @@ function fmtTokens(n: number): string {
 }
 
 function filterTasks(tasks: Task[]): Task[] {
-  if (_filter === "All") {
-    return tasks;
+  let filtered = tasks;
+  if (_filter !== "All") {
+    filtered = filtered.filter((t) => t.project === _filter);
   }
-  return tasks.filter((t) => t.project === _filter);
+  if (_filterAgent !== "All") {
+    filtered = filtered.filter((t) => t.assignee === _filterAgent);
+  }
+  return filtered;
 }
 
 function renderTask(task: Task) {
@@ -501,6 +506,25 @@ export function renderCompanyTasks(_props: CompanyTasksProps) {
           <span style="color:var(--ok)">${Math.round((done / (total.length || 1)) * 100)}%</span>
           <span>Complete</span>
         </div>
+      </div>
+
+      <!-- Agent filter row -->
+      <div class="cd-tasks-agent-filter">
+        <span class="cd-tasks-agent-filter__label">Filter by agent:</span>
+        <button class="cd-log-af-btn ${_filterAgent === "All" ? "cd-log-af-btn--active" : ""}"
+          @click=${() => {
+            _filterAgent = "All";
+          }}>All</button>
+        ${AGENTS.map(
+          (a) => html`
+            <button class="cd-log-af-btn ${_filterAgent === a.id ? "cd-log-af-btn--active" : ""}"
+              @click=${() => {
+                _filterAgent = _filterAgent === a.id ? "All" : a.id;
+              }}>
+              ${a.emoji} ${a.name}
+            </button>
+          `,
+        )}
       </div>
 
       <!-- Kanban board -->

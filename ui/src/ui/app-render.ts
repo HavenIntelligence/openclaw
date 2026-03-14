@@ -132,6 +132,7 @@ const lazyCompanyTeams = createLazy(() => import("./views/company-teams.ts"));
 const lazyCompanyFleet = createLazy(() => import("./views/company-fleet.ts"));
 const lazyCompanyOrgChart = createLazy(() => import("./views/company-org-chart.ts"));
 const lazyCompanyOffice = createLazy(() => import("./views/company-office.ts"));
+const lazyCompanyMonitor = createLazy(() => import("./views/company-monitor.ts"));
 const lazyRoleHub = createLazy(() => import("./views/role-hub.ts"));
 const lazyCompanyTasks = createLazy(() => import("./views/company-tasks.ts"));
 
@@ -1943,6 +1944,14 @@ export function renderApp(state: AppViewState) {
           state.tab === "companyOffice"
             ? lazyRender(lazyCompanyOffice, (m) =>
                 m.renderCompanyOffice({ requestUpdate: requestHostUpdate }),
+              )
+            : nothing
+        }
+
+        ${
+          state.tab === "companyMonitor"
+            ? lazyRender(lazyCompanyMonitor, (m) =>
+                m.renderCompanyMonitor({ requestRender: requestHostUpdate }),
               )
             : nothing
         }

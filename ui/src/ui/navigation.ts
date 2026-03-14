@@ -10,7 +10,7 @@ export const TAB_GROUPS = [
   { label: "agent", tabs: ["agents", "skills", "nodes"] },
   {
     label: "company",
-    tabs: ["companyOverview", "companyOrgChart", "companyOffice"],
+    tabs: ["companyOverview", "companyOrgChart", "companyOffice", "companyMonitor"],
   },
   {
     label: "settings",
@@ -51,6 +51,7 @@ export type Tab =
   | "companyFleet"
   | "companyOrgChart"
   | "companyOffice"
+  | "companyMonitor"
   | "roleHub"
   | "companyTasks";
 
@@ -78,6 +79,7 @@ const TAB_PATHS: Record<Tab, string> = {
   companyFleet: "/company/fleet",
   companyOrgChart: "/company/org-chart",
   companyOffice: "/company/office",
+  companyMonitor: "/company/monitor",
   roleHub: "/company/roles",
   companyTasks: "/company/tasks",
 };
@@ -211,6 +213,8 @@ export function iconForTab(tab: Tab): IconName {
       return "gitBranch";
     case "companyOffice":
       return "home";
+    case "companyMonitor":
+      return "activity";
     case "roleHub":
       return "users";
     case "companyTasks":
