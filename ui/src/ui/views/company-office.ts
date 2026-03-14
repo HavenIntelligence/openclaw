@@ -924,7 +924,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   @click=${() => {
                     _logAgentFilter = _logAgentFilter === a.id ? "all" : a.id;
                   }}>
-                  ${a.emoji}
+                  ${a.emoji} ${a.name}
                 </button>
               `,
               )}

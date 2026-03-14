@@ -1,4 +1,6 @@
 import { html } from "lit";
+import { renderCompanyTasks } from "./company-tasks.ts";
+import { renderRoleHub } from "./role-hub.ts";
 
 // ── Sub-tab ────────────────────────────────────────────────────────────────
 type OverviewTab = "profile" | "teams" | "fleet" | "roles" | "tasks" | "chats";
@@ -605,38 +607,105 @@ function renderTeams() {
   `;
 }
 function renderRoles() {
-  return html`
-    <div class="cd-subtab-stub">
-      <div class="cd-subtab-stub__icon">🎭</div>
-      <div class="cd-subtab-stub__title">Role Hub</div>
-      <div class="cd-subtab-stub__desc">
-        Browse 100+ agent role templates with pre-configured tools, skills, and system prompts.
-      </div>
-      <div class="cd-subtab-stub__hint">Role Hub available at <strong>/company/roles</strong></div>
-    </div>
-  `;
+  return renderRoleHub({});
 }
 function renderTasks() {
-  return html`
-    <div class="cd-subtab-stub">
-      <div class="cd-subtab-stub__icon">📋</div>
-      <div class="cd-subtab-stub__title">Task Kanban</div>
-      <div class="cd-subtab-stub__desc">
-        Global kanban board tracking all agent tasks across projects and teams.
-      </div>
-      <div class="cd-subtab-stub__hint">Task board available at <strong>/company/tasks</strong></div>
-    </div>
-  `;
+  return renderCompanyTasks({});
 }
 function renderChats() {
+  const CHAT_LOG = [
+    {
+      ts: "09:54",
+      from: "👤 Founder",
+      to: "👑 founder-ai",
+      content: "[Human override] Hold restart — check if context window exceeded first.",
+      type: "human",
+    },
+    {
+      ts: "09:47",
+      from: "👑 founder-ai",
+      to: "📣 content-director",
+      content:
+        "📋 Strategy brief for Q1 content push — prioritize AI use-case blog and pricing page rewrite.",
+      type: "out",
+    },
+    {
+      ts: "09:47",
+      from: "📣 content-director",
+      to: "🔍 research-alpha",
+      content:
+        "🔍 Task: Competitor pricing analysis — focus on 10 top AI SaaS players, extract pricing tiers.",
+      type: "out",
+    },
+    {
+      ts: "09:48",
+      from: "🏢 ops-prime",
+      to: "👑 founder-ai",
+      content:
+        "📊 Q1 OKR report filed — 87% target completion. 2 red items: hiring (delayed) and churn (+1.2%).",
+      type: "in",
+    },
+    {
+      ts: "09:46",
+      from: "💻 code-agent",
+      to: "🏢 ops-prime",
+      content:
+        "💻 PR #42 ready — MCP retry fix + auth token refresh. All 142 tests passing. Requesting approval.",
+      type: "in",
+    },
+    {
+      ts: "09:43",
+      from: "🔍 research-alpha",
+      to: "✍️ writing-beta",
+      content:
+        "📄 Research complete: 18 sources, pricing matrix attached. Avg entry $49/mo, enterprise ~$2K.",
+      type: "out",
+    },
+    {
+      ts: "09:40",
+      from: "📝 review-gamma",
+      to: "🔔 supervisor",
+      content: "❌ CRASH: Context window exceeded (128K). Supervisor restart requested.",
+      type: "error",
+    },
+    {
+      ts: "09:40",
+      from: "✍️ writing-beta",
+      to: "📝 review-gamma",
+      content:
+        "✍️ Draft ready: 'AI Agents in 2026' — 2,480 words, SEO score 84/100. Please review.",
+      type: "out",
+    },
+  ];
+  const typeColor: Record<string, string> = {
+    out: "var(--border)",
+    in: "rgba(34,197,94,0.3)",
+    error: "rgba(239,68,68,0.3)",
+    human: "rgba(245,158,11,0.3)",
+  };
   return html`
-    <div class="cd-subtab-stub">
-      <div class="cd-subtab-stub__icon">💬</div>
-      <div class="cd-subtab-stub__title">Company Chats</div>
-      <div class="cd-subtab-stub__desc">
-        View all inter-agent messages, human overrides, and decision logs across the fleet.
+    <div class="cd-chats-view">
+      <div class="cd-chats-header">
+        <span class="cd-chats-header__title">💬 Company Chats</span>
+        <span class="cd-chats-header__sub"
+          >All inter-agent messages and human overrides · ${CHAT_LOG.length} entries</span
+        >
       </div>
-      <div class="cd-subtab-stub__hint">Full chat log in the main Chat view</div>
+      <div class="cd-chats-log">
+        ${CHAT_LOG.map(
+          (msg) => html`
+          <div class="cd-chat-entry" style="border-left-color:${typeColor[msg.type] ?? "var(--border)"}">
+            <div class="cd-chat-entry__meta">
+              <span class="cd-chat-entry__from">${msg.from}</span>
+              <span class="cd-chat-entry__arrow">→</span>
+              <span class="cd-chat-entry__to">${msg.to}</span>
+              <span class="cd-chat-entry__ts">${msg.ts}</span>
+            </div>
+            <div class="cd-chat-entry__content">${msg.content}</div>
+          </div>
+        `,
+        )}
+      </div>
     </div>
   `;
 }

@@ -4075,3 +4075,85 @@
   color: var(--text-strong);
   font-weight: 600;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Chats view
+   ═══════════════════════════════════════════════════════════════ */
+.cd-chats-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cd-chats-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cd-chats-header__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.cd-chats-header__sub {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.cd-chats-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cd-chat-entry {
+  padding: 10px 14px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cd-chat-entry__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.cd-chat-entry__from {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.cd-chat-entry__arrow {
+  color: var(--muted-foreground);
+}
+
+.cd-chat-entry__to {
+  color: var(--muted-foreground);
+}
+
+.cd-chat-entry__ts {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-family: monospace;
+}
+
+.cd-chat-entry__content {
+  font-size: 13px;
+  color: var(--text-strong);
+  line-height: 1.5;
+}
+
+/* Log filter: wider buttons to show emoji+name */
+.cd-log-af-btn {
+  white-space: nowrap;
+}
