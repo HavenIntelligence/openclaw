@@ -82,15 +82,51 @@ const DESKS: Record<string, { x: number; y: number }> = {
 };
 
 const THOUGHTS: Record<string, string[]> = {
-  "founder-ai": ["📈 Q2 strategy…", "🧠 Fundraise plan", "👁️ Reviewing OKRs"],
-  "ops-prime": ["📋 Process gap", "⚡ Optimizing flow", "📊 KPIs on track"],
-  "content-director": ["🎯 Campaign live", "📣 Reach growing", "💡 New angle!"],
-  "nanoclaw-primary": ["📝 Notes ready", "🗓️ Schedule OK", "📌 Reminder set"],
-  "code-agent": ["🐛 Found a bug!", "🔧 Fixing…", "✅ PR merged"],
-  "test-runner": ["🧪 Running tests", "📊 89% coverage", "❌ 2 failures"],
-  "research-alpha": ["🔍 Found data", "📚 Deep dive…", "💡 Insight!"],
-  "writing-beta": ["✍️ First draft", "📝 Editing…", "🎉 Published!"],
-  "review-gamma": ["⚡ CRASHED", "💥 Restarting…", "🔴 Error state"],
+  "founder-ai": [
+    "Reviewing Q2 roadmap…",
+    "Should we prioritize the MCP marketplace?",
+    "Fundraise deck looks solid. One more round of feedback.",
+  ],
+  "ops-prime": [
+    "Churn is up 1.2% — need to flag this.",
+    "Deployment window set for Thursday 2am.",
+    "Team velocity is healthy this sprint.",
+  ],
+  "content-director": [
+    "New blog angle: AI agents vs. human teams.",
+    "SEO score needs work on the pricing page.",
+    "Let's A/B test two headline variants.",
+  ],
+  "nanoclaw-primary": [
+    "Founder meeting notes synced.",
+    "Calendar blocked for deep work: 9–12am.",
+    "3 reminders queued for tomorrow.",
+  ],
+  "code-agent": [
+    "MCP retry fix looks clean. Running tests.",
+    "Auth token refresh was a race condition.",
+    "PR #42 ready. All 142 tests passing ✅",
+  ],
+  "test-runner": [
+    "Coverage at 89%. Need 3 more edge cases.",
+    "Flakey test in auth suite — investigating.",
+    "Regression suite finished. 0 new failures.",
+  ],
+  "research-alpha": [
+    "Found pricing data for 18 competitors.",
+    "Anthropic API: $3/M input tokens at scale.",
+    "Building comparison table for writing-beta.",
+  ],
+  "writing-beta": [
+    "Draft at 1,800 words. 700 more to go.",
+    "Adding a 'Key Takeaways' section.",
+    "SEO keywords woven in. Reads naturally.",
+  ],
+  "review-gamma": [
+    "Context window exceeded 128K limit.",
+    "Supervisor restarting… attempt 2/3.",
+    "Unable to resume — awaiting human review.",
+  ],
 };
 
 const MESSAGE_SCRIPTS = [
@@ -109,7 +145,7 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "founder-ai",
     name: "Founder AI",
-    emoji: "👑",
+    emoji: "🧑‍💻",
     color: "#ff5c5c",
     team: "executive",
     status: "thinking",
@@ -126,7 +162,7 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "ops-prime",
     name: "Ops Prime",
-    emoji: "🏢",
+    emoji: "🧑‍💼",
     color: "#60a5fa",
     team: "executive",
     status: "working",
@@ -143,7 +179,7 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "content-director",
     name: "CMO",
-    emoji: "📣",
+    emoji: "👩‍🎨",
     color: "#fb923c",
     team: "content",
     status: "working",
@@ -177,11 +213,11 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "code-agent",
     name: "Code Agent",
-    emoji: "💻",
+    emoji: "👨‍💻",
     color: "#22c55e",
     team: "devops",
     status: "working",
-    activity: "Writing code",
+    activity: "Fixing MCP retry",
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
@@ -195,10 +231,10 @@ const INITIAL_AGENTS: OfficeAgent[] = [
     id: "test-runner",
     name: "Test Runner",
     emoji: "🧪",
-    color: "#4ade80",
+    color: "#a78bfa",
     team: "devops",
-    status: "thinking",
-    activity: "Running tests",
+    status: "idle",
+    activity: "Waiting for PR",
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
@@ -215,7 +251,7 @@ const INITIAL_AGENTS: OfficeAgent[] = [
     color: "#f97316",
     team: "content",
     status: "working",
-    activity: "Deep research",
+    activity: "Competitor analysis",
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
@@ -227,12 +263,12 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   },
   {
     id: "writing-beta",
-    name: "Writer Beta",
+    name: "Writer",
     emoji: "✍️",
     color: "#fbbf24",
     team: "content",
     status: "working",
-    activity: "Writing draft",
+    activity: "Drafting blog post",
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
@@ -245,7 +281,7 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "review-gamma",
     name: "Reviewer",
-    emoji: "📝",
+    emoji: "🧐",
     color: "#ef4444",
     team: "content",
     status: "crashed",
@@ -482,7 +518,7 @@ function simulationStep() {
   }
   _canvasBubbles = _canvasBubbles.filter((b) => b.timer > 0);
 
-  if (_tick % 140 === 0) {
+  if (_tick % 200 === 0) {
     const script = MESSAGE_SCRIPTS[_scriptIdx % MESSAGE_SCRIPTS.length];
     spawnMessage(script.from, script.to, script.emoji, script.label);
     addLog(
@@ -500,7 +536,7 @@ function simulationStep() {
     }
   }
 
-  if (_tick % 220 === 0) {
+  if (_tick % 320 === 0) {
     const activeAgents = _agents.filter((a) => a.status !== "crashed");
     if (activeAgents.length > 0) {
       const a = activeAgents[Math.floor(Math.random() * activeAgents.length)];
@@ -540,8 +576,9 @@ function simulationStep() {
       }
     }
 
-    if (_tick % 300 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 300) {
-      const goMeet = Math.random() < 0.3;
+    if (_tick % 600 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 600) {
+      // 15% chance to go to meeting room, otherwise stay at desk
+      const goMeet = Math.random() < 0.15 && agent.status !== "crashed";
       if (goMeet) {
         agent.targetX = 5 + Math.floor(Math.random() * 3);
         agent.targetY = 4;
@@ -549,8 +586,10 @@ function simulationStep() {
       } else {
         agent.targetX = agent.deskX;
         agent.targetY = agent.deskY;
-        agent.status = "working";
-        agent.activity = "Back at desk";
+        if (agent.status !== "crashed") {
+          agent.status = "working";
+          agent.activity = "Back at desk";
+        }
       }
     }
 
@@ -558,7 +597,7 @@ function simulationStep() {
     const dy = agent.targetY - agent.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > 0.1) {
-      const speed = 0.035;
+      const speed = 0.022;
       agent.x += (dx / dist) * speed;
       agent.y += (dy / dist) * speed;
     } else {

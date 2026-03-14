@@ -546,44 +546,53 @@ function renderAgentDetail(agent: AgentRecord) {
   `;
 }
 
-// ── Sub-tab: Fleet (agent list) ─────────────────────────────────────────────
+// ── Sub-tab: Agent Status (renamed from Fleet) ────────────────────────────
 function renderFleet() {
   return html`
     <div class="cd-fleet-view">
       <div class="cd-fleet-header">
-        <span class="cd-fleet-header__title">Agent Fleet</span>
-        <span class="cd-fleet-header__sub">${AGENTS.length} agents · ${AGENTS.filter((a) => a.status === "running").length} running · ${AGENTS.filter((a) => a.status === "crashed").length} crashed</span>
+        <span class="cd-fleet-header__title">Agent Status</span>
+        <span class="cd-fleet-header__sub"
+          >${AGENTS.length} agents · ${AGENTS.filter((a) => a.status === "running").length} running ·
+          ${AGENTS.filter((a) => a.status === "paused").length} paused ·
+          ${AGENTS.filter((a) => a.status === "crashed").length} crashed</span
+        >
         <button class="cd-btn cd-btn--primary cd-btn--sm">+ New Agent</button>
       </div>
       <div class="cd-fleet-table">
         <div class="cd-fleet-thead">
-          <span>Agent</span><span>Role</span><span>Workspace</span><span>Status</span><span>Tasks</span><span>Tokens</span><span>Uptime</span>
+          <span>Agent</span><span>Role / Team</span><span>Current Workspace</span><span>Status</span><span>Tasks</span><span>Tokens</span><span>Uptime</span><span>Last Active</span>
         </div>
         ${AGENTS.map(
           (a) => html`
-          <div class="cd-fleet-row ${_selectedAgentId === a.id ? "cd-fleet-row--selected" : ""}"
+          <div
+            class="cd-fleet-row ${_selectedAgentId === a.id ? "cd-fleet-row--selected" : ""}"
             @click=${() => {
               _selectedAgentId = _selectedAgentId === a.id ? null : a.id;
               _agentDetailTab = "trace";
-            }}>
+            }}
+          >
             <span class="cd-fleet-agent">
               <span class="cd-fleet-dot" style="background:${statusColor(a.status)}"></span>
               ${a.emoji} <strong>${a.name}</strong>
             </span>
-            <span class="cd-muted">${a.role}</span>
+            <span class="cd-muted" style="font-size:12px">${a.role}<br /><span style="font-size:10px;opacity:.6">${a.team}</span></span>
             <span class="cd-muted cd-mono" style="font-size:11px">${a.currentWorkspace}</span>
-            <span class="cd-ad-badge" style="background:${statusColor(a.status)}22;color:${statusColor(a.status)};border-color:${statusColor(a.status)}44">${a.status}</span>
+            <span
+              class="cd-ad-badge"
+              style="background:${statusColor(a.status)}22;color:${statusColor(a.status)};border-color:${statusColor(a.status)}44"
+              >${a.status}</span
+            >
             <span>${a.totalTasksCompleted}</span>
             <span>${(a.totalTokensUsed / 1_000_000).toFixed(1)}M</span>
             <span>${a.uptimePct}%</span>
+            <span class="cd-muted" style="font-size:11px">${a.lastActiveAt}</span>
           </div>
           ${
             _selectedAgentId === a.id
               ? html`
-            <div class="cd-fleet-row-detail">
-              ${renderAgentDetail(a)}
-            </div>
-          `
+                <div class="cd-fleet-row-detail">${renderAgentDetail(a)}</div>
+              `
               : ""
           }
         `,
@@ -595,14 +604,221 @@ function renderFleet() {
 
 // ── Sub-tab stubs ──────────────────────────────────────────────────────────
 function renderTeams() {
+  // Team definitions with supervision strategies, members, KPIs
+  const TEAMS = [
+    {
+      id: "executive",
+      name: "Executive Suite",
+      icon: "👑",
+      color: "#ff5c5c",
+      strategy: "singleton",
+      strategyDesc: "Each agent is unique; crashes restart only that agent.",
+      lead: "founder-ai",
+      leadEmoji: "👑",
+      members: [
+        {
+          id: "founder-ai",
+          emoji: "👑",
+          name: "Founder AI",
+          role: "CEO",
+          status: "running" as const,
+        },
+        {
+          id: "ops-prime",
+          emoji: "🧑‍💼",
+          name: "Ops Prime",
+          role: "COO",
+          status: "running" as const,
+        },
+        {
+          id: "nanoclaw-primary",
+          emoji: "🤖",
+          name: "NanoClaw",
+          role: "Executive Assistant",
+          status: "paused" as const,
+        },
+      ],
+      kpis: { tasksThisWeek: 42, avgResponseTime: "1.2s", uptime: "99.1%", tokensUsed: "8.4M" },
+      healthStatus: "healthy" as const,
+      description:
+        "Sets company strategy, oversees all departments, and handles human↔fleet communication.",
+    },
+    {
+      id: "content",
+      name: "Content Pipeline",
+      icon: "✍️",
+      color: "#fb923c",
+      strategy: "one-for-one",
+      strategyDesc: "One agent crashes → only that agent restarts. Others unaffected.",
+      lead: "content-director",
+      leadEmoji: "📢",
+      members: [
+        {
+          id: "content-director",
+          emoji: "📢",
+          name: "CMO",
+          role: "Content Director",
+          status: "running" as const,
+        },
+        {
+          id: "research-alpha",
+          emoji: "🔍",
+          name: "Research Alpha",
+          role: "Researcher",
+          status: "running" as const,
+        },
+        {
+          id: "writing-beta",
+          emoji: "✍️",
+          name: "Writing Beta",
+          role: "Writer",
+          status: "running" as const,
+        },
+        {
+          id: "review-gamma",
+          emoji: "🧐",
+          name: "Reviewer",
+          role: "Content Reviewer",
+          status: "crashed" as const,
+        },
+      ],
+      kpis: { tasksThisWeek: 28, avgResponseTime: "3.8s", uptime: "82.4%", tokensUsed: "21.6M" },
+      healthStatus: "degraded" as const,
+      description:
+        "Runs the full content production pipeline: research → draft → review → publish.",
+    },
+    {
+      id: "devops",
+      name: "DevOps",
+      icon: "⚙️",
+      color: "#22c55e",
+      strategy: "rest-for-one",
+      strategyDesc:
+        "One crashes → all downstream dependents restart. Preserves pipeline integrity.",
+      lead: "code-agent",
+      leadEmoji: "💻",
+      members: [
+        {
+          id: "code-agent",
+          emoji: "💻",
+          name: "Code Agent",
+          role: "Software Engineer",
+          status: "running" as const,
+        },
+        {
+          id: "test-runner",
+          emoji: "🧪",
+          name: "Test Runner",
+          role: "QA Engineer",
+          status: "paused" as const,
+        },
+      ],
+      kpis: { tasksThisWeek: 19, avgResponseTime: "4.1s", uptime: "99.8%", tokensUsed: "9.3M" },
+      healthStatus: "healthy" as const,
+      description: "Manages codebase, CI/CD pipeline, deployments, and automated test coverage.",
+    },
+  ];
+
+  const statusC = (s: string) => {
+    if (s === "running") {
+      return "var(--ok)";
+    }
+    if (s === "crashed") {
+      return "var(--destructive)";
+    }
+    if (s === "paused") {
+      return "#f59e0b";
+    }
+    return "var(--muted-foreground)";
+  };
+
+  const healthBadge = (h: "healthy" | "degraded") =>
+    h === "healthy"
+      ? html`
+          <span
+            class="cd-ad-badge"
+            style="
+              background: rgba(34, 197, 94, 0.12);
+              color: var(--ok);
+              border-color: rgba(34, 197, 94, 0.3);
+            "
+            >✅ Healthy</span
+          >
+        `
+      : html`
+          <span
+            class="cd-ad-badge"
+            style="
+              background: rgba(245, 158, 11, 0.12);
+              color: #f59e0b;
+              border-color: rgba(245, 158, 11, 0.3);
+            "
+            >⚠️ Degraded</span
+          >
+        `;
+
+  const strategyBadge = (s: string) => {
+    const map: Record<string, string> = {
+      "one-for-one": "#60a5fa",
+      "one-for-all": "#f97316",
+      "rest-for-one": "#a78bfa",
+      singleton: "var(--muted-foreground)",
+    };
+    return html`<span class="cd-ad-badge" style="background:${map[s] ?? "var(--border)"}20;color:${map[s] ?? "var(--muted-foreground)"};border-color:${map[s] ?? "var(--border)"}40">${s}</span>`;
+  };
+
   return html`
-    <div class="cd-subtab-stub">
-      <div class="cd-subtab-stub__icon">👥</div>
-      <div class="cd-subtab-stub__title">Teams</div>
-      <div class="cd-subtab-stub__desc">
-        Manage agent teams, supervision strategies, and department structure.
+    <div class="cd-teams-view">
+      <div class="cd-teams-header">
+        <span class="cd-teams-header__title">Teams</span>
+        <span class="cd-teams-header__sub">${TEAMS.length} teams · ${TEAMS.reduce((n, t) => n + t.members.length, 0)} agents total</span>
+        <button class="cd-btn cd-btn--primary cd-btn--sm">+ New Team</button>
       </div>
-      <div class="cd-subtab-stub__hint">Team management available in full agent control plane</div>
+      <div class="cd-teams-grid">
+        ${TEAMS.map(
+          (team) => html`
+          <div class="cd-team-card" style="border-top-color:${team.color}">
+            <div class="cd-team-card__header">
+              <span class="cd-team-card__icon">${team.icon}</span>
+              <div class="cd-team-card__meta">
+                <div class="cd-team-card__name">${team.name}</div>
+                <div class="cd-team-card__badges">
+                  ${strategyBadge(team.strategy)}
+                  ${healthBadge(team.healthStatus)}
+                </div>
+              </div>
+            </div>
+            <div class="cd-team-card__desc">${team.description}</div>
+            <div class="cd-team-card__strategy-info">
+              <span class="cd-team-card__strategy-label">Supervision strategy</span>
+              <span class="cd-team-card__strategy-desc">${team.strategyDesc}</span>
+            </div>
+            <!-- KPIs -->
+            <div class="cd-team-kpis">
+              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.tasksThisWeek}</div><div class="cd-team-kpi__label">Tasks this week</div></div>
+              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.avgResponseTime}</div><div class="cd-team-kpi__label">Avg response</div></div>
+              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.uptime}</div><div class="cd-team-kpi__label">Uptime</div></div>
+              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.tokensUsed}</div><div class="cd-team-kpi__label">Tokens used</div></div>
+            </div>
+            <!-- Members -->
+            <div class="cd-team-card__members-title">Members (${team.members.length})</div>
+            <div class="cd-team-members">
+              ${team.members.map(
+                (m) => html`
+                <div class="cd-team-member">
+                  <span class="cd-fleet-dot" style="background:${statusC(m.status)}"></span>
+                  <span class="cd-team-member__avatar">${m.emoji}</span>
+                  <span class="cd-team-member__name">${m.name}</span>
+                  <span class="cd-team-member__role">${m.role}</span>
+                  <span class="cd-ad-badge" style="font-size:10px;background:${statusC(m.status)}18;color:${statusC(m.status)};border-color:${statusC(m.status)}35">${m.status}</span>
+                </div>
+              `,
+              )}
+            </div>
+          </div>
+        `,
+        )}
+      </div>
     </div>
   `;
 }
@@ -906,7 +1122,7 @@ export type CompanyOverviewProps = Record<string, never>;
 export function renderCompanyOverview(_props: CompanyOverviewProps) {
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🦀", label: "Company" },
-    { id: "fleet", icon: "🤖", label: "Fleet" },
+    { id: "fleet", icon: "🤖", label: "Agent Status" },
     { id: "teams", icon: "👥", label: "Teams" },
     { id: "roles", icon: "🎭", label: "Role Hub" },
     { id: "tasks", icon: "📋", label: "Tasks" },

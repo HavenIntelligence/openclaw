@@ -4157,3 +4157,172 @@
 .cd-log-af-btn {
   white-space: nowrap;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Teams view
+   ═══════════════════════════════════════════════════════════════ */
+.cd-teams-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cd-teams-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cd-teams-header__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.cd-teams-header__sub {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  flex: 1;
+}
+
+.cd-teams-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.cd-team-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cd-team-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cd-team-card__icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.cd-team-card__meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cd-team-card__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.cd-team-card__badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cd-team-card__desc {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+
+.cd-team-card__strategy-info {
+  background: var(--bg-muted);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cd-team-card__strategy-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cd-team-card__strategy-desc {
+  font-size: 12px;
+  color: var(--text-strong);
+}
+
+.cd-team-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.cd-team-kpi {
+  text-align: center;
+  background: var(--bg-muted);
+  border-radius: 6px;
+  padding: 8px 4px;
+}
+
+.cd-team-kpi__val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.cd-team-kpi__label {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+.cd-team-card__members-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cd-team-members {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cd-team-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.cd-team-member__avatar {
+  font-size: 16px;
+}
+
+.cd-team-member__name {
+  font-weight: 600;
+  color: var(--text-strong);
+  flex: 1;
+}
+
+.cd-team-member__role {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+/* 8-column fleet grid for Agent Status */
+.cd-fleet-thead,
+.cd-fleet-row {
+  grid-template-columns: 2fr 1.4fr 2fr 0.8fr 0.5fr 0.6fr 0.5fr 0.8fr;
+}
