@@ -70,7 +70,7 @@ const COLS = 14;
 const ROWS = 9;
 
 const DESKS: Record<string, { x: number; y: number }> = {
-  "founder-ai": { x: 6, y: 0 },
+  "ai-director": { x: 6, y: 0 },
   "ops-prime": { x: 1, y: 2 },
   "content-director": { x: 11, y: 2 },
   "nanoclaw-primary": { x: 6, y: 2 },
@@ -82,7 +82,7 @@ const DESKS: Record<string, { x: number; y: number }> = {
 };
 
 const THOUGHTS: Record<string, string[]> = {
-  "founder-ai": [
+  "ai-director": [
     "Reviewing Q2 roadmap…",
     "Should we prioritize the MCP marketplace?",
     "Fundraise deck looks solid. One more round of feedback.",
@@ -130,21 +130,21 @@ const THOUGHTS: Record<string, string[]> = {
 };
 
 const MESSAGE_SCRIPTS = [
-  { from: "founder-ai", to: "content-director", emoji: "📋", label: "Strategy brief" },
+  { from: "ai-director", to: "content-director", emoji: "📋", label: "Strategy brief" },
   { from: "content-director", to: "research-alpha", emoji: "🔍", label: "Research task" },
   { from: "research-alpha", to: "writing-beta", emoji: "📄", label: "Research output" },
   { from: "writing-beta", to: "review-gamma", emoji: "✍️", label: "Draft ready" },
-  { from: "founder-ai", to: "ops-prime", emoji: "📊", label: "OKR review" },
+  { from: "ai-director", to: "ops-prime", emoji: "📊", label: "OKR review" },
   { from: "ops-prime", to: "code-agent", emoji: "⚙️", label: "Deploy task" },
   { from: "code-agent", to: "test-runner", emoji: "💻", label: "PR ready" },
   { from: "test-runner", to: "ops-prime", emoji: "✅", label: "Tests passed" },
-  { from: "nanoclaw-primary", to: "founder-ai", emoji: "💬", label: "Summary ready" },
+  { from: "nanoclaw-primary", to: "ai-director", emoji: "💬", label: "Summary ready" },
 ];
 
 const INITIAL_AGENTS: OfficeAgent[] = [
   {
-    id: "founder-ai",
-    name: "Founder AI",
+    id: "ai-director",
+    name: "AI Director",
     emoji: "🧑‍💻",
     color: "#ff5c5c",
     team: "executive",
@@ -153,11 +153,11 @@ const INITIAL_AGENTS: OfficeAgent[] = [
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    ...DESKS["founder-ai"],
-    targetX: DESKS["founder-ai"].x,
-    targetY: DESKS["founder-ai"].y,
-    deskX: DESKS["founder-ai"].x,
-    deskY: DESKS["founder-ai"].y,
+    ...DESKS["ai-director"],
+    targetX: DESKS["ai-director"].x,
+    targetY: DESKS["ai-director"].y,
+    deskX: DESKS["ai-director"].x,
+    deskY: DESKS["ai-director"].y,
   },
   {
     id: "ops-prime",
@@ -302,7 +302,7 @@ let _execLog: LogEntry[] = [
   {
     id: "l-0",
     ts: "09:41:02",
-    agent: "founder-ai",
+    agent: "ai-director",
     agentEmoji: "👑",
     type: "system",
     content: "Project Alpha started — 4 agents assigned",
@@ -387,7 +387,7 @@ let _execLog: LogEntry[] = [
   {
     id: "l-9",
     ts: "09:44:05",
-    agent: "founder-ai",
+    agent: "ai-director",
     agentEmoji: "👑",
     type: "human",
     content: "[Human override] Hold restart — check if context window exceeded first.",
@@ -1049,7 +1049,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     return;
                   }
                   addLog("human", "👤", "human", `[Founder] ${_humanInput}`);
-                  const founderAgent = _agents.find((a) => a.id === "founder-ai");
+                  const founderAgent = _agents.find((a) => a.id === "ai-director");
                   if (founderAgent) {
                     founderAgent.activity = "Processing founder input";
                     founderAgent.status = "thinking";

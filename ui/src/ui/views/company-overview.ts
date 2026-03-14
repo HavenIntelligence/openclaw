@@ -94,8 +94,8 @@ type AgentRecord = {
 
 const AGENTS: AgentRecord[] = [
   {
-    id: "founder-ai",
-    name: "Founder AI",
+    id: "ai-director",
+    name: "AI Director",
     emoji: "👑",
     role: "CEO / Founder",
     team: "Executive",
@@ -157,12 +157,12 @@ const AGENTS: AgentRecord[] = [
     fileAccess: ["/ops/*", "/shared/*"],
     stateChain: [
       { ts: "09:40", state: "working", note: "Generating Q1 OKR report" },
-      { ts: "09:45", state: "messaging", note: "Sent OKR report → founder-ai" },
+      { ts: "09:45", state: "messaging", note: "Sent OKR report → ai-director" },
       { ts: "09:46", state: "working", note: "Delegating deploy task to code-agent" },
       { ts: "09:50", state: "idle:waiting", note: "Waiting for code-agent test results" },
     ],
     recentMessages: [
-      { ts: "09:45", from: "→ founder-ai", content: "📊 Q1 OKR report filed" },
+      { ts: "09:45", from: "→ ai-director", content: "📊 Q1 OKR report filed" },
       { ts: "09:46", from: "→ code-agent", content: "⚙️ Deploy task: v1.2.0 to staging" },
     ],
   },
@@ -613,13 +613,13 @@ function renderTeams() {
       color: "#ff5c5c",
       strategy: "singleton",
       strategyDesc: "Each agent is unique; crashes restart only that agent.",
-      lead: "founder-ai",
+      lead: "ai-director",
       leadEmoji: "👑",
       members: [
         {
-          id: "founder-ai",
+          id: "ai-director",
           emoji: "👑",
-          name: "Founder AI",
+          name: "AI Director",
           role: "CEO",
           status: "running" as const,
         },
@@ -833,13 +833,13 @@ function renderChats() {
     {
       ts: "09:54",
       from: "👤 Founder",
-      to: "👑 founder-ai",
+      to: "👑 ai-director",
       content: "[Human override] Hold restart — check if context window exceeded first.",
       type: "human",
     },
     {
       ts: "09:47",
-      from: "👑 founder-ai",
+      from: "👑 ai-director",
       to: "📣 content-director",
       content:
         "📋 Strategy brief for Q1 content push — prioritize AI use-case blog and pricing page rewrite.",
@@ -856,7 +856,7 @@ function renderChats() {
     {
       ts: "09:48",
       from: "🏢 ops-prime",
-      to: "👑 founder-ai",
+      to: "👑 ai-director",
       content:
         "📊 Q1 OKR report filed — 87% target completion. 2 red items: hiring (delayed) and churn (+1.2%).",
       type: "in",

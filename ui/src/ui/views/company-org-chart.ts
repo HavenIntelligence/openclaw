@@ -20,7 +20,7 @@ type OrgNode = {
 
 const ORG_TREE: OrgNode = {
   id: "ceo",
-  name: "founder-ai",
+  name: "ai-director",
   role: "CEO / Founder",
   emoji: "👑",
   color: "#ff5c5c",

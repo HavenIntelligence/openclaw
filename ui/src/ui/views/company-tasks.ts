@@ -89,7 +89,7 @@ const DEMO_TASKS: Task[] = [
       "Compile Q1 metrics, milestones, team updates, and Q2 roadmap into investor-ready presentation.",
     status: "backlog",
     priority: "critical",
-    assignee: "founder-ai",
+    assignee: "ai-director",
     assigneeEmoji: "👑",
     project: "Fundraise",
     tags: ["fundraise", "investors", "strategy"],
@@ -161,7 +161,7 @@ const DEMO_TASKS: Task[] = [
       "Compelling narrative covering problem, solution, traction, team, and market opportunity for Series Seed raise.",
     status: "in_progress",
     priority: "critical",
-    assignee: "founder-ai",
+    assignee: "ai-director",
     assigneeEmoji: "👑",
     project: "Fundraise",
     tags: ["fundraise", "strategy", "narrative"],
@@ -192,7 +192,7 @@ const DEMO_TASKS: Task[] = [
       "research-alpha completed competitor analysis. Review for accuracy, gaps, and strategic implications.",
     status: "review",
     priority: "high",
-    assignee: "founder-ai",
+    assignee: "ai-director",
     assigneeEmoji: "👑",
     project: "Project Alpha",
     tags: ["strategy", "review", "research"],
@@ -317,7 +317,7 @@ const PROJECTS = [
 ];
 
 const AGENTS = [
-  { id: "founder-ai", name: "founder-ai", emoji: "👑" },
+  { id: "ai-director", name: "ai-director", emoji: "👑" },
   { id: "ops-prime", name: "ops-prime", emoji: "🏢" },
   { id: "code-agent", name: "code-agent", emoji: "💻" },
   { id: "test-runner", name: "test-runner", emoji: "🧪" },
