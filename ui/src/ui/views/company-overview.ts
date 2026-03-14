@@ -670,12 +670,12 @@ export function renderCompanyOverview(_props: CompanyOverviewProps) {
       ${
         st.health !== "healthy"
           ? html`
-        <div class="cd-alert-banner">
-          ${icons.alertTriangle}
-          <strong>Degraded:</strong>&nbsp;review-gamma is crashed (restart 2/3). Writing pipeline impacted.
-          <button class="cd-btn cd-btn--xs cd-btn--ghost" style="margin-left:auto">View Logs</button>
-        </div>
-      `
+              <div class="cd-alert-banner">
+                ⚠️
+                <strong>Degraded:</strong>&nbsp;review-gamma is crashed (restart 2/3). Writing pipeline impacted.
+                <button class="cd-btn cd-btn--xs cd-btn--ghost" style="margin-left: auto">View Logs</button>
+              </div>
+            `
           : ""
       }
 
