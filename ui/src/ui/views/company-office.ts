@@ -799,14 +799,51 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
         <!-- LEFT: animated office canvas -->
         <div class="cd-office-canvas-wrap">
-          <!-- Project progress bar -->
+          <!-- Project progress bar (clawport style) -->
           <div class="cd-office-proj-bar">
-            <span class="cd-office-proj-bar__name">${activeProject.name}</span>
-            <span class="cd-office-proj-bar__desc">${activeProject.description}</span>
-            <div class="cd-office-proj-progress">
-              <div class="cd-office-proj-progress__fill" style="width:${activeProject.progress}%"></div>
+            <div class="cd-office-proj-bar__copy">
+              <span class="cd-office-proj-bar__name">${activeProject.name}</span>
+              <span class="cd-office-proj-bar__desc">${activeProject.description}</span>
             </div>
-            <span class="cd-office-proj-bar__pct">${activeProject.progress}%</span>
+            <div class="cd-office-proj-bar__meta">
+              <span class="cd-office-proj-status cd-office-proj-status--${activeProject.status}">${activeProject.status}</span>
+              <div class="cd-office-proj-progress">
+                <div class="cd-office-proj-progress__fill" style="width:${activeProject.progress}%"></div>
+              </div>
+              <span class="cd-office-proj-bar__pct">${activeProject.progress}%</span>
+            </div>
+          </div>
+
+          <!-- Focus strip (critical path) -->
+          <div class="cd-office-focus-strip">
+            <span class="cd-office-focus-strip__label">Critical path</span>
+            <div class="cd-office-focus-track">
+              ${[
+                "ai-director",
+                "content-director",
+                "research-alpha",
+                "writing-beta",
+                "review-gamma",
+              ].map((agentId, i, arr) => {
+                const a = _agents.find((x) => x.id === agentId);
+                if (!a) {
+                  return "";
+                }
+                const isHot = a.status === "working" || a.status === "thinking";
+                return html`
+                  <span class="cd-office-focus-pill ${isHot ? "cd-office-focus-pill--hot" : ""}">
+                    ${a.emoji} ${a.name}
+                  </span>
+                  ${
+                    i < arr.length - 1
+                      ? html`
+                          <span class="cd-office-focus-arrow">→</span>
+                        `
+                      : ""
+                  }
+                `;
+              })}
+            </div>
           </div>
 
           <div class="cd-office-canvas" style="width:${W}px;height:${H}px">
@@ -829,7 +866,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
               )}
 
-              <!-- SVG edge network (static connections between agents) -->
+              <!-- SVG edge network -->
               <svg class="cd-office-network" style="width:${W}px;height:${H}px" viewBox="0 0 ${W} ${H}">
                 ${MESSAGE_SCRIPTS.map((script) => {
                   const from = _agents.find((a) => a.id === script.from);
@@ -848,6 +885,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   );
                   return html`
                     <g class="cd-office-edge ${hasActiveMsg ? "cd-office-edge--active" : ""}">
+                      <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__hit" fill="none" stroke="transparent" stroke-width="18"/>
                       <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__line"/>
                       ${hasActiveMsg ? html`<path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>` : ""}
                     </g>
@@ -855,7 +893,33 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 })}
               </svg>
 
-              <!-- Flying messages -->
+              <!-- Edge labels (clawport style) -->
+              ${MESSAGE_SCRIPTS.map((script) => {
+                const from = _agents.find((a) => a.id === script.from);
+                const to = _agents.find((a) => a.id === script.to);
+                if (!from || !to) {
+                  return "";
+                }
+                const x1 = from.x * TILE + TILE / 2;
+                const y1 = from.y * TILE + 20;
+                const x2 = to.x * TILE + TILE / 2;
+                const y2 = to.y * TILE + 20;
+                const cpX = (x1 + x2) / 2;
+                const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
+                const lx = 0.5 * 0.5 * x1 + 2 * 0.5 * 0.5 * cpX + 0.5 * 0.5 * x2;
+                const ly = 0.5 * 0.5 * y1 + 2 * 0.5 * 0.5 * cpY + 0.5 * 0.5 * y2 - 22;
+                const hasActiveMsg = _messages.some(
+                  (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
+                );
+                return html`
+                  <div class="cd-office-edge-label ${hasActiveMsg ? "cd-office-edge-label--active" : ""}"
+                    style="left:${lx}px;top:${ly}px">
+                    ${script.label}
+                  </div>
+                `;
+              })}
+
+              <!-- Flying message packets (clawport style) -->
               ${_messages.map((msg) => {
                 const t = msg.progress;
                 const cpX = (msg.fromX + msg.toX) / 2;
@@ -864,9 +928,9 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 const py = (1 - t) * (1 - t) * msg.fromY + 2 * (1 - t) * t * cpY + t * t * msg.toY;
                 const opacity = t < 0.1 ? t * 10 : t > 0.85 ? (1 - t) / 0.15 : 1;
                 return html`
-                  <div class="cd-office-msg-bubble" style="left:${px - 16}px;top:${py - 16}px;opacity:${opacity}">
-                    ${msg.emoji}
-                    <span class="cd-office-msg-label">${msg.label}</span>
+                  <div class="cd-office-packet" style="left:${px}px;top:${py}px;opacity:${opacity}">
+                    <span class="cd-office-packet__icon">${msg.emoji}</span>
+                    <span class="cd-office-packet__label">${msg.label}</span>
                   </div>
                 `;
               })}
@@ -932,19 +996,30 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             </div>
           </div>
 
-          <!-- Activity feed (bottom) -->
-          <div class="cd-office-feed">
-            <div class="cd-office-feed__list">
-              ${_agents.map(
-                (agent) => html`
-                <div class="cd-office-feed__row ${agent.status === "crashed" ? "cd-office-feed__row--crashed" : ""}">
-                  <span class="cd-office-feed__emoji">${agent.emoji}</span>
-                  <span class="cd-office-feed__name">${agent.name}</span>
-                  <span class="cd-office-feed__activity">${agent.activity}</span>
-                  <span class="cd-pulse cd-pulse--${agent.status === "working" || agent.status === "thinking" ? "running" : agent.status === "crashed" ? "crashed" : "idle"}"></span>
-                </div>
-              `,
-              )}
+          <!-- Summary strip (clawport style) -->
+          <div class="cd-office-summary-strip">
+            <div class="cd-office-summary-card">
+              <span class="cd-office-summary-card__label">Now</span>
+              <span class="cd-office-summary-card__title">
+                ${_execLog.length > 0 ? _execLog[_execLog.length - 1].content.slice(0, 60) : "Waiting for first event"}
+              </span>
+              <span class="cd-office-summary-card__detail">
+                ${_execLog.length > 0 ? `${_execLog[_execLog.length - 1].agentEmoji} ${_execLog[_execLog.length - 1].agent} · ${_execLog[_execLog.length - 1].ts}` : "Press play to start"}
+              </span>
+            </div>
+            <div class="cd-office-summary-card">
+              <span class="cd-office-summary-card__label">Active</span>
+              <span class="cd-office-summary-card__title">${_agents.filter((a) => a.status === "working" || a.status === "thinking").length} agents working</span>
+              <span class="cd-office-summary-card__detail">${_messages.length} messages in flight · ${_canvasBubbles.length} outputs visible</span>
+            </div>
+            <div class="cd-office-summary-card ${_agents.some((a) => a.status === "crashed") ? "cd-office-summary-card--danger" : ""}">
+              <span class="cd-office-summary-card__label">Blocked</span>
+              <span class="cd-office-summary-card__title">
+                ${_agents.find((a) => a.status === "crashed") ? `${_agents.find((a) => a.status === "crashed")?.name} crashed` : "No active blocker"}
+              </span>
+              <span class="cd-office-summary-card__detail">
+                ${_agents.find((a) => a.status === "crashed") ? "Awaiting supervisor restart or human review" : "All paths clear"}
+              </span>
             </div>
           </div>
         </div>

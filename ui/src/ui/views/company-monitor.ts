@@ -21,6 +21,7 @@ type TimelineAgent = {
   role: string;
   lifecycle: AgentLifecycle;
   color: string;
+  workspace?: string;
 };
 
 type LifecycleEvent = {
@@ -47,11 +48,20 @@ type LineageEdge = {
   timestamp: number;
 };
 
+type Annotation = {
+  id: string;
+  timestamp: number;
+  agentId?: string;
+  type: "bottleneck" | "decision" | "dispatch" | "insight";
+  title: string;
+  description: string;
+  placement?: "top" | "bottom";
+};
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const LANE_HEIGHT = 64;
 const PADDING_TOP = 16;
-const PADDING_LEFT = 180;
-const TIME_SCALE = 8;
+const TIMELINE_PAD = 16;
 const MAX_TIME = 180;
 
 // ── Demo Data ────────────────────────────────────────────────────────────────
@@ -63,6 +73,7 @@ const AGENTS: TimelineAgent[] = [
     role: "CEO",
     lifecycle: "persistent",
     color: "#ff5c5c",
+    workspace: "strategy",
   },
   {
     id: "ops-prime",
@@ -71,6 +82,7 @@ const AGENTS: TimelineAgent[] = [
     role: "COO",
     lifecycle: "persistent",
     color: "#60a5fa",
+    workspace: "operations",
   },
   {
     id: "content-director",
@@ -79,6 +91,7 @@ const AGENTS: TimelineAgent[] = [
     role: "Content Director",
     lifecycle: "persistent",
     color: "#fb923c",
+    workspace: "content",
   },
   {
     id: "research-alpha",
@@ -111,6 +124,7 @@ const AGENTS: TimelineAgent[] = [
     role: "Software Engineer",
     lifecycle: "persistent",
     color: "#22c55e",
+    workspace: "engineering",
   },
   {
     id: "test-runner",
@@ -127,6 +141,7 @@ const AGENTS: TimelineAgent[] = [
     role: "Executive Assistant",
     lifecycle: "persistent",
     color: "#14b8a6",
+    workspace: "executive",
   },
 ];
 
@@ -231,6 +246,215 @@ const EVENTS: LifecycleEvent[] = [
   },
 ];
 
+const ANNOTATIONS: Annotation[] = [
+  {
+    id: "ann-1",
+    timestamp: 20,
+    agentId: "ai-director",
+    type: "dispatch",
+    title: "Parallel Dispatch",
+    description: "Root agent delegates competitor analysis and engineering tasks concurrently.",
+  },
+  {
+    id: "ann-2",
+    timestamp: 55,
+    agentId: "code-agent",
+    type: "bottleneck",
+    title: "Handoff Delay",
+    description: "PR handoff to test-runner created a pipeline bottleneck.",
+    placement: "bottom",
+  },
+  {
+    id: "ann-3",
+    timestamp: 90,
+    agentId: "review-gamma",
+    type: "decision",
+    title: "Error Recovery",
+    description: "Context window exceeded 128K. Agent triggered backtrack to last checkpoint.",
+  },
+  {
+    id: "ann-4",
+    timestamp: 80,
+    agentId: "nanoclaw",
+    type: "insight",
+    title: "Human-in-Loop",
+    description: "Agent paused awaiting human feedback on executive summary.",
+  },
+  {
+    id: "ann-5",
+    timestamp: 120,
+    agentId: "ops-prime",
+    type: "dispatch",
+    title: "Context Merge",
+    description: "Ops merged assistant context from NanoClaw into operations workspace.",
+  },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let _currentTime = 0;
+let _isPlaying = true;
+let _speed = 1;
+let _timeScale = 8;
+let _hoveredAgentId: string | null = null;
+let _selectedAgentId: string | null = null;
+let _hoveredEventId: string | null = null;
+let _selectedActivityId: string | null = null;
+let _showAnnotations = true;
+let _hoveredAnnotation: string | null = null;
+let _playInterval: ReturnType<typeof setInterval> | null = null;
+
+// ── Playback ─────────────────────────────────────────────────────────────────
+function startPlayback(requestRender: () => void) {
+  if (_playInterval) {
+    return;
+  }
+  _playInterval = setInterval(() => {
+    if (!_isPlaying) {
+      return;
+    }
+    _currentTime = Math.min(_currentTime + 0.5 * _speed, MAX_TIME);
+    if (_currentTime >= MAX_TIME) {
+      _isPlaying = false;
+    }
+    requestRender();
+  }, 50);
+}
+
+function stopPlayback() {
+  if (_playInterval) {
+    clearInterval(_playInterval);
+    _playInterval = null;
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function getAgentY(agentId: string): number {
+  const index = AGENTS.findIndex((a) => a.id === agentId);
+  return PADDING_TOP + index * LANE_HEIGHT + LANE_HEIGHT / 2;
+}
+
+function getX(timestamp: number): number {
+  return TIMELINE_PAD + timestamp * _timeScale;
+}
+
+function agentStatus(agentId: string, time: number): string {
+  const agentEvents = EVENTS.filter((e) => e.agentId === agentId && e.timestamp <= time).toSorted(
+    (a, b) => b.timestamp - a.timestamp,
+  );
+  const last = agentEvents[0];
+  if (!last) {
+    return "inactive";
+  }
+  if (["start", "resume", "split", "handoff", "merge"].includes(last.type)) {
+    return "running";
+  }
+  if (last.type === "pause") {
+    return "paused";
+  }
+  if (last.type === "error") {
+    return "error";
+  }
+  if (last.type === "archive") {
+    return "archived";
+  }
+  return "spawned";
+}
+
+function statusDotColor(status: string): string {
+  if (status === "running") {
+    return "#22c55e";
+  }
+  if (status === "paused") {
+    return "#f59e0b";
+  }
+  if (status === "error") {
+    return "#ef4444";
+  }
+  if (status === "archived") {
+    return "#94a3b8";
+  }
+  return "#6b7280";
+}
+
+function eventIcon(type: EventKind): string {
+  const map: Record<EventKind, string> = {
+    spawn: "●",
+    start: "▶",
+    pause: "⏸",
+    resume: "▶",
+    split: "⑂",
+    merge: "⊕",
+    backtrack: "↩",
+    error: "✕",
+    handoff: "⇋",
+    archive: "▣",
+  };
+  return map[type] ?? "•";
+}
+
+function eventColor(type: EventKind): string {
+  const map: Record<EventKind, string> = {
+    spawn: "#22c55e",
+    start: "#22c55e",
+    pause: "#f59e0b",
+    resume: "#22c55e",
+    split: "#a78bfa",
+    merge: "#60a5fa",
+    backtrack: "#60a5fa",
+    error: "#ef4444",
+    handoff: "#3b82f6",
+    archive: "#94a3b8",
+  };
+  return map[type] ?? "#94a3b8";
+}
+
+function annotationIcon(type: Annotation["type"]): string {
+  if (type === "bottleneck") {
+    return "⚠";
+  }
+  if (type === "decision") {
+    return "◆";
+  }
+  if (type === "dispatch") {
+    return "⚡";
+  }
+  return "✦";
+}
+
+function annotationColor(type: Annotation["type"]): {
+  fg: string;
+  border: string;
+  bg: string;
+} {
+  if (type === "bottleneck") {
+    return {
+      fg: "#fb7185",
+      border: "rgba(244,63,94,0.5)",
+      bg: "rgba(244,63,94,0.2)",
+    };
+  }
+  if (type === "decision") {
+    return {
+      fg: "#fbbf24",
+      border: "rgba(245,158,11,0.5)",
+      bg: "rgba(245,158,11,0.2)",
+    };
+  }
+  if (type === "dispatch") {
+    return {
+      fg: "#34d399",
+      border: "rgba(16,185,129,0.5)",
+      bg: "rgba(16,185,129,0.2)",
+    };
+  }
+  return {
+    fg: "#a78bfa",
+    border: "rgba(129,140,248,0.5)",
+    bg: "rgba(129,140,248,0.2)",
+  };
+}
+
+// ── Derivation ───────────────────────────────────────────────────────────────
 function deriveActivityWindows(
   agents: TimelineAgent[],
   events: LifecycleEvent[],
@@ -294,153 +518,83 @@ function deriveLineageEdges(events: LifecycleEvent[]): LineageEdge[] {
   return edges;
 }
 
-// ── State ────────────────────────────────────────────────────────────────────
-let _currentTime = 0;
-let _isPlaying = true;
-let _speed = 1;
-let _hoveredAgentId: string | null = null;
-let _selectedAgentId: string | null = null;
-let _hoveredEventId: string | null = null;
-let _playInterval: ReturnType<typeof setInterval> | null = null;
+function windowForAgentAtTime(
+  agentId: string,
+  timestamp: number,
+  isSource: boolean,
+  windows: ActivityWindow[],
+): ActivityWindow | null {
+  const exact = windows.find(
+    (w) =>
+      w.agentId === agentId &&
+      w.startTime <= timestamp &&
+      (w.endTime === null || w.endTime >= timestamp),
+  );
+  if (exact) {
+    return exact;
+  }
+  if (isSource) {
+    const past = windows.filter((w) => w.agentId === agentId && w.startTime <= timestamp);
+    return past.length > 0 ? past.reduce((a, b) => (a.startTime > b.startTime ? a : b)) : null;
+  }
+  const future = windows.filter((w) => w.agentId === agentId && w.startTime >= timestamp);
+  return future.length > 0 ? future.reduce((a, b) => (a.startTime < b.startTime ? a : b)) : null;
+}
 
-function startPlayback(requestRender: () => void) {
-  if (_playInterval) {
+function connectedWindowIds(
+  startId: string,
+  windows: ActivityWindow[],
+  edges: LineageEdge[],
+): Set<string> {
+  const set = new Set<string>([startId]);
+  for (const edge of edges) {
+    const src = windowForAgentAtTime(edge.sourceId, edge.timestamp, true, windows);
+    const tgt = windowForAgentAtTime(edge.targetId, edge.timestamp, false, windows);
+    if (src?.id === startId && tgt) {
+      set.add(tgt.id);
+    }
+    if (tgt?.id === startId && src) {
+      set.add(src.id);
+    }
+  }
+  return set;
+}
+
+// ── Scroll sync ──────────────────────────────────────────────────────────────
+function syncScroll(e: Event): void {
+  const canvas = e.target as HTMLElement;
+  const body = canvas.closest(".cd-monitor-body");
+  if (!body) {
     return;
   }
-  _playInterval = setInterval(() => {
-    if (!_isPlaying) {
-      return;
-    }
-    _currentTime = Math.min(_currentTime + 0.5 * _speed, MAX_TIME);
-    if (_currentTime >= MAX_TIME) {
-      _isPlaying = false;
-    }
-    requestRender();
-  }, 50);
-}
-
-function stopPlayback() {
-  if (_playInterval) {
-    clearInterval(_playInterval);
-    _playInterval = null;
+  const left = body.querySelector(".cd-monitor-left-scroll");
+  if (left) {
+    left.scrollTop = canvas.scrollTop;
   }
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function getAgentY(agentId: string): number {
-  const index = AGENTS.findIndex((a) => a.id === agentId);
-  return PADDING_TOP + index * LANE_HEIGHT + LANE_HEIGHT / 2;
-}
-
-function getX(timestamp: number): number {
-  return PADDING_LEFT + timestamp * TIME_SCALE;
-}
-
-function lifecycleColor(lc: AgentLifecycle): string {
-  if (lc === "persistent") {
-    return "#22c55e";
+  const axis = body.querySelector(".cd-monitor-axis-row");
+  if (axis) {
+    axis.scrollLeft = canvas.scrollLeft;
   }
-  if (lc === "ephemeral") {
-    return "#f59e0b";
-  }
-  return "#818cf8";
-}
-
-function eventIcon(type: EventKind): string {
-  const map: Record<EventKind, string> = {
-    spawn: "🟢",
-    start: "▶️",
-    pause: "⏸️",
-    resume: "▶️",
-    split: "🔀",
-    merge: "🔗",
-    backtrack: "↩️",
-    error: "❌",
-    handoff: "🤝",
-    archive: "📦",
-  };
-  return map[type] ?? "•";
-}
-
-function eventColor(type: EventKind): string {
-  const map: Record<EventKind, string> = {
-    spawn: "#22c55e",
-    start: "#22c55e",
-    pause: "#f59e0b",
-    resume: "#22c55e",
-    split: "#a78bfa",
-    merge: "#60a5fa",
-    backtrack: "#60a5fa",
-    error: "#ef4444",
-    handoff: "#3b82f6",
-    archive: "#94a3b8",
-  };
-  return map[type] ?? "#94a3b8";
-}
-
-function agentStatus(agentId: string, time: number): string {
-  const agentEvents = EVENTS.filter((e) => e.agentId === agentId && e.timestamp <= time).toSorted(
-    (a, b) => b.timestamp - a.timestamp,
-  );
-  const last = agentEvents[0];
-  if (!last) {
-    return "inactive";
-  }
-  if (
-    last.type === "start" ||
-    last.type === "resume" ||
-    last.type === "split" ||
-    last.type === "handoff" ||
-    last.type === "merge"
-  ) {
-    return "running";
-  }
-  if (last.type === "pause") {
-    return "paused";
-  }
-  if (last.type === "error") {
-    return "error";
-  }
-  if (last.type === "archive") {
-    return "archived";
-  }
-  return "spawned";
-}
-
-function statusDotColor(status: string): string {
-  if (status === "running") {
-    return "#22c55e";
-  }
-  if (status === "paused") {
-    return "#f59e0b";
-  }
-  if (status === "error") {
-    return "#ef4444";
-  }
-  if (status === "archived") {
-    return "#94a3b8";
-  }
-  return "#6b7280";
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
 export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
-  const requestRender = deps.requestRender ?? (() => {});
+  const rr = deps.requestRender ?? (() => {});
 
   if (_isPlaying && !_playInterval) {
-    startPlayback(requestRender);
+    startPlayback(rr);
   }
 
-  const activityWindows = deriveActivityWindows(AGENTS, EVENTS, _currentTime);
-  const lineageEdges = deriveLineageEdges(EVENTS.filter((e) => e.timestamp <= _currentTime));
-  const timelineWidth = PADDING_LEFT + MAX_TIME * TIME_SCALE + 40;
-  const timelineHeight = PADDING_TOP + AGENTS.length * LANE_HEIGHT + 16;
+  const windows = deriveActivityWindows(AGENTS, EVENTS, _currentTime);
+  const edges = deriveLineageEdges(EVENTS.filter((e) => e.timestamp <= _currentTime));
+  const tlWidth = MAX_TIME * _timeScale + TIMELINE_PAD * 2 + 20;
+  const tlHeight = PADDING_TOP + AGENTS.length * LANE_HEIGHT + 24;
 
   const highlightSet = new Set<string>();
   const focusId = _hoveredAgentId || _selectedAgentId;
   if (focusId) {
     highlightSet.add(focusId);
-    for (const e of lineageEdges) {
+    for (const e of edges) {
       if (e.sourceId === focusId) {
         highlightSet.add(e.targetId);
       }
@@ -449,254 +603,596 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
       }
     }
   }
-  const hasHighlight = highlightSet.size > 0;
+  const hasHL = highlightSet.size > 0;
+
+  const connWins = _selectedActivityId
+    ? connectedWindowIds(_selectedActivityId, windows, edges)
+    : new Set<string>();
+
+  const runningCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "running").length;
+  const errorCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "error").length;
+  const pausedCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "paused").length;
 
   return html`
     <div class="cd-monitor-page">
-      <!-- Top bar -->
+      <!-- ═══ Top bar ═══ -->
       <div class="cd-monitor-topbar">
         <div class="cd-monitor-topbar__left">
           <span class="cd-monitor-eyebrow">Agent Timeline Monitor</span>
           <span class="cd-monitor-counts">
-            ${AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "running").length} running ·
-            ${AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "error").length} errors ·
-            ${AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "paused").length} paused
+            ${runningCount} running · ${errorCount} errors · ${pausedCount}
+            paused
           </span>
         </div>
         <div class="cd-monitor-controls">
-          <button class="cd-monitor-btn ${_speed === 1 ? "cd-monitor-btn--active" : ""}" @click=${() => {
-            _speed = 1;
-            requestRender();
-          }}>1x</button>
-          <button class="cd-monitor-btn ${_speed === 2 ? "cd-monitor-btn--active" : ""}" @click=${() => {
-            _speed = 2;
-            requestRender();
-          }}>2x</button>
-          <button class="cd-monitor-btn ${_speed === 4 ? "cd-monitor-btn--active" : ""}" @click=${() => {
-            _speed = 4;
-            requestRender();
-          }}>4x</button>
-          <button class="cd-monitor-btn cd-monitor-btn--primary" @click=${() => {
-            if (_currentTime >= MAX_TIME) {
+          <button
+            class="cd-monitor-btn cd-monitor-btn--primary"
+            @click=${() => {
+              if (_currentTime >= MAX_TIME) {
+                _currentTime = 0;
+              }
+              _isPlaying = !_isPlaying;
+              if (_isPlaying) {
+                startPlayback(rr);
+              }
+              rr();
+            }}
+          >
+            ${_isPlaying ? "⏸ Pause" : "▶ Play"}
+          </button>
+          <button
+            class="cd-monitor-btn"
+            @click=${() => {
+              _isPlaying = false;
+              _currentTime = MAX_TIME;
+              rr();
+            }}
+            title="Skip to End"
+          >
+            ⏭ End
+          </button>
+          <button
+            class="cd-monitor-btn"
+            @click=${() => {
               _currentTime = 0;
-            }
-            _isPlaying = !_isPlaying;
-            if (_isPlaying) {
-              startPlayback(requestRender);
-            }
-            requestRender();
-          }}>${_isPlaying ? "⏸ Pause" : "▶ Play"}</button>
-          <button class="cd-monitor-btn" @click=${() => {
-            _currentTime = 0;
-            _isPlaying = true;
-            stopPlayback();
-            startPlayback(requestRender);
-            requestRender();
-          }}>↻ Replay</button>
+              _isPlaying = true;
+              stopPlayback();
+              startPlayback(rr);
+              rr();
+            }}
+          >
+            ↻ Replay
+          </button>
+          <span class="cd-monitor-sep"></span>
+          ${[1, 2, 4].map(
+            (s) => html`
+              <button
+                class="cd-monitor-btn ${_speed === s ? "cd-monitor-btn--active" : ""}"
+                @click=${() => {
+                  _speed = s;
+                  rr();
+                }}
+              >
+                ${s}x
+              </button>
+            `,
+          )}
+          <span class="cd-monitor-sep"></span>
+          <button
+            class="cd-monitor-btn ${_showAnnotations ? "cd-monitor-btn--insights-on" : ""}"
+            @click=${() => {
+              _showAnnotations = !_showAnnotations;
+              rr();
+            }}
+            title="Toggle AI Insights"
+          >
+            ✦ Insights
+          </button>
+          <span class="cd-monitor-sep"></span>
+          <button
+            class="cd-monitor-btn cd-monitor-btn--sm"
+            @click=${() => {
+              _timeScale = Math.max(2, _timeScale - 2);
+              rr();
+            }}
+            title="Zoom Out"
+          >
+            −
+          </button>
+          <span class="cd-monitor-zoom-label">${_timeScale}x</span>
+          <button
+            class="cd-monitor-btn cd-monitor-btn--sm"
+            @click=${() => {
+              _timeScale = Math.min(32, _timeScale + 2);
+              rr();
+            }}
+            title="Zoom In"
+          >
+            +
+          </button>
           <span class="cd-monitor-time">T = ${Math.floor(_currentTime)}</span>
         </div>
       </div>
 
-      <!-- Time slider -->
+      <!-- ═══ Scrubber ═══ -->
       <div class="cd-monitor-slider-row">
-        <input type="range" class="cd-monitor-slider" min="0" max="${MAX_TIME}" step="1"
+        <input
+          type="range"
+          class="cd-monitor-slider"
+          min="0"
+          max="${MAX_TIME}"
+          step="1"
           .value=${String(Math.floor(_currentTime))}
           @input=${(e: Event) => {
             _currentTime = Number((e.target as HTMLInputElement).value);
-            requestRender();
+            rr();
           }}
         />
       </div>
 
-      <!-- Main timeline -->
-      <div class="cd-monitor-timeline-wrap">
-        <div class="cd-monitor-timeline" style="width:${timelineWidth}px;height:${timelineHeight}px;position:relative">
-
-          <!-- Background grid -->
-          <div style="position:absolute;inset:0;pointer-events:none;background-size:${TIME_SCALE * 10}px ${LANE_HEIGHT}px;background-position:${PADDING_LEFT}px ${PADDING_TOP}px;background-image:linear-gradient(to right,rgba(255,255,255,0.025) 1px,transparent 1px),linear-gradient(to bottom,rgba(255,255,255,0.025) 1px,transparent 1px)"></div>
-
-          <!-- Time scale labels -->
-          ${Array.from({ length: Math.floor(MAX_TIME / 10) + 1 }, (_, i) => i * 10).map(
-            (t) => html`
-              <div class="cd-monitor-tick" style="left:${getX(t)}px;top:0;position:absolute">
-                <span class="cd-monitor-tick__label">${t}</span>
-              </div>
-            `,
-          )}
-
-          <!-- Agent lane labels (left) -->
-          ${AGENTS.map(
-            (agent) => html`
-              <div class="cd-monitor-lane-label"
-                style="top:${getAgentY(agent.id) - LANE_HEIGHT / 2}px;height:${LANE_HEIGHT}px"
-                @mouseenter=${() => {
-                  _hoveredAgentId = agent.id;
-                  requestRender();
-                }}
-                @mouseleave=${() => {
-                  _hoveredAgentId = null;
-                  requestRender();
-                }}
-                @click=${() => {
-                  _selectedAgentId = _selectedAgentId === agent.id ? null : agent.id;
-                  requestRender();
-                }}>
-                <span class="cd-monitor-lane-dot" style="background:${statusDotColor(agentStatus(agent.id, _currentTime))}"></span>
-                <span class="cd-monitor-lane-emoji">${agent.emoji}</span>
-                <span class="cd-monitor-lane-info">
-                  <span class="cd-monitor-lane-name">${agent.name}</span>
-                  <span class="cd-monitor-lane-role">${agent.role}</span>
-                </span>
-              </div>
-            `,
-          )}
-
-          <!-- SVG: lineage edges -->
-          <svg style="position:absolute;inset:0;overflow:visible;pointer-events:none" width="${timelineWidth}" height="${timelineHeight}">
-            ${lineageEdges.map((edge) => {
-              const y1 = getAgentY(edge.sourceId);
-              const y2 = getAgentY(edge.targetId);
-              const x = getX(edge.timestamp);
-              const isHighlighted = hasHighlight
-                ? highlightSet.has(edge.sourceId) && highlightSet.has(edge.targetId)
-                : true;
-              const opacity = hasHighlight ? (isHighlighted ? 0.9 : 0.12) : 0.45;
-              const strokeColor =
-                edge.type === "handoff"
-                  ? "#3b82f6"
-                  : edge.type === "split"
-                    ? "#a78bfa"
-                    : edge.type === "merge"
-                      ? "#60a5fa"
-                      : "#94a3b8";
-              const isDown = y2 > y1;
-              let pathD = `M ${x} ${y1}`;
-              let arrowPoints = "";
-              if (isDown) {
-                pathD += ` L ${x} ${y2 - 6}`;
-                arrowPoints = `${x - 4},${y2 - 6} ${x + 4},${y2 - 6} ${x},${y2}`;
-              } else {
-                pathD += ` L ${x} ${y2 + 6}`;
-                arrowPoints = `${x - 4},${y2 + 6} ${x + 4},${y2 + 6} ${x},${y2}`;
-              }
-              return html`
-                <g style="opacity:${opacity};transition:opacity .2s ease">
-                  <path d="${pathD}" stroke="${strokeColor}" stroke-width="${isHighlighted ? 2 : 1}" fill="none" stroke-dasharray="${edge.type === "handoff" ? "4 4" : "none"}"/>
-                  <circle cx="${x}" cy="${y1}" r="3" fill="${strokeColor}"/>
-                  ${arrowPoints ? html`<polygon points="${arrowPoints}" fill="${strokeColor}"/>` : ""}
-                </g>
-              `;
-            })}
-          </svg>
-
-          <!-- Activity windows -->
-          ${activityWindows.map((w) => {
-            const agent = AGENTS.find((a) => a.id === w.agentId);
-            if (!agent) {
-              return "";
-            }
-            const y = getAgentY(w.agentId) - 10;
-            const x = getX(w.startTime);
-            const endT = w.endTime !== null ? w.endTime : _currentTime;
-            const width = Math.max((endT - w.startTime) * TIME_SCALE, 4);
-            const lc = agent.lifecycle;
-            const bg =
-              lc === "persistent"
-                ? "rgba(34,197,94,0.18)"
-                : lc === "ephemeral"
-                  ? "rgba(245,158,11,0.18)"
-                  : "rgba(129,140,248,0.18)";
-            const border =
-              lc === "persistent"
-                ? "rgba(34,197,94,0.5)"
-                : lc === "ephemeral"
-                  ? "rgba(245,158,11,0.5)"
-                  : "rgba(129,140,248,0.5)";
-            const isHighlighted = hasHighlight ? highlightSet.has(w.agentId) : true;
-            const opacity = hasHighlight ? (isHighlighted ? 1 : 0.2) : 1;
-            return html`
-              <div class="cd-monitor-window" style="left:${x}px;top:${y}px;width:${width}px;background:${bg};border-color:${border};opacity:${opacity}"
-                @mouseenter=${() => {
-                  _hoveredAgentId = w.agentId;
-                  requestRender();
-                }}
-                @mouseleave=${() => {
-                  _hoveredAgentId = null;
-                  requestRender();
-                }}>
-              </div>
-            `;
-          })}
-
-          <!-- Event markers -->
-          ${EVENTS.filter((e) => e.timestamp <= _currentTime)
-            .filter((e) =>
-              ["pause", "error", "archive", "backtrack", "split", "handoff", "merge"].includes(
-                e.type,
-              ),
-            )
-            .map((ev) => {
-              const y = getAgentY(ev.agentId);
-              const x = getX(ev.timestamp);
-              const isHighlighted = hasHighlight ? highlightSet.has(ev.agentId) : true;
-              const opacity = hasHighlight ? (isHighlighted ? 1 : 0.2) : 1;
-              const color = eventColor(ev.type);
-              const isHovered = _hoveredEventId === ev.id;
-              return html`
-              <div class="cd-monitor-event ${isHovered ? "cd-monitor-event--hovered" : ""}"
-                style="left:${x}px;top:${y}px;border-color:${color}50;background:${color}20;opacity:${opacity}"
-                @mouseenter=${() => {
-                  _hoveredEventId = ev.id;
-                  _hoveredAgentId = ev.agentId;
-                  requestRender();
-                }}
-                @mouseleave=${() => {
-                  _hoveredEventId = null;
-                  _hoveredAgentId = null;
-                  requestRender();
-                }}>
-                <span style="font-size:10px">${eventIcon(ev.type)}</span>
-                ${
-                  isHovered
-                    ? html`
-                  <div class="cd-monitor-tooltip">
-                    <div class="cd-monitor-tooltip__type" style="color:${color}">${ev.type}</div>
-                    ${ev.details ? html`<div class="cd-monitor-tooltip__detail">${ev.details}</div>` : ""}
-                    ${ev.targetId ? html`<div class="cd-monitor-tooltip__target">→ ${AGENTS.find((a) => a.id === ev.targetId)?.name ?? ev.targetId}</div>` : ""}
+      <!-- ═══ Body: left panel + right timeline ═══ -->
+      <div class="cd-monitor-body">
+        <!-- Left panel: agent lane headers -->
+        <div
+          class="cd-monitor-left"
+          @click=${() => {
+            _selectedAgentId = null;
+            _selectedActivityId = null;
+            rr();
+          }}
+        >
+          <div class="cd-monitor-left-corner"></div>
+          <div class="cd-monitor-left-scroll">
+            <div style="padding-top:${PADDING_TOP}px;min-height:${tlHeight}px">
+              ${AGENTS.map((agent) => {
+                const status = agentStatus(agent.id, _currentTime);
+                const isSelected = _selectedAgentId === agent.id;
+                const isHovered = _hoveredAgentId === agent.id && !isSelected;
+                return html`
+                  <div
+                    class="cd-monitor-lane-header ${
+                      isSelected ? "cd-monitor-lane-header--selected" : ""
+                    } ${isHovered ? "cd-monitor-lane-header--hovered" : ""}"
+                    style="height:${LANE_HEIGHT}px"
+                    @click=${(ev: Event) => {
+                      ev.stopPropagation();
+                      _selectedAgentId = _selectedAgentId === agent.id ? null : agent.id;
+                      _selectedActivityId = null;
+                      rr();
+                    }}
+                    @mouseenter=${() => {
+                      _hoveredAgentId = agent.id;
+                      rr();
+                    }}
+                    @mouseleave=${() => {
+                      _hoveredAgentId = null;
+                      rr();
+                    }}
+                  >
+                    <div class="cd-monitor-lane-header__info">
+                      <div class="cd-monitor-lane-header__row">
+                        <span class="cd-monitor-lane-header__name"
+                          >${agent.emoji} ${agent.name}</span
+                        >
+                        ${
+                          agent.workspace
+                            ? html`<span class="cd-monitor-lane-workspace"
+                              >${agent.workspace}</span
+                            >`
+                            : ""
+                        }
+                      </div>
+                      <div class="cd-monitor-lane-header__row">
+                        <span class="cd-monitor-lane-header__role"
+                          >${agent.role}</span
+                        >
+                        <span
+                          class="cd-monitor-lane-lifecycle cd-monitor-lane-lifecycle--${agent.lifecycle}"
+                          >${agent.lifecycle.toUpperCase()}</span
+                        >
+                      </div>
+                    </div>
+                    <div
+                      class="cd-monitor-lane-status-dot ${
+                        status === "running" ? "cd-monitor-lane-status-dot--running" : ""
+                      }"
+                      style="background:${statusDotColor(status)}"
+                    ></div>
                   </div>
-                `
-                    : ""
-                }
-              </div>
-            `;
-            })}
+                `;
+              })}
+            </div>
+          </div>
+        </div>
 
-          <!-- Playhead -->
-          <div class="cd-monitor-playhead" style="left:${getX(_currentTime)}px;top:0;height:${timelineHeight}px">
-            <span class="cd-monitor-playhead__time">${Math.floor(_currentTime)}</span>
+        <!-- Right: time axis + scrollable timeline -->
+        <div class="cd-monitor-right">
+          <!-- Time axis (clickable) -->
+          <div
+            class="cd-monitor-axis-row"
+            @click=${(e: MouseEvent) => {
+              const el = e.currentTarget as HTMLElement;
+              const rect = el.getBoundingClientRect();
+              const x = e.clientX - rect.left + el.scrollLeft - TIMELINE_PAD;
+              const t = Math.max(0, Math.min(MAX_TIME, Math.round(x / _timeScale)));
+              _isPlaying = false;
+              _currentTime = t;
+              rr();
+            }}
+          >
+            <div
+              class="cd-monitor-axis-inner"
+              style="width:${tlWidth}px;position:relative;height:100%"
+            >
+              ${Array.from({ length: Math.floor(MAX_TIME / 10) + 1 }, (_, i) => i * 10).map(
+                (t) => html`
+                  <div
+                    class="cd-monitor-axis-tick"
+                    style="left:${getX(t)}px"
+                  >
+                    <span class="cd-monitor-axis-tick__label">${t}</span>
+                    <div class="cd-monitor-axis-tick__mark"></div>
+                  </div>
+                `,
+              )}
+              <div
+                class="cd-monitor-axis-cursor"
+                style="left:${getX(_currentTime)}px"
+              >
+                <span class="cd-monitor-axis-cursor__val"
+                  >${Math.floor(_currentTime)}</span
+                >
+              </div>
+            </div>
           </div>
 
+          <!-- Scrollable timeline canvas -->
+          <div
+            class="cd-monitor-canvas"
+            @scroll=${syncScroll}
+            @click=${() => {
+              _selectedAgentId = null;
+              _selectedActivityId = null;
+              rr();
+            }}
+          >
+            <div
+              style="position:relative;width:${tlWidth}px;height:${tlHeight}px"
+            >
+              <!-- Background grid -->
+              <div
+                style="position:absolute;inset:0;pointer-events:none;background-size:${
+                  _timeScale * 10
+                }px ${LANE_HEIGHT}px;background-position:${TIMELINE_PAD}px ${PADDING_TOP}px;background-image:linear-gradient(to right,rgba(255,255,255,0.025) 1px,transparent 1px),linear-gradient(to bottom,rgba(255,255,255,0.025) 1px,transparent 1px)"
+              ></div>
+
+              <!-- SVG: lineage edges -->
+              <svg
+                style="position:absolute;inset:0;overflow:visible;pointer-events:none"
+                width="${tlWidth}"
+                height="${tlHeight}"
+              >
+                ${edges.map((edge) => {
+                  const y1 = getAgentY(edge.sourceId);
+                  const y2 = getAgentY(edge.targetId);
+                  const x = getX(edge.timestamp);
+                  const isEdgeHL = hasHL
+                    ? highlightSet.has(edge.sourceId) && highlightSet.has(edge.targetId)
+                    : true;
+                  let opacity = hasHL ? (isEdgeHL ? 0.9 : 0.12) : 0.45;
+                  let sw = isEdgeHL ? 2 : 1;
+                  if (_selectedActivityId) {
+                    const srcW = windowForAgentAtTime(edge.sourceId, edge.timestamp, true, windows);
+                    const tgtW = windowForAgentAtTime(
+                      edge.targetId,
+                      edge.timestamp,
+                      false,
+                      windows,
+                    );
+                    const conn =
+                      srcW?.id === _selectedActivityId || tgtW?.id === _selectedActivityId;
+                    opacity = conn ? 1 : 0.1;
+                    sw = conn ? 2 : 1;
+                  }
+                  const sc =
+                    edge.type === "handoff"
+                      ? "#3b82f6"
+                      : edge.type === "split"
+                        ? "#a78bfa"
+                        : edge.type === "merge"
+                          ? "#60a5fa"
+                          : "#94a3b8";
+                  const down = y2 > y1;
+                  let pathD = `M ${x} ${y1}`;
+                  let arrow = "";
+                  if (down) {
+                    pathD += ` L ${x} ${y2 - 6}`;
+                    arrow = `${x - 4},${y2 - 6} ${x + 4},${y2 - 6} ${x},${y2}`;
+                  } else {
+                    pathD += ` L ${x} ${y2 + 6}`;
+                    arrow = `${x - 4},${y2 + 6} ${x + 4},${y2 + 6} ${x},${y2}`;
+                  }
+                  return html`
+                    <g
+                      style="opacity:${opacity};transition:opacity .2s ease"
+                    >
+                      <path
+                        d="${pathD}"
+                        stroke="${sc}"
+                        stroke-width="${sw}"
+                        fill="none"
+                        stroke-dasharray="${edge.type === "handoff" ? "4 4" : "none"}"
+                      />
+                      <circle cx="${x}" cy="${y1}" r="3" fill="${sc}" />
+                      ${arrow ? html`<polygon points="${arrow}" fill="${sc}" />` : ""}
+                    </g>
+                  `;
+                })}
+              </svg>
+
+              <!-- Activity windows -->
+              ${windows.map((w) => {
+                const agent = AGENTS.find((a) => a.id === w.agentId);
+                if (!agent) {
+                  return "";
+                }
+                const y = getAgentY(w.agentId) - 10;
+                const x = getX(w.startTime);
+                const endT = w.endTime !== null ? w.endTime : _currentTime;
+                const width = Math.max((endT - w.startTime) * _timeScale, 4);
+                const lc = agent.lifecycle;
+                const bg =
+                  lc === "persistent"
+                    ? "rgba(34,197,94,0.18)"
+                    : lc === "ephemeral"
+                      ? "rgba(245,158,11,0.18)"
+                      : "rgba(129,140,248,0.18)";
+                const border =
+                  lc === "persistent"
+                    ? "rgba(34,197,94,0.5)"
+                    : lc === "ephemeral"
+                      ? "rgba(245,158,11,0.5)"
+                      : "rgba(129,140,248,0.5)";
+                let opacity = 1;
+                if (_selectedActivityId) {
+                  opacity = connWins.has(w.id) ? 1 : 0.1;
+                } else if (hasHL) {
+                  opacity = highlightSet.has(w.agentId) ? 1 : 0.2;
+                }
+                const isSel = _selectedActivityId === w.id;
+                return html`
+                  <div
+                    class="cd-monitor-window ${isSel ? "cd-monitor-window--selected" : ""}"
+                    style="left:${x}px;top:${y}px;width:${width}px;background:${bg};border-color:${border};opacity:${opacity}"
+                    @mouseenter=${() => {
+                      if (!_selectedActivityId) {
+                        _hoveredAgentId = w.agentId;
+                        rr();
+                      }
+                    }}
+                    @mouseleave=${() => {
+                      if (!_selectedActivityId) {
+                        _hoveredAgentId = null;
+                        rr();
+                      }
+                    }}
+                    @click=${(ev: Event) => {
+                      ev.stopPropagation();
+                      _selectedActivityId = _selectedActivityId === w.id ? null : w.id;
+                      _selectedAgentId = w.agentId;
+                      rr();
+                    }}
+                  >
+                  </div>
+                `;
+              })}
+
+              <!-- Event markers -->
+              ${EVENTS.filter((e) => e.timestamp <= _currentTime)
+                .filter((e) =>
+                  ["pause", "error", "archive", "backtrack", "split", "handoff", "merge"].includes(
+                    e.type,
+                  ),
+                )
+                .map((ev) => {
+                  const y = getAgentY(ev.agentId);
+                  const x = getX(ev.timestamp);
+                  let opacity = 1;
+                  if (_selectedActivityId) {
+                    const ew = windowForAgentAtTime(ev.agentId, ev.timestamp, true, windows);
+                    opacity = ew && connWins.has(ew.id) ? 1 : 0.1;
+                  } else if (hasHL) {
+                    opacity = highlightSet.has(ev.agentId) ? 1 : 0.2;
+                  }
+                  const color = eventColor(ev.type);
+                  const isHov = _hoveredEventId === ev.id;
+                  return html`
+                    <div
+                      class="cd-monitor-event ${isHov ? "cd-monitor-event--hovered" : ""}"
+                      style="left:${x}px;top:${y}px;border-color:${color}50;background:${color}20;opacity:${opacity}"
+                      @mouseenter=${() => {
+                        _hoveredEventId = ev.id;
+                        _hoveredAgentId = ev.agentId;
+                        rr();
+                      }}
+                      @mouseleave=${() => {
+                        _hoveredEventId = null;
+                        _hoveredAgentId = null;
+                        rr();
+                      }}
+                      @click=${(ev2: Event) => {
+                        ev2.stopPropagation();
+                        _selectedAgentId = ev.agentId;
+                        rr();
+                      }}
+                    >
+                      <span style="font-size:10px">${eventIcon(ev.type)}</span>
+                      ${
+                        isHov
+                          ? html`
+                            <div class="cd-monitor-tooltip">
+                              <div
+                                class="cd-monitor-tooltip__type"
+                                style="color:${color}"
+                              >
+                                ${ev.type}
+                              </div>
+                              ${
+                                ev.details
+                                  ? html`<div
+                                    class="cd-monitor-tooltip__detail"
+                                  >
+                                    ${ev.details}
+                                  </div>`
+                                  : ""
+                              }
+                              ${
+                                ev.targetId
+                                  ? html`<div
+                                    class="cd-monitor-tooltip__target"
+                                  >
+                                    →
+                                    ${AGENTS.find((a) => a.id === ev.targetId)?.name ?? ev.targetId}
+                                  </div>`
+                                  : ""
+                              }
+                            </div>
+                          `
+                          : ""
+                      }
+                    </div>
+                  `;
+                })}
+
+              <!-- AI Annotation markers -->
+              ${
+                _showAnnotations
+                  ? ANNOTATIONS.filter((a) => a.timestamp <= _currentTime).map((ann) => {
+                      const x = getX(ann.timestamp);
+                      const rawY = ann.agentId ? getAgentY(ann.agentId) : 40;
+                      const below = ann.placement === "bottom" || rawY < 60;
+                      const y = below ? rawY + 24 : rawY - 24;
+                      const ac = annotationColor(ann.type);
+                      const isHov = _hoveredAnnotation === ann.id;
+                      return html`
+                      <div
+                        class="cd-monitor-annotation"
+                        style="left:${x}px;top:${y}px"
+                        @mouseenter=${() => {
+                          _hoveredAnnotation = ann.id;
+                          rr();
+                        }}
+                        @mouseleave=${() => {
+                          _hoveredAnnotation = null;
+                          rr();
+                        }}
+                      >
+                        <div
+                          class="cd-monitor-annotation__dot"
+                          style="color:${ac.fg};border-color:${ac.border};background:${ac.bg}"
+                        >
+                          ${annotationIcon(ann.type)}
+                        </div>
+                        ${
+                          isHov
+                            ? html`
+                              <div
+                                class="cd-monitor-annotation__tip ${
+                                  below ? "cd-monitor-annotation__tip--below" : ""
+                                }"
+                              >
+                                <div
+                                  class="cd-monitor-annotation__tip-title"
+                                  style="color:${ac.fg}"
+                                >
+                                  ${ann.title}
+                                </div>
+                                <div
+                                  class="cd-monitor-annotation__tip-desc"
+                                >
+                                  ${ann.description}
+                                </div>
+                              </div>
+                            `
+                            : ""
+                        }
+                      </div>
+                    `;
+                    })
+                  : ""
+              }
+
+              <!-- Playhead -->
+              <div
+                class="cd-monitor-playhead"
+                style="left:${getX(_currentTime)}px;top:0;height:${tlHeight}px"
+              >
+                <span class="cd-monitor-playhead__time"
+                  >${Math.floor(_currentTime)}</span
+                >
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Legend -->
+      <!-- ═══ Legend ═══ -->
       <div class="cd-monitor-legend">
         <div class="cd-monitor-legend__section">
           <span class="cd-monitor-legend__title">Lifecycle</span>
-          <span class="cd-monitor-legend__item"><span class="cd-monitor-legend__swatch" style="background:${lifecycleColor("persistent")}"></span> Persistent</span>
-          <span class="cd-monitor-legend__item"><span class="cd-monitor-legend__swatch" style="background:${lifecycleColor("ephemeral")}"></span> Ephemeral</span>
-          <span class="cd-monitor-legend__item"><span class="cd-monitor-legend__swatch" style="background:${lifecycleColor("contract")}"></span> Contract</span>
+          <span class="cd-monitor-legend__item"
+            ><span
+              class="cd-monitor-legend__swatch"
+              style="background:#22c55e"
+            ></span>
+            Persistent</span
+          >
+          <span class="cd-monitor-legend__item"
+            ><span
+              class="cd-monitor-legend__swatch"
+              style="background:#f59e0b"
+            ></span>
+            Ephemeral</span
+          >
+          <span class="cd-monitor-legend__item"
+            ><span
+              class="cd-monitor-legend__swatch"
+              style="background:#818cf8"
+            ></span>
+            Contract</span
+          >
         </div>
         <div class="cd-monitor-legend__section">
           <span class="cd-monitor-legend__title">Events</span>
-          <span class="cd-monitor-legend__item">⏸️ Pause</span>
-          <span class="cd-monitor-legend__item">❌ Error</span>
-          <span class="cd-monitor-legend__item">🔀 Split</span>
-          <span class="cd-monitor-legend__item">🤝 Handoff</span>
-          <span class="cd-monitor-legend__item">🔗 Merge</span>
-          <span class="cd-monitor-legend__item">↩️ Backtrack</span>
-          <span class="cd-monitor-legend__item">📦 Archive</span>
+          <span class="cd-monitor-legend__item">⏸ Pause</span>
+          <span class="cd-monitor-legend__item">✕ Error</span>
+          <span class="cd-monitor-legend__item">⑂ Split</span>
+          <span class="cd-monitor-legend__item">⇋ Handoff</span>
+          <span class="cd-monitor-legend__item">⊕ Merge</span>
+          <span class="cd-monitor-legend__item">↩ Backtrack</span>
+          <span class="cd-monitor-legend__item">▣ Archive</span>
         </div>
+        ${
+          _showAnnotations
+            ? html`
+                <div class="cd-monitor-legend__section">
+                  <span class="cd-monitor-legend__title">AI Insights</span>
+                  <span class="cd-monitor-legend__item"
+                    ><span class="cd-monitor-legend__swatch" style="background: #fb7185"></span> Bottleneck</span
+                  >
+                  <span class="cd-monitor-legend__item"
+                    ><span class="cd-monitor-legend__swatch" style="background: #fbbf24"></span> Decision</span
+                  >
+                  <span class="cd-monitor-legend__item"
+                    ><span class="cd-monitor-legend__swatch" style="background: #34d399"></span> Dispatch</span
+                  >
+                  <span class="cd-monitor-legend__item"
+                    ><span class="cd-monitor-legend__swatch" style="background: #a78bfa"></span> Insight</span
+                  >
+                </div>
+              `
+            : ""
+        }
       </div>
     </div>
   `;

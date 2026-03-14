@@ -367,275 +367,254 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
   const selected = nodes.find((n) => n.id === _selectedId) ?? null;
 
   return html`
-    <div class="cd-page cd-page--orgchart">
+    <div class="cd-page cd-page--orgchart cd-oc-fullwidth">
 
-      <!-- Toolbar -->
-      <div class="cd-oc-toolbar">
-        <span class="cd-oc-toolbar__title">🏗️ Org Chart</span>
-        <span class="cd-oc-toolbar__count">${nodes.length} roles · ${nodes.filter((n) => n.status === "active").length} active</span>
-        <div style="flex:1"></div>
-        <button class="cd-btn ${_deleteMode ? "cd-btn--destructive" : "cd-btn--outline"} cd-btn--sm"
-          @click=${() => {
-            _deleteMode = !_deleteMode;
-            _addTargetId = null;
-          }}>
-          ${_deleteMode ? "✅ Done removing" : "🗑️ Remove mode"}
-        </button>
-        <button class="cd-btn cd-btn--primary cd-btn--sm"
-          @click=${() => {
-            _addTargetId = _selectedId ?? nodes[nodes.length - 1]?.id ?? null;
-            _deleteMode = false;
-          }}>
-          ${icons.plus} Add Role
-        </button>
+      <!-- Full-width SVG topology graph -->
+      <div class="cd-oc-canvas-wrap cd-oc-canvas-wrap--full">
+        <div class="cd-oc-canvas">
+          <svg class="cd-oc-svg" viewBox="-20 -20 ${svgW} ${svgH}" preserveAspectRatio="xMidYMin meet" style="width:100%;height:auto;min-height:100%">
+            <!-- Edge lines -->
+            <g class="cd-oc-edges">
+              ${edges.map(
+                (e) => svg`
+                <path class="cd-oc-edge"
+                  d="M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}"
+                  fill="none"
+                />
+              `,
+              )}
+            </g>
+
+            <!-- Node cards -->
+            ${nodes.map((n) => {
+              const isSelected = n.id === _selectedId;
+              const isAddTarget = n.id === _addTargetId;
+              const statusC = statusColor(n.status);
+              return svg`
+                <g
+                  class="cd-oc-node ${isSelected ? "cd-oc-node--selected" : ""} ${n.status === "crashed" ? "cd-oc-node--crashed" : ""} ${_deleteMode && n.id !== ORG_TREE.id ? "cd-oc-node--deletable" : ""}"
+                  transform="translate(${n.x}, ${n.y})"
+                  @click=${() => {
+                    if (_deleteMode && n.id !== ORG_TREE.id) {
+                      deleteNode(ORG_TREE, n.id);
+                      if (_selectedId === n.id) {
+                        _selectedId = null;
+                      }
+                    } else {
+                      _selectedId = isSelected ? null : n.id;
+                      _addTargetId = null;
+                    }
+                  }}
+                  style="cursor:${_deleteMode && n.id !== ORG_TREE.id ? "not-allowed" : "pointer"}"
+                >
+                  <!-- Card bg -->
+                  <rect x="0" y="0" width="${NODE_W}" height="${NODE_H}" rx="10"
+                    fill="var(--card)"
+                    stroke="${isAddTarget ? "#22c55e" : isSelected ? n.color : _deleteMode && n.id !== ORG_TREE.id ? "#ef4444" : "var(--border)"}"
+                    stroke-width="${isSelected || isAddTarget || (_deleteMode && n.id !== ORG_TREE.id) ? 2.5 : 1}"
+                  />
+                  <!-- Left accent bar -->
+                  <rect x="0" y="0" width="4" height="${NODE_H}" rx="2" fill="${n.color}" />
+                  <!-- Status dot -->
+                  <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" />
+                  ${
+                    n.status === "active"
+                      ? svg`
+                    <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" opacity="0.4">
+                      <animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/>
+                      <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/>
+                    </circle>
+                  `
+                      : ""
+                  }
+                  <!-- Delete X overlay in delete mode -->
+                  ${
+                    _deleteMode && n.id !== ORG_TREE.id
+                      ? svg`
+                    <rect x="${NODE_W - 26}" y="4" width="20" height="20" rx="4" fill="rgba(239,68,68,0.15)" />
+                    <text x="${NODE_W - 16}" y="17" fill="#ef4444" font-size="14" text-anchor="middle" dominant-baseline="middle">×</text>
+                  `
+                      : ""
+                  }
+                  <!-- Emoji -->
+                  <text x="20" y="32" font-size="20" dominant-baseline="middle">${n.emoji}</text>
+                  <!-- Name -->
+                  <text x="48" y="26" fill="var(--text-strong)" font-size="11.5" font-weight="700" font-family="monospace">${n.name}</text>
+                  <!-- Role -->
+                  <text x="48" y="42" fill="var(--muted-foreground)" font-size="10">${n.role}</text>
+                  <!-- Model chip -->
+                  <rect x="8" y="${NODE_H - 22}" width="${NODE_W - 16}" height="16" rx="4" fill="var(--bg-muted)" />
+                  <text x="${NODE_W / 2}" y="${NODE_H - 11}" fill="var(--accent-2-muted)" font-size="9.5" text-anchor="middle" font-family="monospace">${n.model}</text>
+                </g>
+              `;
+            })}
+          </svg>
+        </div>
+
+        <!-- Floating toolbar (bottom-center) -->
+        <div class="cd-oc-float-toolbar">
+          <span class="cd-oc-float-toolbar__count">${nodes.length} roles · ${nodes.filter((n) => n.status === "active").length} active</span>
+          <div class="cd-oc-float-toolbar__sep"></div>
+          <button class="cd-oc-float-btn ${_deleteMode ? "cd-oc-float-btn--danger" : ""}"
+            @click=${() => {
+              _deleteMode = !_deleteMode;
+              _addTargetId = null;
+            }}>
+            ${_deleteMode ? "✅ Done" : "🗑️ Remove"}
+          </button>
+          <button class="cd-oc-float-btn cd-oc-float-btn--primary"
+            @click=${() => {
+              _addTargetId = _selectedId ?? nodes[nodes.length - 1]?.id ?? null;
+              _deleteMode = false;
+            }}>
+            + Add Role
+          </button>
+          <div class="cd-oc-float-toolbar__sep"></div>
+          <div class="cd-oc-legend-inline">
+            <span class="cd-oc-legend__dot cd-oc-legend__dot--active"></span>Active
+            <span class="cd-oc-legend__dot cd-oc-legend__dot--idle"></span>Idle
+            <span class="cd-oc-legend__dot cd-oc-legend__dot--crashed"></span>Crashed
+          </div>
+        </div>
       </div>
 
-      <!-- Add role panel -->
+      <!-- Add role modal overlay -->
       ${
         _addTargetId
           ? html`
-        <div class="cd-oc-add-panel">
-          <div class="cd-oc-add-panel__title">Add role under:
-            <strong>${nodes.find((n) => n.id === _addTargetId)?.name ?? "—"}</strong>
-          </div>
-          <div class="cd-oc-add-panel__quick">
-            ${QUICK_ROLES.map(
-              (preset) => html`
-              <button class="cd-oc-quick-role" @click=${() => {
-                const newNode: OrgNode = { ...preset, id: `node-${_idCounter++}`, children: [] };
-                addChildTo(ORG_TREE, _addTargetId!, newNode);
+        <div class="cd-oc-modal-overlay" @click=${(e: Event) => {
+          if ((e.target as HTMLElement).classList.contains("cd-oc-modal-overlay")) {
+            _addTargetId = null;
+          }
+        }}>
+          <div class="cd-oc-add-modal">
+            <div class="cd-oc-add-modal__header">
+              <span>Add role under: <strong>${nodes.find((n) => n.id === _addTargetId)?.name ?? "—"}</strong></span>
+              <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
                 _addTargetId = null;
-              }}>
-                ${preset.emoji} ${preset.role}
-              </button>
-            `,
-            )}
-          </div>
-          <div class="cd-oc-add-panel__custom">
-            <input class="cd-form-input" placeholder="Emoji" style="width:52px"
-              .value=${_newRoleEmoji}
-              @input=${(e: Event) => {
-                _newRoleEmoji = (e.target as HTMLInputElement).value;
-              }} />
-            <input class="cd-form-input" placeholder="agent-name"
-              .value=${_newRoleName}
-              @input=${(e: Event) => {
-                _newRoleName = (e.target as HTMLInputElement).value;
-              }} />
-            <input class="cd-form-input" placeholder="Role title"
-              .value=${_newRoleTitle}
-              @input=${(e: Event) => {
-                _newRoleTitle = (e.target as HTMLInputElement).value;
-              }} />
-            <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-              if (!_newRoleName.trim()) {
-                return;
-              }
-              const newNode: OrgNode = {
-                id: `node-${_idCounter++}`,
-                name: _newRoleName.trim(),
-                role: _newRoleTitle || _newRoleName.trim(),
-                emoji: _newRoleEmoji || "🤖",
-                color: "#60a5fa",
-                status: "idle",
-                model: "claude-sonnet-4-5",
-                team: "general",
-                children: [],
-              };
-              addChildTo(ORG_TREE, _addTargetId!, newNode);
-              _newRoleName = "";
-              _newRoleTitle = "";
-              _newRoleEmoji = "🤖";
-              _addTargetId = null;
-            }}>Add</button>
-            <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
-              _addTargetId = null;
-            }}>Cancel</button>
+              }}>${icons.x}</button>
+            </div>
+            <div class="cd-oc-add-panel__quick">
+              ${QUICK_ROLES.map(
+                (preset) => html`
+                <button class="cd-oc-quick-role" @click=${() => {
+                  const newNode: OrgNode = { ...preset, id: `node-${_idCounter++}`, children: [] };
+                  addChildTo(ORG_TREE, _addTargetId!, newNode);
+                  _addTargetId = null;
+                }}>
+                  ${preset.emoji} ${preset.role}
+                </button>
+              `,
+              )}
+            </div>
+            <div class="cd-oc-add-panel__custom">
+              <input class="cd-form-input" placeholder="Emoji" style="width:52px"
+                .value=${_newRoleEmoji}
+                @input=${(e: Event) => {
+                  _newRoleEmoji = (e.target as HTMLInputElement).value;
+                }} />
+              <input class="cd-form-input" placeholder="agent-name"
+                .value=${_newRoleName}
+                @input=${(e: Event) => {
+                  _newRoleName = (e.target as HTMLInputElement).value;
+                }} />
+              <input class="cd-form-input" placeholder="Role title"
+                .value=${_newRoleTitle}
+                @input=${(e: Event) => {
+                  _newRoleTitle = (e.target as HTMLInputElement).value;
+                }} />
+              <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                if (!_newRoleName.trim()) {
+                  return;
+                }
+                const newNode: OrgNode = {
+                  id: `node-${_idCounter++}`,
+                  name: _newRoleName.trim(),
+                  role: _newRoleTitle || _newRoleName.trim(),
+                  emoji: _newRoleEmoji || "🤖",
+                  color: "#60a5fa",
+                  status: "idle",
+                  model: "claude-sonnet-4-5",
+                  team: "general",
+                  children: [],
+                };
+                addChildTo(ORG_TREE, _addTargetId!, newNode);
+                _newRoleName = "";
+                _newRoleTitle = "";
+                _newRoleEmoji = "🤖";
+                _addTargetId = null;
+              }}>Add</button>
+              <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
+                _addTargetId = null;
+              }}>Cancel</button>
+            </div>
           </div>
         </div>
       `
           : ""
       }
 
-      <div class="cd-oc-layout">
-        <!-- SVG topology graph -->
-        <div class="cd-oc-canvas-wrap">
-          <div class="cd-oc-canvas">
-            <svg class="cd-oc-svg" viewBox="-20 -20 ${svgW} ${svgH}" width="${svgW}" height="${svgH}">
-              <!-- Edge lines -->
-              <g class="cd-oc-edges">
-                ${edges.map(
-                  (e) => svg`
-                  <path class="cd-oc-edge"
-                    d="M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}"
-                    fill="none"
-                  />
-                `,
-                )}
-              </g>
-
-              <!-- Node cards -->
-              ${nodes.map((n) => {
-                const isSelected = n.id === _selectedId;
-                const isAddTarget = n.id === _addTargetId;
-                const statusC = statusColor(n.status);
-                return svg`
-                  <g
-                    class="cd-oc-node ${isSelected ? "cd-oc-node--selected" : ""} ${n.status === "crashed" ? "cd-oc-node--crashed" : ""} ${_deleteMode && n.id !== ORG_TREE.id ? "cd-oc-node--deletable" : ""}"
-                    transform="translate(${n.x}, ${n.y})"
-                    @click=${() => {
-                      if (_deleteMode && n.id !== ORG_TREE.id) {
-                        deleteNode(ORG_TREE, n.id);
-                        if (_selectedId === n.id) {
-                          _selectedId = null;
-                        }
-                      } else {
-                        _selectedId = isSelected ? null : n.id;
-                        _addTargetId = null;
-                      }
-                    }}
-                    style="cursor:${_deleteMode && n.id !== ORG_TREE.id ? "not-allowed" : "pointer"}"
-                  >
-                    <!-- Card bg -->
-                    <rect x="0" y="0" width="${NODE_W}" height="${NODE_H}" rx="10"
-                      fill="var(--card)"
-                      stroke="${isAddTarget ? "#22c55e" : isSelected ? n.color : _deleteMode && n.id !== ORG_TREE.id ? "#ef4444" : "var(--border)"}"
-                      stroke-width="${isSelected || isAddTarget || (_deleteMode && n.id !== ORG_TREE.id) ? 2.5 : 1}"
-                    />
-                    <!-- Left accent bar -->
-                    <rect x="0" y="0" width="4" height="${NODE_H}" rx="2" fill="${n.color}" />
-                    <!-- Status dot -->
-                    <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" />
-                    ${
-                      n.status === "active"
-                        ? svg`
-                      <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" opacity="0.4">
-                        <animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/>
-                        <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/>
-                      </circle>
-                    `
-                        : ""
-                    }
-                    <!-- Delete X overlay in delete mode -->
-                    ${
-                      _deleteMode && n.id !== ORG_TREE.id
-                        ? svg`
-                      <rect x="${NODE_W - 26}" y="4" width="20" height="20" rx="4" fill="rgba(239,68,68,0.15)" />
-                      <text x="${NODE_W - 16}" y="17" fill="#ef4444" font-size="14" text-anchor="middle" dominant-baseline="middle">×</text>
-                    `
-                        : ""
-                    }
-                    <!-- + add child button -->
-                    ${
-                      !_deleteMode
-                        ? svg`
-                      <rect x="${NODE_W - 26}" y="${NODE_H - 24}" width="20" height="18" rx="4" fill="rgba(34,197,94,0.12)"
-                        @click=${(e: Event) => {
-                          e.stopPropagation();
-                          _addTargetId = n.id;
-                          _selectedId = null;
-                        }} />
-                      <text x="${NODE_W - 16}" y="${NODE_H - 13}" fill="#22c55e" font-size="14" text-anchor="middle" dominant-baseline="middle"
-                        @click=${(e: Event) => {
-                          e.stopPropagation();
-                          _addTargetId = n.id;
-                          _selectedId = null;
-                        }}>+</text>
-                    `
-                        : ""
-                    }
-                    <!-- Emoji -->
-                    <text x="20" y="32" font-size="20" dominant-baseline="middle">${n.emoji}</text>
-                    <!-- Name -->
-                    <text x="48" y="26" fill="var(--text-strong)" font-size="11.5" font-weight="700" font-family="monospace">${n.name}</text>
-                    <!-- Role -->
-                    <text x="48" y="42" fill="var(--muted-foreground)" font-size="10">${n.role}</text>
-                    <!-- Model chip -->
-                    <rect x="8" y="${NODE_H - 22}" width="${NODE_W - 16}" height="16" rx="4" fill="var(--bg-muted)" />
-                    <text x="${NODE_W / 2}" y="${NODE_H - 11}" fill="var(--accent-2-muted)" font-size="9.5" text-anchor="middle" font-family="monospace">${n.model}</text>
-                  </g>
-                `;
-              })}
-            </svg>
-          </div>
-        </div>
-
-        <!-- Detail panel -->
-        <div class="cd-oc-detail ${selected ? "cd-oc-detail--visible" : ""}">
-          ${
-            selected
-              ? html`
-            <div class="cd-oc-detail__header" style="border-color: ${selected.color}">
-              <span class="cd-oc-detail__emoji">${selected.emoji}</span>
-              <div>
-                <div class="cd-oc-detail__name">${selected.name}</div>
-                <div class="cd-oc-detail__role">${selected.role}</div>
-              </div>
-              <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
-                _selectedId = null;
-              }}>${icons.x}</button>
+      <!-- Floating detail card (appears on node click) -->
+      ${
+        selected
+          ? html`
+        <div class="cd-oc-detail-float" style="--accent-c:${selected.color}">
+          <div class="cd-oc-detail-float__header">
+            <span class="cd-oc-detail__emoji">${selected.emoji}</span>
+            <div style="flex:1;min-width:0">
+              <div class="cd-oc-detail__name">${selected.name}</div>
+              <div class="cd-oc-detail__role">${selected.role}</div>
             </div>
-            <div class="cd-oc-detail__body">
-              <div class="cd-oc-kv"><span>Team</span><span class="cd-oc-kv__val">${selected.team}</span></div>
-              <div class="cd-oc-kv"><span>Model</span><span class="cd-oc-kv__val cd-mono">${selected.model}</span></div>
-              <div class="cd-oc-kv"><span>Status</span>
-                <span class="cd-badge ${selected.status === "active" ? "cd-badge--ok" : selected.status === "crashed" ? "cd-badge--danger" : "cd-badge--muted"}">${selected.status}</span>
+            <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+              _selectedId = null;
+            }}>${icons.x}</button>
+          </div>
+          <div class="cd-oc-detail__body">
+            <div class="cd-oc-kv"><span>Team</span><span class="cd-oc-kv__val">${selected.team}</span></div>
+            <div class="cd-oc-kv"><span>Model</span><span class="cd-oc-kv__val cd-mono">${selected.model}</span></div>
+            <div class="cd-oc-kv"><span>Status</span>
+              <span class="cd-badge ${selected.status === "active" ? "cd-badge--ok" : selected.status === "crashed" ? "cd-badge--danger" : "cd-badge--muted"}">${selected.status}</span>
+            </div>
+            <div class="cd-oc-kv"><span>Reports to</span>
+              <span class="cd-oc-kv__val cd-mono">${(() => {
+                const parent = nodes.find((n) =>
+                  (n.children as LayoutNode[] | undefined)?.some((c) => c.id === selected.id),
+                );
+                return parent ? parent.name : "—";
+              })()}</span>
+            </div>
+            ${
+              (selected.children as LayoutNode[] | undefined)?.length
+                ? html`
+              <div class="cd-oc-kv"><span>Direct reports</span>
+                <span class="cd-oc-kv__val">${(selected.children as LayoutNode[]).map((c) => c.name).join(", ")}</span>
               </div>
-              <div class="cd-oc-kv"><span>Reports to</span>
-                <span class="cd-oc-kv__val cd-mono">${(() => {
-                  const parent = nodes.find((n) =>
-                    (n.children as LayoutNode[] | undefined)?.some((c) => c.id === selected.id),
-                  );
-                  return parent ? parent.name : "—";
-                })()}</span>
-              </div>
+            `
+                : ""
+            }
+            <div class="cd-oc-detail__actions">
+              <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                _addTargetId = selected.id;
+                _selectedId = null;
+              }}>
+                ${icons.plus} Add Report
+              </button>
               ${
-                (selected.children as LayoutNode[] | undefined)?.length
+                selected.id !== ORG_TREE.id
                   ? html`
-                <div class="cd-oc-kv"><span>Direct reports</span>
-                  <span class="cd-oc-kv__val">${(selected.children as LayoutNode[]).map((c) => c.name).join(", ")}</span>
-                </div>
+                <button class="cd-btn cd-btn--destructive cd-btn--sm" @click=${() => {
+                  deleteNode(ORG_TREE, selected.id);
+                  _selectedId = null;
+                }}>🗑️ Remove</button>
               `
                   : ""
               }
-              <div class="cd-oc-detail__actions">
-                <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-                  _addTargetId = selected.id;
-                  _selectedId = null;
-                }}>
-                  ${icons.plus} Add Report
-                </button>
-                ${
-                  selected.id !== ORG_TREE.id
-                    ? html`
-                  <button class="cd-btn cd-btn--destructive cd-btn--sm" @click=${() => {
-                    deleteNode(ORG_TREE, selected.id);
-                    _selectedId = null;
-                  }}>🗑️ Remove</button>
-                `
-                    : ""
-                }
-              </div>
             </div>
-          `
-              : html`
-            <div class="cd-oc-detail__placeholder">
-              ${icons.network}
-              <p>Click any node to inspect. Use <strong>+</strong> on a node to add a direct report. Enable <em>Remove mode</em> to delete nodes.</p>
-            </div>
-          `
-          }
+          </div>
         </div>
-      </div>
-
-      <!-- Legend -->
-      <div class="cd-oc-legend">
-        <div class="cd-oc-legend__item"><span class="cd-oc-legend__dot cd-oc-legend__dot--active"></span>Active</div>
-        <div class="cd-oc-legend__item"><span class="cd-oc-legend__dot cd-oc-legend__dot--idle"></span>Idle</div>
-        <div class="cd-oc-legend__item"><span class="cd-oc-legend__dot cd-oc-legend__dot--crashed"></span>Crashed</div>
-        <div class="cd-oc-legend__sep"></div>
-        <div class="cd-oc-legend__item">Click node = inspect · <strong>+</strong> = add direct report · Remove mode = delete</div>
-      </div>
+      `
+          : ""
+      }
     </div>
   `;
 }
