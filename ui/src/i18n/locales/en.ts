@@ -51,6 +51,8 @@ export const en: TranslationMap = {
     companyFleet: "Fleet",
     companyOrgChart: "Org Chart",
     companyOffice: "Office",
+    roleHub: "Role Hub",
+    companyTasks: "Tasks",
   },
   subtitles: {
     agents: "Workspaces, tools, identities.",
@@ -76,6 +78,8 @@ export const en: TranslationMap = {
     companyFleet: "All agents, health, and live activity.",
     companyOrgChart: "Topology graph: reporting lines and team structure.",
     companyOffice: "Animated live office — watch your agents at work.",
+    roleHub: "100+ role templates with skills, tools, and system prompts.",
+    companyTasks: "Kanban board — assign and track work across agents.",
   },
   overview: {
     access: {

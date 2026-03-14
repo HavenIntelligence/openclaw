@@ -1,22 +1,56 @@
 import { html } from "lit";
 import { icons } from "../icons.ts";
 
-// Simulated demo data for ClawDock Company Overview
-const DEMO_COMPANY = {
+// ── Company Profile (editable in future) ─────────────────────────────────
+const COMPANY_PROFILE = {
   name: "Acme AI Corp",
-  motto: "One founder. One fleet. Full output.",
+  tagline: "One founder. One fleet. Full output.",
   founded: "2025",
-  teams: 3,
-  totalAgents: 8,
-  activeAgents: 6,
-  crashedAgents: 1,
-  idleAgents: 1,
+  stage: "Seed",
+  industry: "AI Infrastructure",
+  hq: "San Francisco, CA (remote-first)",
+  mission: `Build the world's first self-operating AI company — where a single
+human founder delegates all execution to a supervised fleet of specialized AI
+agents, retaining only strategy, ethics review, and final approval rights.`,
+  vision: `Every entrepreneur on Earth running a profitable company powered
+entirely by their own curated agent fleet, with zero operational overhead.`,
+  values: [
+    { emoji: "⚡", label: "Speed", desc: "Ship every day. Agents never sleep." },
+    { emoji: "🎯", label: "Focus", desc: "One north star. No distractions." },
+    { emoji: "🔍", label: "Transparency", desc: "Every decision logged and auditable." },
+    { emoji: "🔄", label: "Resilience", desc: "Crash, recover, keep running." },
+  ],
+  businessModel: `B2B SaaS — tiered subscriptions based on agent seats and
+compute credits. Enterprise plans include custom agent fleet configuration,
+dedicated supervision infrastructure, and human-in-the-loop SLA guarantees.`,
+  currentFocus: [
+    "Launch content pipeline product (Q1 2026)",
+    "Close seed round — $3M target",
+    "Onboard first 10 design-partner companies",
+    "Build MCP marketplace integration",
+  ],
+};
+
+// ── Financial & Operations Status ─────────────────────────────────────────
+const COMPANY_STATUS = {
+  employees: 9,
+  netWorth: 2_400_000,
+  cashBalance: 840_000,
+  monthlyRevenue: 180_000,
+  monthlyBurn: 95_000,
+  runwayMonths: 8.8,
+  mrr: 42_000,
+  arr: 504_000,
   tasksToday: 142,
   tokensToday: 2_840_000,
   uptime: "99.4%",
   health: "degraded" as "healthy" | "degraded" | "critical",
+  activeAgents: 6,
+  crashedAgents: 1,
+  idleAgents: 2,
 };
 
+// ── Supervision Tree demo data ─────────────────────────────────────────────
 const DEMO_SUPERVISION_TREE = [
   {
     id: "root",
@@ -45,7 +79,7 @@ const DEMO_SUPERVISION_TREE = [
             role: "Writer",
             status: "healthy" as const,
             model: "claude-sonnet-4-5",
-            tasks: 28,
+            tasks: 8,
           },
           {
             id: "review-gamma",
@@ -70,322 +104,364 @@ const DEMO_SUPERVISION_TREE = [
             role: "Engineer",
             status: "healthy" as const,
             model: "claude-opus-4-5",
-            tasks: 47,
+            tasks: 34,
           },
           {
             id: "test-runner",
             label: "test-runner",
             role: "QA",
-            status: "healthy" as const,
+            status: "idle" as const,
             model: "gpt-4o",
-            tasks: 31,
+            tasks: 0,
           },
         ],
       },
       {
-        id: "singleton-pa",
-        label: "personal-assistant",
-        role: "Executive Assistant",
+        id: "pa",
+        label: "nanoclaw-primary",
+        role: "Personal Assistant",
         strategy: "singleton",
-        status: "healthy" as const,
-        children: [
-          {
-            id: "nanoclaw-primary",
-            label: "nanoclaw-primary",
-            role: "Personal AI",
-            status: "idle" as const,
-            model: "claude-sonnet-4-5",
-            tasks: 24,
-          },
-        ],
+        status: "idle" as const,
+        children: [],
       },
     ],
   },
 ];
 
-type AgentLeaf = {
-  id: string;
-  label: string;
-  role: string;
-  status: "healthy" | "crashed" | "idle" | "starting";
-  model: string;
-  tasks: number;
-};
+// ── Recent events ──────────────────────────────────────────────────────────
+const DEMO_EVENTS = [
+  {
+    time: "2m ago",
+    icon: "💥",
+    msg: "review-gamma crashed — supervisor restarting (attempt 2/3)",
+    level: "error",
+  },
+  {
+    time: "5m ago",
+    icon: "✅",
+    msg: "code-agent merged PR #42: add retry logic to MCP client",
+    level: "ok",
+  },
+  {
+    time: "11m ago",
+    icon: "📄",
+    msg: "writing-beta published: 'AI Agents in 2026' blog post",
+    level: "ok",
+  },
+  {
+    time: "18m ago",
+    icon: "🔍",
+    msg: "research-alpha completed competitor analysis (14 sources)",
+    level: "ok",
+  },
+  {
+    time: "32m ago",
+    icon: "📊",
+    msg: "ops-prime filed Q1 OKR report — 87% target completion",
+    level: "ok",
+  },
+  {
+    time: "1h ago",
+    icon: "🚀",
+    msg: "Project Alpha kicked off — 3 agents assigned",
+    level: "info",
+  },
+];
 
-type TeamNode = {
-  id: string;
-  label: string;
-  role: string;
-  strategy: string;
-  status: "healthy" | "degraded" | "crashed";
-  children: AgentLeaf[];
-};
-
-type RootNode = {
-  id: string;
-  label: string;
-  role: string;
-  status: "healthy" | "degraded" | "crashed";
-  children: TeamNode[];
-};
-
-function statusBadge(status: string) {
-  if (status === "healthy") {
-    return html`
-      <span class="cd-badge cd-badge--ok">healthy</span>
-    `;
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmt(n: number, prefix = ""): string {
+  if (n >= 1_000_000) {
+    return `${prefix}${(n / 1_000_000).toFixed(1)}M`;
   }
-  if (status === "crashed") {
-    return html`
-      <span class="cd-badge cd-badge--danger">crashed</span>
-    `;
+  if (n >= 1_000) {
+    return `${prefix}${(n / 1_000).toFixed(0)}K`;
   }
-  if (status === "idle") {
-    return html`
-      <span class="cd-badge cd-badge--muted">idle</span>
-    `;
-  }
-  if (status === "degraded") {
-    return html`
-      <span class="cd-badge cd-badge--warn">degraded</span>
-    `;
-  }
-  return html`<span class="cd-badge cd-badge--muted">${status}</span>`;
+  return `${prefix}${n}`;
 }
 
-function strategyLabel(strategy: string) {
-  if (strategy === "one-for-one") {
-    return html`
-      <span class="cd-strategy" title="One agent crashes → only that agent restarts">1:1</span>
-    `;
+function statusColor(s: string) {
+  if (s === "healthy") {
+    return "var(--ok)";
   }
-  if (strategy === "one-for-all") {
-    return html`
-      <span class="cd-strategy" title="One crashes → entire team restarts">1:all</span>
-    `;
+  if (s === "crashed") {
+    return "var(--destructive)";
   }
-  if (strategy === "rest-for-one") {
-    return html`
-      <span class="cd-strategy" title="One crashes → all downstream restart">rest:1</span>
-    `;
-  }
-  return html`<span class="cd-strategy">${strategy}</span>`;
+  return "#f59e0b";
 }
 
-function renderAgentLeaf(agent: AgentLeaf) {
+function strategyBadge(strategy?: string) {
+  const map: Record<string, { label: string; cls: string }> = {
+    "one-for-one": { label: "1:1", cls: "cd-badge--strategy-ofo" },
+    "one-for-all": { label: "1:all", cls: "cd-badge--strategy-ofa" },
+    "rest-for-one": { label: "rest:1", cls: "cd-badge--strategy-rfo" },
+    singleton: { label: "singleton", cls: "cd-badge--strategy-sg" },
+  };
+  const s = map[strategy ?? ""] ?? { label: strategy ?? "", cls: "" };
+  return html`<span class="cd-badge ${s.cls}">${s.label}</span>`;
+}
+
+// Recursive tree node
+function renderAgentLeaf(agent: {
+  id: string;
+  label: string;
+  role: string;
+  status: string;
+  model?: string;
+  tasks?: number;
+}) {
   return html`
-    <div class="cd-agent-leaf ${agent.status === "crashed" ? "cd-agent-leaf--crashed" : ""} ${agent.status === "idle" ? "cd-agent-leaf--idle" : ""}">
-      <div class="cd-agent-leaf__header">
-        <span class="cd-agent-leaf__pulse cd-pulse--${agent.status}"></span>
-        <span class="cd-agent-leaf__name">${agent.label}</span>
-        ${statusBadge(agent.status)}
-      </div>
-      <div class="cd-agent-leaf__meta">
-        <span class="cd-agent-leaf__role">${agent.role}</span>
-        <span class="cd-agent-leaf__model">${agent.model}</span>
-      </div>
-      <div class="cd-agent-leaf__stats">
-        <span class="cd-agent-leaf__tasks">${agent.tasks} tasks</span>
-        ${agent.status === "crashed" ? html`<button class="cd-btn cd-btn--xs cd-btn--danger" title="Restart agent">${icons.rotateCounterClockwise} Restart</button>` : ""}
-      </div>
+    <div class="cd-sup-leaf">
+      <span class="cd-sup-leaf__dot" style="background:${statusColor(agent.status)}"></span>
+      <span class="cd-sup-leaf__name">${agent.label}</span>
+      <span class="cd-sup-leaf__role">${agent.role}</span>
+      ${agent.model ? html`<span class="cd-badge cd-badge--model">${agent.model}</span>` : ""}
+      ${agent.tasks !== undefined ? html`<span class="cd-sup-leaf__tasks">${agent.tasks} tasks</span>` : ""}
     </div>
   `;
 }
 
-function renderTeamNode(team: TeamNode) {
+function renderTeamNode(team: {
+  id: string;
+  label: string;
+  role: string;
+  status: string;
+  strategy?: string;
+  children: Array<{
+    id: string;
+    label: string;
+    role: string;
+    status: string;
+    model?: string;
+    tasks?: number;
+  }>;
+}) {
   return html`
-    <div class="cd-team-node">
-      <div class="cd-team-node__header">
-        <span class="cd-team-node__icon">${icons.users}</span>
-        <div class="cd-team-node__info">
-          <span class="cd-team-node__name">${team.label}</span>
-          <span class="cd-team-node__role">${team.role}</span>
-        </div>
-        <div class="cd-team-node__badges">
-          ${strategyLabel(team.strategy)}
-          ${statusBadge(team.status)}
-        </div>
+    <div class="cd-sup-team">
+      <div class="cd-sup-team__header">
+        <span class="cd-sup-team__dot" style="background:${statusColor(team.status)}"></span>
+        <span class="cd-sup-team__name">${team.label}</span>
+        <span class="cd-sup-team__role">${team.role}</span>
+        ${team.strategy ? strategyBadge(team.strategy) : ""}
       </div>
-      <div class="cd-team-node__agents">
+      <div class="cd-sup-team__members">
         ${team.children.map(renderAgentLeaf)}
       </div>
     </div>
   `;
 }
 
-function renderSupervisionTree(tree: RootNode[]) {
-  const root = tree[0];
-  if (!root) {
-    return html``;
-  }
+function renderSupervisionTree(tree: typeof DEMO_SUPERVISION_TREE) {
   return html`
     <div class="cd-sup-tree">
-      <div class="cd-sup-root">
-        <span class="cd-sup-root__icon">${icons.building}</span>
-        <div class="cd-sup-root__info">
-          <span class="cd-sup-root__name">${root.label}</span>
-          <span class="cd-sup-root__role">${root.role}</span>
+      ${tree.map(
+        (root) => html`
+        <div class="cd-sup-root">
+          <div class="cd-sup-root__header">
+            <span class="cd-sup-root__icon">${icons.network}</span>
+            <span class="cd-sup-root__label">${root.label}</span>
+            <span class="cd-badge cd-badge--ok">${root.role}</span>
+          </div>
+          <div class="cd-sup-root__teams">
+            ${root.children.map((child) =>
+              child.children.length > 0
+                ? renderTeamNode(child as Parameters<typeof renderTeamNode>[0])
+                : renderAgentLeaf(child),
+            )}
+          </div>
         </div>
-        ${statusBadge(root.status)}
-      </div>
-      <div class="cd-sup-tree__teams">
-        ${root.children.map(renderTeamNode)}
-      </div>
+      `,
+      )}
     </div>
   `;
 }
 
+// ── Main Render ────────────────────────────────────────────────────────────
 export type CompanyOverviewProps = Record<string, never>;
 
 export function renderCompanyOverview(_props: CompanyOverviewProps) {
-  const company = DEMO_COMPANY;
+  const runway = COMPANY_STATUS.runwayMonths;
+  const runwayColor = runway < 3 ? "var(--destructive)" : runway < 6 ? "#f59e0b" : "var(--ok)";
 
   return html`
-    <div class="cd-page">
-      <!-- Company hero banner -->
-      <div class="cd-company-hero">
-        <div class="cd-company-hero__left">
-          <div class="cd-company-logo">
-            <span class="cd-company-logo__icon">${icons.building}</span>
-          </div>
-          <div class="cd-company-hero__copy">
-            <h1 class="cd-company-hero__name">${company.name}</h1>
-            <p class="cd-company-hero__motto">${company.motto}</p>
+    <div class="cd-page cd-page--overview">
+
+      <!-- ── Company Profile Card (MD-style) ─────────────────── -->
+      <div class="cd-profile-card">
+        <div class="cd-profile-card__left">
+          <div class="cd-profile-card__logo">🦀</div>
+          <div class="cd-profile-card__meta">
+            <h1 class="cd-profile-card__name">${COMPANY_PROFILE.name}</h1>
+            <p class="cd-profile-card__tag">${COMPANY_PROFILE.tagline}</p>
+            <div class="cd-profile-card__chips">
+              <span class="cd-chip">${COMPANY_PROFILE.stage}</span>
+              <span class="cd-chip">${COMPANY_PROFILE.industry}</span>
+              <span class="cd-chip">Est. ${COMPANY_PROFILE.founded}</span>
+              <span class="cd-chip">📍 ${COMPANY_PROFILE.hq}</span>
+            </div>
           </div>
         </div>
-        <div class="cd-company-hero__stats">
-          <div class="cd-stat-chip">
-            <span class="cd-stat-chip__value">${company.teams}</span>
-            <span class="cd-stat-chip__label">Teams</span>
+        <div class="cd-profile-card__right">
+          <div class="cd-profile-section">
+            <div class="cd-profile-section__label">Mission</div>
+            <p class="cd-profile-section__text">${COMPANY_PROFILE.mission}</p>
           </div>
-          <div class="cd-stat-chip">
-            <span class="cd-stat-chip__value">${company.activeAgents}<span class="cd-stat-chip__sub">/${company.totalAgents}</span></span>
-            <span class="cd-stat-chip__label">Agents Active</span>
-          </div>
-          <div class="cd-stat-chip cd-stat-chip--accent">
-            <span class="cd-stat-chip__value">${company.tasksToday}</span>
-            <span class="cd-stat-chip__label">Tasks Today</span>
-          </div>
-          <div class="cd-stat-chip">
-            <span class="cd-stat-chip__value">${(company.tokensToday / 1_000_000).toFixed(2)}M</span>
-            <span class="cd-stat-chip__label">Tokens Today</span>
-          </div>
-          <div class="cd-stat-chip ${company.health === "degraded" ? "cd-stat-chip--warn" : "cd-stat-chip--ok"}">
-            <span class="cd-stat-chip__value">${company.health}</span>
-            <span class="cd-stat-chip__label">Health</span>
+          <div class="cd-profile-section">
+            <div class="cd-profile-section__label">Vision</div>
+            <p class="cd-profile-section__text">${COMPANY_PROFILE.vision}</p>
           </div>
         </div>
       </div>
 
-      <!-- Alert banner: crashed agent -->
-      ${
-        company.crashedAgents > 0
-          ? html`
-        <div class="cd-alert cd-alert--warn">
-          <span class="cd-alert__icon">${icons.alertTriangle}</span>
-          <div class="cd-alert__body">
-            <strong>${company.crashedAgents} agent crashed</strong> — review-gamma in content-pipeline is down.
-            Supervision strategy: one-for-one — other team members are unaffected.
+      <!-- ── Values + Business Model ─────────────────────────── -->
+      <div class="cd-overview-row">
+        <div class="cd-values-card cd-card">
+          <div class="cd-card__title">Core Values</div>
+          <div class="cd-values-grid">
+            ${COMPANY_PROFILE.values.map(
+              (v) => html`
+              <div class="cd-value-item">
+                <span class="cd-value-item__emoji">${v.emoji}</span>
+                <strong>${v.label}</strong>
+                <span>${v.desc}</span>
+              </div>
+            `,
+            )}
           </div>
-          <button class="cd-btn cd-btn--sm cd-btn--outline">View details</button>
+        </div>
+        <div class="cd-focus-card cd-card">
+          <div class="cd-card__title">Current Focus (Q1 2026)</div>
+          <ul class="cd-focus-list">
+            ${COMPANY_PROFILE.currentFocus.map(
+              (f) => html`
+              <li class="cd-focus-list__item">
+                <span class="cd-focus-list__dot"></span>${f}
+              </li>
+            `,
+            )}
+          </ul>
+          <div class="cd-card__title" style="margin-top:14px">Business Model</div>
+          <p class="cd-biz-model">${COMPANY_PROFILE.businessModel}</p>
+        </div>
+      </div>
+
+      <!-- ── Company Status Dashboard ────────────────────────── -->
+      <div class="cd-status-grid">
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">👥</div>
+          <div class="cd-stat-tile__val">${COMPANY_STATUS.employees}</div>
+          <div class="cd-stat-tile__label">AI Employees</div>
+          <div class="cd-stat-tile__sub">${COMPANY_STATUS.activeAgents} active · ${COMPANY_STATUS.crashedAgents} crashed</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">💎</div>
+          <div class="cd-stat-tile__val">${fmt(COMPANY_STATUS.netWorth, "$")}</div>
+          <div class="cd-stat-tile__label">Net Worth</div>
+          <div class="cd-stat-tile__sub">Company valuation est.</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">💵</div>
+          <div class="cd-stat-tile__val">${fmt(COMPANY_STATUS.cashBalance, "$")}</div>
+          <div class="cd-stat-tile__label">Cash Balance</div>
+          <div class="cd-stat-tile__sub">Available runway funds</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">📈</div>
+          <div class="cd-stat-tile__val">${fmt(COMPANY_STATUS.mrr, "$")}</div>
+          <div class="cd-stat-tile__label">MRR</div>
+          <div class="cd-stat-tile__sub">ARR ${fmt(COMPANY_STATUS.arr, "$")}</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">🔥</div>
+          <div class="cd-stat-tile__val">${fmt(COMPANY_STATUS.monthlyBurn, "$")}</div>
+          <div class="cd-stat-tile__label">Monthly Burn</div>
+          <div class="cd-stat-tile__sub">Operating cost</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">⏳</div>
+          <div class="cd-stat-tile__val" style="color:${runwayColor}">${runway.toFixed(1)}mo</div>
+          <div class="cd-stat-tile__label">Runway</div>
+          <div class="cd-stat-tile__sub" style="color:${runwayColor}">${runway < 6 ? "⚠️ Fundraise soon" : "✅ Healthy"}</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">⚡</div>
+          <div class="cd-stat-tile__val">${COMPANY_STATUS.tasksToday}</div>
+          <div class="cd-stat-tile__label">Tasks Today</div>
+          <div class="cd-stat-tile__sub">${(COMPANY_STATUS.tokensToday / 1_000_000).toFixed(2)}M tokens</div>
+        </div>
+        <div class="cd-stat-tile">
+          <div class="cd-stat-tile__icon">📡</div>
+          <div class="cd-stat-tile__val">${COMPANY_STATUS.uptime}</div>
+          <div class="cd-stat-tile__label">Uptime</div>
+          <div class="cd-stat-tile__sub ${COMPANY_STATUS.health === "degraded" ? "cd-stat-tile__sub--warn" : ""}">
+            ${COMPANY_STATUS.health === "degraded" ? "⚠️ Degraded" : "✅ Healthy"}
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Alert banner ────────────────────────────────────── -->
+      ${
+        COMPANY_STATUS.health !== "healthy"
+          ? html`
+        <div class="cd-alert-banner">
+          ${icons.alertTriangle}
+          <strong>Degraded:</strong>&nbsp;review-gamma is crashed (restart attempt 2/3).
+          Downstream writing pipeline may be impacted.
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" style="margin-left:auto">View Logs</button>
         </div>
       `
           : ""
       }
 
-      <div class="cd-page__grid">
-        <!-- Left: Supervision tree -->
-        <section class="cd-section cd-section--wide">
-          <div class="cd-section__header">
-            <span class="cd-section__title">Supervision Tree</span>
-            <span class="cd-section__sub">Erlang/OTP-inspired hierarchy — agents restart automatically when they crash</span>
+      <!-- ── Supervision Tree + Quick Actions ─────────────────── -->
+      <div class="cd-overview-row">
+        <div class="cd-card" style="flex:2">
+          <div class="cd-card__title">Supervision Tree</div>
+          ${renderSupervisionTree(DEMO_SUPERVISION_TREE)}
+        </div>
+        <div class="cd-card" style="flex:1">
+          <div class="cd-card__title">Quick Actions</div>
+          <div class="cd-quick-actions">
+            <button class="cd-btn cd-btn--primary">${icons.play} Start All Agents</button>
+            <button class="cd-btn cd-btn--outline">${icons.pause} Pause Fleet</button>
+            <button class="cd-btn cd-btn--outline">${icons.rotateCounterClockwise} Restart Crashed</button>
+            <button class="cd-btn cd-btn--outline">${icons.activity} View Logs</button>
+            <button class="cd-btn cd-btn--outline">${icons.terminal2} Open Console</button>
           </div>
-          ${renderSupervisionTree(DEMO_SUPERVISION_TREE as unknown as RootNode[])}
-        </section>
-
-        <!-- Right: Quick actions + metrics -->
-        <div class="cd-sidebar-col">
-          <section class="cd-section">
-            <div class="cd-section__header">
-              <span class="cd-section__title">Quick Actions</span>
+          <div class="cd-card__title" style="margin-top:20px">System Health</div>
+          ${[
+            { label: "Gateway", val: "Connected", ok: true },
+            { label: "Scheduler", val: "Running", ok: true },
+            { label: "Message Bus", val: "Running", ok: true },
+            { label: "Supervisor", val: "Degraded (1 crash)", ok: false },
+            { label: "Storage", val: "OK", ok: true },
+          ].map(
+            (row) => html`
+            <div class="cd-health-row">
+              <span class="cd-health-dot" style="background:${row.ok ? "var(--ok)" : "var(--destructive)"}"></span>
+              <span class="cd-health-label">${row.label}</span>
+              <span class="cd-health-val ${row.ok ? "" : "cd-health-val--err"}">${row.val}</span>
             </div>
-            <div class="cd-quick-actions">
-              <button class="cd-quick-action">
-                <span class="cd-quick-action__icon cd-quick-action__icon--green">${icons.play}</span>
-                <span>Start all agents</span>
-              </button>
-              <button class="cd-quick-action">
-                <span class="cd-quick-action__icon cd-quick-action__icon--amber">${icons.pause}</span>
-                <span>Pause fleet</span>
-              </button>
-              <button class="cd-quick-action">
-                <span class="cd-quick-action__icon cd-quick-action__icon--blue">${icons.rotateCounterClockwise}</span>
-                <span>Restart crashed</span>
-              </button>
-              <button class="cd-quick-action">
-                <span class="cd-quick-action__icon cd-quick-action__icon--red">${icons.stop}</span>
-                <span>Emergency stop</span>
-              </button>
-            </div>
-          </section>
-
-          <section class="cd-section">
-            <div class="cd-section__header">
-              <span class="cd-section__title">System Health</span>
-            </div>
-            <div class="cd-health-rows">
-              <div class="cd-health-row">
-                <span>${icons.cpu}</span>
-                <span class="cd-health-row__label">Control Plane</span>
-                <span class="cd-badge cd-badge--ok">online</span>
-              </div>
-              <div class="cd-health-row">
-                <span>${icons.network}</span>
-                <span class="cd-health-row__label">Message Bus</span>
-                <span class="cd-badge cd-badge--ok">online</span>
-              </div>
-              <div class="cd-health-row">
-                <span>${icons.activity}</span>
-                <span class="cd-health-row__label">Supervision</span>
-                <span class="cd-badge cd-badge--warn">1 fault</span>
-              </div>
-              <div class="cd-health-row">
-                <span>${icons.scrollText}</span>
-                <span class="cd-health-row__label">Event Log</span>
-                <span class="cd-badge cd-badge--ok">live</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="cd-section">
-            <div class="cd-section__header">
-              <span class="cd-section__title">Recent Events</span>
-            </div>
-            <div class="cd-event-feed">
-              <div class="cd-event-feed__item cd-event-feed__item--danger">
-                <span class="cd-event-feed__time">09:41</span>
-                <span class="cd-event-feed__msg">review-gamma crashed (exit code 1)</span>
-              </div>
-              <div class="cd-event-feed__item cd-event-feed__item--info">
-                <span class="cd-event-feed__time">09:38</span>
-                <span class="cd-event-feed__msg">writing-beta completed task #28</span>
-              </div>
-              <div class="cd-event-feed__item cd-event-feed__item--info">
-                <span class="cd-event-feed__time">09:35</span>
-                <span class="cd-event-feed__msg">code-agent delegated subtask to test-runner</span>
-              </div>
-              <div class="cd-event-feed__item cd-event-feed__item--ok">
-                <span class="cd-event-feed__time">09:30</span>
-                <span class="cd-event-feed__msg">Pipeline run #142 completed in 2m 14s</span>
-              </div>
-              <div class="cd-event-feed__item cd-event-feed__item--info">
-                <span class="cd-event-feed__time">09:27</span>
-                <span class="cd-event-feed__msg">research-alpha started task #12</span>
-              </div>
-            </div>
-          </section>
+          `,
+          )}
         </div>
       </div>
+
+      <!-- ── Recent Events ────────────────────────────────────── -->
+      <div class="cd-card">
+        <div class="cd-card__title">Recent Events</div>
+        <div class="cd-event-feed">
+          ${DEMO_EVENTS.map(
+            (e) => html`
+            <div class="cd-event-row cd-event-row--${e.level}">
+              <span class="cd-event-icon">${e.icon}</span>
+              <span class="cd-event-time">${e.time}</span>
+              <span class="cd-event-msg">${e.msg}</span>
+            </div>
+          `,
+          )}
+        </div>
+      </div>
+
     </div>
   `;
 }

@@ -132,6 +132,8 @@ const lazyCompanyTeams = createLazy(() => import("./views/company-teams.ts"));
 const lazyCompanyFleet = createLazy(() => import("./views/company-fleet.ts"));
 const lazyCompanyOrgChart = createLazy(() => import("./views/company-org-chart.ts"));
 const lazyCompanyOffice = createLazy(() => import("./views/company-office.ts"));
+const lazyRoleHub = createLazy(() => import("./views/role-hub.ts"));
+const lazyCompanyTasks = createLazy(() => import("./views/company-tasks.ts"));
 
 function lazyRender<M>(getter: () => M | null, render: (mod: M) => unknown) {
   const mod = getter();
@@ -1942,6 +1944,14 @@ export function renderApp(state: AppViewState) {
             ? lazyRender(lazyCompanyOffice, (m) =>
                 m.renderCompanyOffice({ requestUpdate: requestHostUpdate }),
               )
+            : nothing
+        }
+
+        ${state.tab === "roleHub" ? lazyRender(lazyRoleHub, (m) => m.renderRoleHub({})) : nothing}
+
+        ${
+          state.tab === "companyTasks"
+            ? lazyRender(lazyCompanyTasks, (m) => m.renderCompanyTasks({}))
             : nothing
         }
       </main>

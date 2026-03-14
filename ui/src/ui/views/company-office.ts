@@ -2,65 +2,88 @@ import { html } from "lit";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentStatus = "thinking" | "working" | "idle" | "crashed" | "messaging";
-type Direction = "down" | "left" | "right" | "up";
 
 type OfficeAgent = {
   id: string;
   name: string;
-  role: string;
-  emoji: string; // character avatar
-  deskEmoji: string; // desk/work item
-  x: number; // tile position
+  emoji: string;
+  x: number;
   y: number;
   targetX: number;
   targetY: number;
   status: AgentStatus;
   activity: string;
-  direction: Direction;
-  moveProgress: number; // 0..1 animation interpolation
   thoughtBubble: string;
   thoughtTimer: number;
   color: string;
-  team: string;
-  deskX: number; // home desk position
+  deskX: number;
   deskY: number;
   messageTo: string | null;
-  messageTimer: number;
+  team: string;
 };
 
-// Message flying between agents
 type FlyingMessage = {
   id: string;
-  fromId: string;
-  toId: string;
   fromX: number;
   fromY: number;
   toX: number;
   toY: number;
-  progress: number; // 0..1
+  progress: number;
   emoji: string;
   label: string;
 };
 
-// ── Demo data ─────────────────────────────────────────────────────────────
-const TILE = 48; // px per tile
-const COLS = 18;
-const ROWS = 10;
-
-// Desk positions (tile coordinates)
-const DESKS: Record<string, { x: number; y: number }> = {
-  "founder-ai": { x: 8, y: 1 }, // CEO — center top
-  "ops-prime": { x: 2, y: 3 }, // COO — left
-  "content-director": { x: 13, y: 3 }, // CMO — right
-  "nanoclaw-primary": { x: 8, y: 3 }, // PA — center
-  "code-agent": { x: 1, y: 7 }, // Engineer — bottom left
-  "test-runner": { x: 4, y: 7 }, // QA — bottom left
-  "research-alpha": { x: 11, y: 7 }, // Researcher — bottom right
-  "writing-beta": { x: 14, y: 7 }, // Writer — bottom right
-  "review-gamma": { x: 16, y: 7 }, // Reviewer — bottom right
+// ── Execution log entry ────────────────────────────────────────────────────
+type LogEntry = {
+  id: string;
+  ts: string;
+  agent: string;
+  agentEmoji: string;
+  type: "tool_call" | "output" | "thinking" | "human" | "error" | "system";
+  content: string;
+  tokens?: number;
+  duration?: number;
 };
 
-// Message scripts for simulation
+// ── Project definition ──────────────────────────────────────────────────────
+type Project = {
+  id: string;
+  name: string;
+  status: "running" | "paused" | "completed";
+  agents: string[];
+  progress: number;
+  description: string;
+};
+
+// ── Demo data ──────────────────────────────────────────────────────────────
+const TILE = 48;
+const COLS = 14;
+const ROWS = 9;
+
+const DESKS: Record<string, { x: number; y: number }> = {
+  "founder-ai": { x: 6, y: 0 },
+  "ops-prime": { x: 1, y: 2 },
+  "content-director": { x: 11, y: 2 },
+  "nanoclaw-primary": { x: 6, y: 2 },
+  "code-agent": { x: 0, y: 6 },
+  "test-runner": { x: 3, y: 6 },
+  "research-alpha": { x: 9, y: 6 },
+  "writing-beta": { x: 11, y: 6 },
+  "review-gamma": { x: 13, y: 6 },
+};
+
+const THOUGHTS: Record<string, string[]> = {
+  "founder-ai": ["📈 Q2 strategy…", "🧠 Fundraise plan", "👁️ Reviewing OKRs"],
+  "ops-prime": ["📋 Process gap", "⚡ Optimizing flow", "📊 KPIs on track"],
+  "content-director": ["🎯 Campaign live", "📣 Reach growing", "💡 New angle!"],
+  "nanoclaw-primary": ["📝 Notes ready", "🗓️ Schedule OK", "📌 Reminder set"],
+  "code-agent": ["🐛 Found a bug!", "🔧 Fixing…", "✅ PR merged"],
+  "test-runner": ["🧪 Running tests", "📊 89% coverage", "❌ 2 failures"],
+  "research-alpha": ["🔍 Found data", "📚 Deep dive…", "💡 Insight!"],
+  "writing-beta": ["✍️ First draft", "📝 Editing…", "🎉 Published!"],
+  "review-gamma": ["⚡ CRASHED", "💥 Restarting…", "🔴 Error state"],
+};
+
 const MESSAGE_SCRIPTS = [
   { from: "founder-ai", to: "content-director", emoji: "📋", label: "Strategy brief" },
   { from: "content-director", to: "research-alpha", emoji: "🔍", label: "Research task" },
@@ -73,35 +96,18 @@ const MESSAGE_SCRIPTS = [
   { from: "nanoclaw-primary", to: "founder-ai", emoji: "💬", label: "Summary ready" },
 ];
 
-const THOUGHTS: Record<string, string[]> = {
-  "founder-ai": ["📈 Q2 targets...", "🧠 New strategy?", "👁️ Reviewing..."],
-  "ops-prime": ["📋 Process gap...", "⚡ Optimizing...", "📊 KPIs look ok"],
-  "content-director": ["🎯 Campaign ready", "📣 Reach growing", "💡 New angle!"],
-  "nanoclaw-primary": ["📝 Taking notes", "🗓️ Schedule ok", "📌 Reminder set"],
-  "code-agent": ["🐛 Found a bug!", "🔧 Fixing...", "✅ PR merged"],
-  "test-runner": ["🧪 Running tests", "📊 89% coverage", "❌ 2 failures"],
-  "research-alpha": ["🔍 Found data", "📚 Deep dive...", "💡 Insight!"],
-  "writing-beta": ["✍️ First draft", "📝 Editing...", "🎉 Published!"],
-  "review-gamma": ["⚡ CRASHED", "💥 Error 1", "🔴 Restarting..."],
-};
-
 const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "founder-ai",
     name: "Founder AI",
-    role: "CEO",
     emoji: "👑",
-    deskEmoji: "🖥️",
     color: "#ff5c5c",
     team: "executive",
     status: "thinking",
     activity: "Setting strategy",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["founder-ai"],
     targetX: DESKS["founder-ai"].x,
     targetY: DESKS["founder-ai"].y,
@@ -111,19 +117,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "ops-prime",
     name: "Ops Prime",
-    role: "COO",
     emoji: "🏢",
-    deskEmoji: "📊",
     color: "#60a5fa",
     team: "executive",
     status: "working",
     activity: "Reviewing OKRs",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["ops-prime"],
     targetX: DESKS["ops-prime"].x,
     targetY: DESKS["ops-prime"].y,
@@ -133,19 +134,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "content-director",
     name: "CMO",
-    role: "CMO",
     emoji: "📣",
-    deskEmoji: "📋",
     color: "#fb923c",
     team: "content",
     status: "working",
     activity: "Planning content",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["content-director"],
     targetX: DESKS["content-director"].x,
     targetY: DESKS["content-director"].y,
@@ -155,19 +151,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "nanoclaw-primary",
     name: "NanoClaw",
-    role: "PA",
     emoji: "🤖",
-    deskEmoji: "📅",
     color: "#14b8a6",
     team: "executive",
     status: "idle",
     activity: "Awaiting tasks",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["nanoclaw-primary"],
     targetX: DESKS["nanoclaw-primary"].x,
     targetY: DESKS["nanoclaw-primary"].y,
@@ -177,19 +168,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "code-agent",
     name: "Code Agent",
-    role: "Engineer",
     emoji: "💻",
-    deskEmoji: "⚙️",
     color: "#22c55e",
     team: "devops",
     status: "working",
     activity: "Writing code",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["code-agent"],
     targetX: DESKS["code-agent"].x,
     targetY: DESKS["code-agent"].y,
@@ -199,19 +185,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "test-runner",
     name: "Test Runner",
-    role: "QA",
     emoji: "🧪",
-    deskEmoji: "✅",
     color: "#4ade80",
     team: "devops",
     status: "thinking",
     activity: "Running tests",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["test-runner"],
     targetX: DESKS["test-runner"].x,
     targetY: DESKS["test-runner"].y,
@@ -221,19 +202,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "research-alpha",
     name: "Researcher",
-    role: "Research",
     emoji: "🔍",
-    deskEmoji: "📚",
     color: "#f97316",
     team: "content",
     status: "working",
     activity: "Deep research",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["research-alpha"],
     targetX: DESKS["research-alpha"].x,
     targetY: DESKS["research-alpha"].y,
@@ -243,19 +219,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "writing-beta",
     name: "Writer Beta",
-    role: "Writer",
     emoji: "✍️",
-    deskEmoji: "📝",
     color: "#fbbf24",
     team: "content",
     status: "working",
     activity: "Writing draft",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["writing-beta"],
     targetX: DESKS["writing-beta"].x,
     targetY: DESKS["writing-beta"].y,
@@ -265,19 +236,14 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   {
     id: "review-gamma",
     name: "Reviewer",
-    role: "Reviewer",
     emoji: "📝",
-    deskEmoji: "🔴",
     color: "#ef4444",
     team: "content",
     status: "crashed",
     activity: "CRASHED",
-    direction: "down",
-    moveProgress: 0,
     thoughtBubble: "",
     thoughtTimer: 0,
     messageTo: null,
-    messageTimer: 0,
     ...DESKS["review-gamma"],
     targetX: DESKS["review-gamma"].x,
     targetY: DESKS["review-gamma"].y,
@@ -286,7 +252,143 @@ const INITIAL_AGENTS: OfficeAgent[] = [
   },
 ];
 
-// ── Simulation state (module-level so it persists between renders) ─────────
+// ── Demo execution log ────────────────────────────────────────────────────
+let _execLog: LogEntry[] = [
+  {
+    id: "l-0",
+    ts: "09:41:02",
+    agent: "founder-ai",
+    agentEmoji: "👑",
+    type: "system",
+    content: "Project Alpha started — 4 agents assigned",
+    tokens: undefined,
+  },
+  {
+    id: "l-1",
+    ts: "09:41:04",
+    agent: "research-alpha",
+    agentEmoji: "🔍",
+    type: "thinking",
+    content:
+      "Analyzing task: competitor pricing research for B2B AI SaaS landscape (10 companies)…",
+  },
+  {
+    id: "l-2",
+    ts: "09:41:08",
+    agent: "research-alpha",
+    agentEmoji: "🔍",
+    type: "tool_call",
+    content: "web_search({ query: 'AI SaaS pricing models 2026 comparison', max_results: 20 })",
+    tokens: 1_200,
+    duration: 1840,
+  },
+  {
+    id: "l-3",
+    ts: "09:41:12",
+    agent: "research-alpha",
+    agentEmoji: "🔍",
+    type: "output",
+    content:
+      "Found 18 sources. Extracting pricing tiers for: Anthropic API, OpenAI, Cohere, Mistral, Replicate, Modal, Together.ai, Groq, Fireworks, Perplexity…",
+    tokens: 4_800,
+  },
+  {
+    id: "l-4",
+    ts: "09:42:15",
+    agent: "code-agent",
+    agentEmoji: "💻",
+    type: "tool_call",
+    content: "bash({ cmd: 'npm run test -- --coverage --reporter=verbose' })",
+    tokens: 320,
+    duration: 12_400,
+  },
+  {
+    id: "l-5",
+    ts: "09:42:27",
+    agent: "code-agent",
+    agentEmoji: "💻",
+    type: "output",
+    content:
+      "Test suite: 142 passed, 2 failed\n  ✗ MCP retry test: timeout after 5000ms\n  ✗ Auth token refresh: expected 200, got 401",
+    tokens: 890,
+  },
+  {
+    id: "l-6",
+    ts: "09:43:01",
+    agent: "writing-beta",
+    agentEmoji: "✍️",
+    type: "thinking",
+    content:
+      "Drafting 'AI Agents in 2026' — structuring 5 sections: Overview, Use Cases, Architecture, Risks, Future Outlook…",
+  },
+  {
+    id: "l-7",
+    ts: "09:43:18",
+    agent: "writing-beta",
+    agentEmoji: "✍️",
+    type: "output",
+    content:
+      "**AI Agents in 2026: The Operational Layer**\n\nThe shift from language models to autonomous agents represents the most significant productivity unlock since cloud computing. In 2026, enterprises are deploying fleets of specialized agents…",
+    tokens: 2_400,
+  },
+  {
+    id: "l-8",
+    ts: "09:44:00",
+    agent: "ops-prime",
+    agentEmoji: "🏢",
+    type: "system",
+    content: "⚠️ review-gamma crashed (OOM). Supervisor initiating restart sequence (attempt 1/3).",
+  },
+  {
+    id: "l-9",
+    ts: "09:44:05",
+    agent: "founder-ai",
+    agentEmoji: "👑",
+    type: "human",
+    content: "[Human override] Hold restart — check if context window exceeded first.",
+  },
+];
+
+let _logIdCounter = 10;
+
+// ── Projects ───────────────────────────────────────────────────────────────
+const PROJECTS: Project[] = [
+  {
+    id: "alpha",
+    name: "Project Alpha",
+    status: "running",
+    agents: ["code-agent", "test-runner", "research-alpha", "writing-beta"],
+    progress: 62,
+    description: "Core platform v1.2.0 — reliability improvements and MCP client refactor.",
+  },
+  {
+    id: "beta",
+    name: "Project Beta",
+    status: "paused",
+    agents: ["research-alpha", "writing-beta"],
+    progress: 28,
+    description: "AI agent fleet white-paper and thought leadership content series.",
+  },
+  {
+    id: "content",
+    name: "Content Pipeline",
+    status: "running",
+    agents: ["research-alpha", "writing-beta", "review-gamma"],
+    progress: 85,
+    description: "Automated content production pipeline: research → draft → review → publish.",
+  },
+];
+
+// ── Human input state ──────────────────────────────────────────────────────
+let _humanInput = "";
+let _selectedAgent = "founder-ai";
+let _isPaused = false;
+let _activeProject = "alpha";
+let _showAddProject = false;
+let _newProjectName = "";
+let _rightTab: "log" | "output" | "human" = "log";
+
+// ── Animation state ────────────────────────────────────────────────────────
 let _agents: OfficeAgent[] = INITIAL_AGENTS.map((a) => ({ ...a }));
 let _messages: FlyingMessage[] = [];
 let _tick = 0;
@@ -296,6 +398,29 @@ let _animFrame: number | null = null;
 let _hostUpdate: (() => void) | null = null;
 let _simulationStarted = false;
 
+function addLog(
+  agent: string,
+  emoji: string,
+  type: LogEntry["type"],
+  content: string,
+  tokens?: number,
+) {
+  const now = new Date();
+  const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+  _execLog.push({
+    id: `l-${_logIdCounter++}`,
+    ts,
+    agent,
+    agentEmoji: emoji,
+    type,
+    content,
+    tokens,
+  });
+  if (_execLog.length > 80) {
+    _execLog = _execLog.slice(-60);
+  }
+}
+
 function spawnMessage(fromId: string, toId: string, emoji: string, label: string) {
   const from = _agents.find((a) => a.id === fromId);
   const to = _agents.find((a) => a.id === toId);
@@ -304,8 +429,6 @@ function spawnMessage(fromId: string, toId: string, emoji: string, label: string
   }
   _messages.push({
     id: `msg-${_msgIdCounter++}`,
-    fromId,
-    toId,
     fromX: from.x * TILE + TILE / 2,
     fromY: from.y * TILE + TILE / 2,
     toX: to.x * TILE + TILE / 2,
@@ -317,20 +440,27 @@ function spawnMessage(fromId: string, toId: string, emoji: string, label: string
 }
 
 function simulationStep() {
+  if (_isPaused) {
+    return;
+  }
   _tick++;
 
-  // Advance messages
   for (const msg of _messages) {
     msg.progress += 0.025;
   }
   _messages = _messages.filter((m) => m.progress < 1.0);
 
-  // Spawn a new message every ~3s (90 frames)
   if (_tick % 90 === 0) {
     const script = MESSAGE_SCRIPTS[_scriptIdx % MESSAGE_SCRIPTS.length];
     spawnMessage(script.from, script.to, script.emoji, script.label);
+    addLog(
+      script.from,
+      _agents.find((a) => a.id === script.from)?.emoji ?? "🤖",
+      "tool_call",
+      `→ ${script.to}: ${script.label}`,
+      Math.floor(Math.random() * 3000 + 500),
+    );
     _scriptIdx++;
-    // Also set messaging status on sender
     const sender = _agents.find((a) => a.id === script.from);
     if (sender && sender.status !== "crashed") {
       sender.status = "messaging";
@@ -338,19 +468,37 @@ function simulationStep() {
     }
   }
 
-  // Walk agents toward meeting room sometimes
+  if (_tick % 150 === 0) {
+    const activeAgents = _agents.filter((a) => a.status !== "crashed");
+    if (activeAgents.length > 0) {
+      const a = activeAgents[Math.floor(Math.random() * activeAgents.length)];
+      const outputs = [
+        "Completed analysis. 14 key insights identified.",
+        "Generated 1,200 word draft. Ready for review.",
+        "All tests passing. Coverage at 91%.",
+        "Dependency vulnerability patched and deployed.",
+        "Market research compiled: 8 competitors analyzed.",
+      ];
+      addLog(
+        a.id,
+        a.emoji,
+        "output",
+        outputs[Math.floor(Math.random() * outputs.length)],
+        Math.floor(Math.random() * 8000 + 1000),
+      );
+    }
+  }
+
   for (const agent of _agents) {
     if (agent.status === "crashed") {
-      agent.thoughtBubble = THOUGHTS[agent.id]?.[_tick % 3] ?? "💥";
       continue;
     }
 
-    // Update thought bubble every 3s
     if (_tick % 80 === Math.abs(agent.id.charCodeAt(0)) % 80) {
       const thoughts = THOUGHTS[agent.id] ?? [];
       if (thoughts.length > 0) {
         agent.thoughtBubble = thoughts[Math.floor(_tick / 80) % thoughts.length];
-        agent.thoughtTimer = 120;
+        agent.thoughtTimer = 100;
       }
     }
     if (agent.thoughtTimer > 0) {
@@ -360,15 +508,13 @@ function simulationStep() {
       }
     }
 
-    // Occasionally walk to meeting room (tile 8,5) and back
     if (_tick % 200 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 200) {
-      const goMeet = Math.random() < 0.3 && agent.status !== "messaging";
+      const goMeet = Math.random() < 0.3;
       if (goMeet) {
-        agent.targetX = 7 + Math.floor(Math.random() * 3);
-        agent.targetY = 5;
+        agent.targetX = 5 + Math.floor(Math.random() * 3);
+        agent.targetY = 4;
         agent.status = "thinking";
       } else {
-        // Return to desk
         agent.targetX = agent.deskX;
         agent.targetY = agent.deskY;
         agent.status = "working";
@@ -376,7 +522,6 @@ function simulationStep() {
       }
     }
 
-    // Move toward target
     const dx = agent.targetX - agent.x;
     const dy = agent.targetY - agent.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -384,18 +529,11 @@ function simulationStep() {
       const speed = 0.06;
       agent.x += (dx / dist) * speed;
       agent.y += (dy / dist) * speed;
-      // Update facing direction
-      if (Math.abs(dx) > Math.abs(dy)) {
-        agent.direction = dx > 0 ? "right" : "left";
-      } else {
-        agent.direction = dy > 0 ? "down" : "up";
-      }
     } else {
       agent.x = agent.targetX;
       agent.y = agent.targetY;
     }
 
-    // Restore messaging status after a bit
     if (agent.status === "messaging" && _tick % 60 === 0) {
       agent.status = "working";
     }
@@ -418,203 +556,472 @@ function startSimulation(update: () => void) {
   _animFrame = requestAnimationFrame(loop);
 }
 
-// ── Floor plan tiles ───────────────────────────────────────────────────────
+// ── Floor zones ────────────────────────────────────────────────────────────
 const FLOOR_TILES = [
-  // Meeting room (center)
   {
-    x: 7,
-    y: 4,
+    x: 0,
+    y: 0,
+    w: COLS,
+    h: 2,
+    label: "Executive Suite",
+    color: "rgba(96,165,250,0.05)",
+    border: "rgba(96,165,250,0.15)",
+  },
+  {
+    x: 5,
+    y: 3,
     w: 4,
     h: 3,
     label: "Meeting Room",
     color: "rgba(255,92,92,0.06)",
     border: "rgba(255,92,92,0.25)",
   },
-  // Dev area (bottom left)
   {
     x: 0,
-    y: 6,
+    y: 5,
     w: 7,
-    h: 3,
+    h: 4,
     label: "Dev Area",
     color: "rgba(34,197,94,0.06)",
     border: "rgba(34,197,94,0.2)",
   },
-  // Content area (bottom right)
   {
-    x: 10,
-    y: 6,
-    w: 8,
-    h: 3,
+    x: 8,
+    y: 5,
+    w: 6,
+    h: 4,
     label: "Content Area",
     color: "rgba(251,146,60,0.06)",
     border: "rgba(251,146,60,0.2)",
   },
-  // Executive area (top)
-  {
-    x: 1,
-    y: 0,
-    w: 16,
-    h: 3,
-    label: "Executive Suite",
-    color: "rgba(96,165,250,0.05)",
-    border: "rgba(96,165,250,0.15)",
-  },
 ];
 
-const DESK_ITEMS: Array<{ x: number; y: number; emoji: string }> = Object.entries(DESKS).map(
-  ([id, pos]) => {
-    const agent = INITIAL_AGENTS.find((a) => a.id === id);
-    return { x: pos.x, y: pos.y, emoji: agent?.deskEmoji ?? "🖥️" };
-  },
-);
+const DESK_ITEMS = Object.entries(DESKS).map(([id, pos]) => {
+  const a = INITIAL_AGENTS.find((x) => x.id === id);
+  return { ...pos, emoji: "🖥️", agent: a };
+});
 
-// ── Render ─────────────────────────────────────────────────────────────────
+// ── Log type helpers ───────────────────────────────────────────────────────
+function logTypeClass(type: LogEntry["type"]) {
+  const map: Record<string, string> = {
+    tool_call: "cd-log--tool",
+    output: "cd-log--output",
+    thinking: "cd-log--thinking",
+    human: "cd-log--human",
+    error: "cd-log--error",
+    system: "cd-log--system",
+  };
+  return map[type] ?? "";
+}
+
+function logTypeIcon(type: LogEntry["type"]) {
+  const map: Record<string, string> = {
+    tool_call: "⚙️",
+    output: "📤",
+    thinking: "💭",
+    human: "👤",
+    error: "❌",
+    system: "🔔",
+  };
+  return map[type] ?? "•";
+}
+
+// ── Main render ────────────────────────────────────────────────────────────
 export type CompanyOfficeProps = {
   requestUpdate?: () => void;
 };
 
 export function renderCompanyOffice(props: CompanyOfficeProps) {
-  // Start the simulation loop
   if (props.requestUpdate) {
     startSimulation(props.requestUpdate);
   }
 
   const W = COLS * TILE;
   const H = ROWS * TILE;
+  const activeProject = PROJECTS.find((p) => p.id === _activeProject) ?? PROJECTS[0];
 
   return html`
     <div class="cd-page cd-page--office">
-      <!-- Top bar -->
+
+      <!-- ── Top bar ─────────────────────────────────────────────────── -->
       <div class="cd-office-bar">
         <div class="cd-office-bar__left">
           <span class="cd-office-bar__title">🏢 Live Office</span>
-          <span class="cd-office-bar__sub">Real-time agent activity simulation</span>
+          <span class="cd-office-bar__sub">Real-time agent simulation</span>
         </div>
+
+        <!-- Project tabs -->
+        <div class="cd-office-projects">
+          ${PROJECTS.map(
+            (p) => html`
+            <button class="cd-office-proj-tab ${_activeProject === p.id ? "cd-office-proj-tab--active" : ""} cd-office-proj-tab--${p.status}"
+              @click=${() => {
+                _activeProject = p.id;
+              }}>
+              ${
+                p.status === "running"
+                  ? html`
+                      <span class="cd-pulse cd-pulse--running"></span>
+                    `
+                  : p.status === "paused"
+                    ? "⏸"
+                    : "✅"
+              }
+              ${p.name}
+              <span class="cd-office-proj-tab__pct">${p.progress}%</span>
+            </button>
+          `,
+          )}
+          <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+            _showAddProject = !_showAddProject;
+          }} title="New Project">
+            + Project
+          </button>
+        </div>
+
+        <!-- Controls -->
         <div class="cd-office-bar__chips">
-          ${_agents.filter((a) => a.status !== "crashed").length} agents active
-          <span class="cd-pulse cd-pulse--running"></span>
-          ${_messages.length > 0 ? html`<span class="cd-office-bar__msgs">${_messages.length} messages in flight</span>` : ""}
+          <button class="cd-btn cd-btn--${_isPaused ? "primary" : "outline"} cd-btn--sm" @click=${() => {
+            _isPaused = !_isPaused;
+          }}>
+            ${_isPaused ? "▶ Resume" : "⏸ Pause"}
+          </button>
+          <span>${_agents.filter((a) => a.status !== "crashed").length} active</span>
+          ${_messages.length > 0 ? html`<span class="cd-office-bar__msgs">${_messages.length} msgs</span>` : ""}
         </div>
       </div>
 
-      <!-- Canvas -->
-      <div class="cd-office-canvas-wrap">
-        <div class="cd-office-canvas" style="width:${W}px;height:${H}px">
-          <!-- Floor grid (CSS background handles grid lines) -->
-          <div class="cd-office-floor" style="width:${W}px;height:${H}px">
+      <!-- Add project inline form -->
+      ${
+        _showAddProject
+          ? html`
+        <div class="cd-office-new-proj">
+          <input class="cd-form-input" placeholder="Project name…"
+            .value=${_newProjectName}
+            @input=${(e: Event) => {
+              _newProjectName = (e.target as HTMLInputElement).value;
+            }} />
+          <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+            if (_newProjectName.trim()) {
+              PROJECTS.push({
+                id: `proj-${Date.now()}`,
+                name: _newProjectName.trim(),
+                status: "running",
+                agents: [],
+                progress: 0,
+                description: "New project",
+              });
+              _newProjectName = "";
+              _showAddProject = false;
+            }
+          }}>Launch</button>
+          <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
+            _showAddProject = false;
+          }}>Cancel</button>
+        </div>
+      `
+          : ""
+      }
 
-            <!-- Zone fills -->
-            ${FLOOR_TILES.map(
-              (zone) => html`
-              <div class="cd-office-zone"
-                style="left:${zone.x * TILE}px;top:${zone.y * TILE}px;width:${zone.w * TILE}px;height:${zone.h * TILE}px;background:${zone.color};border-color:${zone.border}">
-                <span class="cd-office-zone__label">${zone.label}</span>
-              </div>
-            `,
-            )}
+      <!-- ── Main split layout ───────────────────────────────────────── -->
+      <div class="cd-office-split">
 
-            <!-- Desk items -->
-            ${DESK_ITEMS.map(
-              (d) => html`
-              <div class="cd-office-desk-item"
-                style="left:${d.x * TILE + TILE / 2 - 10}px;top:${d.y * TILE + TILE - 16}px">
-                ${d.emoji}
-              </div>
-            `,
-            )}
+        <!-- LEFT: animated office canvas -->
+        <div class="cd-office-canvas-wrap">
+          <!-- Project progress bar -->
+          <div class="cd-office-proj-bar">
+            <span class="cd-office-proj-bar__name">${activeProject.name}</span>
+            <span class="cd-office-proj-bar__desc">${activeProject.description}</span>
+            <div class="cd-office-proj-progress">
+              <div class="cd-office-proj-progress__fill" style="width:${activeProject.progress}%"></div>
+            </div>
+            <span class="cd-office-proj-bar__pct">${activeProject.progress}%</span>
+          </div>
 
-            <!-- Flying messages -->
-            ${_messages.map((msg) => {
-              const t = msg.progress;
-              // Bezier interpolation for curved path
-              const cpX = (msg.fromX + msg.toX) / 2;
-              const cpY = Math.min(msg.fromY, msg.toY) - 60;
-              const px = (1 - t) * (1 - t) * msg.fromX + 2 * (1 - t) * t * cpX + t * t * msg.toX;
-              const py = (1 - t) * (1 - t) * msg.fromY + 2 * (1 - t) * t * cpY + t * t * msg.toY;
-              const opacity = t < 0.1 ? t * 10 : t > 0.85 ? (1 - t) / 0.15 : 1;
-              return html`
-                <div class="cd-office-msg-bubble" style="left:${px - 16}px;top:${py - 16}px;opacity:${opacity}">
-                  ${msg.emoji}
-                  <span class="cd-office-msg-label">${msg.label}</span>
+          <div class="cd-office-canvas" style="width:${W}px;height:${H}px">
+            <div class="cd-office-floor" style="width:${W}px;height:${H}px">
+
+              <!-- Zones -->
+              ${FLOOR_TILES.map(
+                (zone) => html`
+                <div class="cd-office-zone"
+                  style="left:${zone.x * TILE}px;top:${zone.y * TILE}px;width:${zone.w * TILE}px;height:${zone.h * TILE}px;background:${zone.color};border-color:${zone.border}">
+                  <span class="cd-office-zone__label">${zone.label}</span>
                 </div>
-              `;
-            })}
+              `,
+              )}
 
-            <!-- Agents -->
-            ${_agents.map((agent) => {
-              const px = agent.x * TILE;
-              const py = agent.y * TILE;
-              const isMoving =
-                Math.abs(agent.x - agent.targetX) > 0.15 ||
-                Math.abs(agent.y - agent.targetY) > 0.15;
-              return html`
-                <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${isMoving ? "cd-office-agent--moving" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
-                  style="left:${px}px;top:${py}px;border-color:${agent.color}">
-                  <!-- Avatar -->
-                  <div class="cd-office-agent__avatar">${agent.emoji}</div>
-                  <!-- Status indicator -->
-                  <div class="cd-office-agent__status-dot" style="background:${
-                    agent.status === "working" || agent.status === "thinking"
-                      ? "var(--ok)"
-                      : agent.status === "messaging"
-                        ? "var(--accent)"
-                        : agent.status === "idle"
-                          ? "#f59e0b"
-                          : "var(--destructive)"
-                  }"></div>
-                  <!-- Thought bubble -->
-                  ${
-                    agent.thoughtBubble
-                      ? html`
-                    <div class="cd-office-thought">${agent.thoughtBubble}</div>
-                  `
-                      : ""
-                  }
-                  <!-- Name tag -->
-                  <div class="cd-office-agent__tag" style="background:${agent.color}20;border-color:${agent.color}40">
-                    ${agent.name}
+              <!-- Desk items -->
+              ${DESK_ITEMS.map(
+                (d) => html`
+                <div class="cd-office-desk-item" style="left:${d.x * TILE + TILE / 2 - 10}px;top:${d.y * TILE + TILE - 16}px">🖥️</div>
+              `,
+              )}
+
+              <!-- Flying messages -->
+              ${_messages.map((msg) => {
+                const t = msg.progress;
+                const cpX = (msg.fromX + msg.toX) / 2;
+                const cpY = Math.min(msg.fromY, msg.toY) - 50;
+                const px = (1 - t) * (1 - t) * msg.fromX + 2 * (1 - t) * t * cpX + t * t * msg.toX;
+                const py = (1 - t) * (1 - t) * msg.fromY + 2 * (1 - t) * t * cpY + t * t * msg.toY;
+                const opacity = t < 0.1 ? t * 10 : t > 0.85 ? (1 - t) / 0.15 : 1;
+                return html`
+                  <div class="cd-office-msg-bubble" style="left:${px - 16}px;top:${py - 16}px;opacity:${opacity}">
+                    ${msg.emoji}
+                    <span class="cd-office-msg-label">${msg.label}</span>
                   </div>
-                  <!-- Working animation -->
-                  ${
-                    agent.status === "working" || agent.status === "thinking"
-                      ? html`
-                          <div class="cd-office-agent__work-anim"><span></span><span></span><span></span></div>
-                        `
-                      : ""
-                  }
-                  ${
-                    agent.status === "crashed"
-                      ? html`
-                          <div class="cd-office-agent__crash">💥</div>
-                        `
-                      : ""
-                  }
-                </div>
-              `;
-            })}
+                `;
+              })}
 
+              <!-- Agents -->
+              ${_agents.map((agent) => {
+                const isMoving =
+                  Math.abs(agent.x - agent.targetX) > 0.15 ||
+                  Math.abs(agent.y - agent.targetY) > 0.15;
+                return html`
+                  <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${isMoving ? "cd-office-agent--moving" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
+                    style="left:${agent.x * TILE}px;top:${agent.y * TILE}px;border-color:${agent.color}">
+                    <div class="cd-office-agent__avatar">${agent.emoji}</div>
+                    <div class="cd-office-agent__status-dot" style="background:${
+                      agent.status === "working" || agent.status === "thinking"
+                        ? "var(--ok)"
+                        : agent.status === "messaging"
+                          ? "var(--accent)"
+                          : agent.status === "idle"
+                            ? "#f59e0b"
+                            : "var(--destructive)"
+                    }"></div>
+                    ${agent.thoughtBubble ? html`<div class="cd-office-thought">${agent.thoughtBubble}</div>` : ""}
+                    <div class="cd-office-agent__tag" style="background:${agent.color}20;border-color:${agent.color}40">${agent.name}</div>
+                    ${
+                      agent.status === "working" || agent.status === "thinking"
+                        ? html`
+                            <div class="cd-office-agent__work-anim"><span></span><span></span><span></span></div>
+                          `
+                        : ""
+                    }
+                    ${
+                      agent.status === "crashed"
+                        ? html`
+                            <div class="cd-office-agent__crash">💥</div>
+                          `
+                        : ""
+                    }
+                  </div>
+                `;
+              })}
+
+            </div>
+          </div>
+
+          <!-- Activity feed (bottom) -->
+          <div class="cd-office-feed">
+            <div class="cd-office-feed__list">
+              ${_agents.map(
+                (agent) => html`
+                <div class="cd-office-feed__row ${agent.status === "crashed" ? "cd-office-feed__row--crashed" : ""}">
+                  <span class="cd-office-feed__emoji">${agent.emoji}</span>
+                  <span class="cd-office-feed__name">${agent.name}</span>
+                  <span class="cd-office-feed__activity">${agent.activity}</span>
+                  <span class="cd-pulse cd-pulse--${agent.status === "working" || agent.status === "thinking" ? "running" : agent.status === "crashed" ? "crashed" : "idle"}"></span>
+                </div>
+              `,
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Activity feed -->
-      <div class="cd-office-feed">
-        <div class="cd-office-feed__title">Activity Feed</div>
-        <div class="cd-office-feed__list">
-          ${_agents
-            .slice()
-            .toSorted((a, b) => a.id.localeCompare(b.id))
-            .map(
-              (agent) => html`
-            <div class="cd-office-feed__row ${agent.status === "crashed" ? "cd-office-feed__row--crashed" : ""}">
-              <span class="cd-office-feed__emoji">${agent.emoji}</span>
-              <span class="cd-office-feed__name">${agent.name}</span>
-              <span class="cd-office-feed__activity">${agent.activity}</span>
-              <span class="cd-pulse cd-pulse--${agent.status === "working" || agent.status === "thinking" ? "running" : agent.status === "crashed" ? "crashed" : agent.status === "messaging" ? "running" : "idle"}"></span>
+        <!-- RIGHT: execution panel ─────────────────────────────────── -->
+        <div class="cd-office-panel">
+
+          <!-- Panel tabs -->
+          <div class="cd-office-panel__tabs">
+            <button class="cd-office-panel__tab ${_rightTab === "log" ? "cd-office-panel__tab--active" : ""}"
+              @click=${() => {
+                _rightTab = "log";
+              }}>📋 Execution Log</button>
+            <button class="cd-office-panel__tab ${_rightTab === "output" ? "cd-office-panel__tab--active" : ""}"
+              @click=${() => {
+                _rightTab = "output";
+              }}>📤 Outputs</button>
+            <button class="cd-office-panel__tab ${_rightTab === "human" ? "cd-office-panel__tab--active" : ""}"
+              @click=${() => {
+                _rightTab = "human";
+              }}>👤 Human Input</button>
+          </div>
+
+          <!-- Execution Log tab -->
+          ${
+            _rightTab === "log"
+              ? html`
+            <div class="cd-office-log">
+              ${[..._execLog].toReversed().map(
+                (entry) => html`
+                <div class="cd-log-entry ${logTypeClass(entry.type)}">
+                  <div class="cd-log-entry__header">
+                    <span class="cd-log-entry__icon">${logTypeIcon(entry.type)}</span>
+                    <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agent}</span>
+                    <span class="cd-log-entry__ts">${entry.ts}</span>
+                    ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
+                    ${entry.duration ? html`<span class="cd-log-entry__duration">${entry.duration}ms</span>` : ""}
+                  </div>
+                  <div class="cd-log-entry__content">${entry.content}</div>
+                </div>
+              `,
+              )}
             </div>
-          `,
-            )}
+          `
+              : ""
+          }
+
+          <!-- Outputs tab -->
+          ${
+            _rightTab === "output"
+              ? html`
+            <div class="cd-office-outputs">
+              ${_execLog
+                .filter((e) => e.type === "output")
+                .toReversed()
+                .map(
+                  (entry) => html`
+                <div class="cd-output-card">
+                  <div class="cd-output-card__header">
+                    <span>${entry.agentEmoji} ${entry.agent}</span>
+                    <span class="cd-output-card__ts">${entry.ts}</span>
+                    ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
+                  </div>
+                  <div class="cd-output-card__content">${entry.content}</div>
+                  <div class="cd-output-card__actions">
+                    <button class="cd-btn cd-btn--ghost cd-btn--xs">📋 Copy</button>
+                    <button class="cd-btn cd-btn--ghost cd-btn--xs">📤 Export</button>
+                    <button class="cd-btn cd-btn--ghost cd-btn--xs">✅ Approve</button>
+                    <button class="cd-btn cd-btn--ghost cd-btn--xs">↩ Request revision</button>
+                  </div>
+                </div>
+              `,
+                )}
+              ${
+                _execLog.filter((e) => e.type === "output").length === 0
+                  ? html`
+                      <div class="cd-office-empty">No outputs yet — agents are working…</div>
+                    `
+                  : ""
+              }
+            </div>
+          `
+              : ""
+          }
+
+          <!-- Human Input tab -->
+          ${
+            _rightTab === "human"
+              ? html`
+            <div class="cd-office-human">
+              <div class="cd-human-desc">
+                Send a message, override a decision, or stop the fleet. Your input is logged and shown to the relevant agent(s).
+              </div>
+
+              <!-- Agent selector -->
+              <label class="cd-form-label">Send to agent</label>
+              <div class="cd-human-agents">
+                ${_agents.map(
+                  (a) => html`
+                  <button class="cd-human-agent-btn ${_selectedAgent === a.id ? "cd-human-agent-btn--active" : ""}"
+                    style="border-color:${_selectedAgent === a.id ? a.color : "var(--border)"}"
+                    @click=${() => {
+                      _selectedAgent = a.id;
+                    }}>
+                    ${a.emoji} ${a.name}
+                  </button>
+                `,
+                )}
+                <button class="cd-human-agent-btn ${_selectedAgent === "all" ? "cd-human-agent-btn--active" : ""}"
+                  @click=${() => {
+                    _selectedAgent = "all";
+                  }}>
+                  📢 Broadcast all
+                </button>
+              </div>
+
+              <!-- Message input -->
+              <label class="cd-form-label">Message</label>
+              <textarea class="cd-form-textarea" rows="4"
+                placeholder="Type your instruction, question, or override…"
+                .value=${_humanInput}
+                @input=${(e: Event) => {
+                  _humanInput = (e.target as HTMLTextAreaElement).value;
+                }}></textarea>
+
+              <!-- Actions -->
+              <div class="cd-human-actions">
+                <button class="cd-btn cd-btn--primary" @click=${() => {
+                  if (!_humanInput.trim()) {
+                    return;
+                  }
+                  const target = _selectedAgent === "all" ? "all agents" : _selectedAgent;
+                  const targetAgent = _agents.find((a) => a.id === _selectedAgent);
+                  addLog("human", "👤", "human", `[To ${target}] ${_humanInput}`, undefined);
+                  if (targetAgent) {
+                    targetAgent.activity = "Human override received";
+                    targetAgent.status = "thinking";
+                  }
+                  _humanInput = "";
+                }}>
+                  📨 Send Message
+                </button>
+                <button class="cd-btn cd-btn--outline" @click=${() => {
+                  _isPaused = true;
+                  addLog("human", "👤", "human", "[Human] Fleet paused by operator.", undefined);
+                }}>
+                  ⏸ Pause Fleet
+                </button>
+                <button class="cd-btn cd-btn--destructive" @click=${() => {
+                  const a = _agents.find((x) => x.id === _selectedAgent);
+                  if (a) {
+                    a.status = "idle";
+                    a.activity = "Stopped by human";
+                    addLog("human", "👤", "system", `[Human] ${a.name} stopped.`, undefined);
+                  }
+                }}>
+                  ⛔ Stop Agent
+                </button>
+              </div>
+
+              <!-- Pending human reviews -->
+              <div class="cd-human-reviews">
+                <div class="cd-human-reviews__title">⚠️ Pending Human Review (2)</div>
+                <div class="cd-human-review-item">
+                  <div class="cd-human-review-item__title">writing-beta requests approval to publish blog post</div>
+                  <div class="cd-human-review-item__desc">"AI Agents in 2026" — 2,480 words, SEO-optimized, pending final approval before publishing to CMS.</div>
+                  <div class="cd-human-review-item__actions">
+                    <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                      addLog(
+                        "human",
+                        "👤",
+                        "human",
+                        "✅ Approved: 'AI Agents in 2026' for publish.",
+                      );
+                    }}>✅ Approve & Publish</button>
+                    <button class="cd-btn cd-btn--outline cd-btn--sm">📝 Request Revision</button>
+                    <button class="cd-btn cd-btn--ghost cd-btn--sm">👁 Preview</button>
+                  </div>
+                </div>
+                <div class="cd-human-review-item">
+                  <div class="cd-human-review-item__title">code-agent wants to deploy v1.2.0 to production</div>
+                  <div class="cd-human-review-item__desc">PR #42 merged. All tests passing. Requesting authorization for production deployment.</div>
+                  <div class="cd-human-review-item__actions">
+                    <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                      addLog("human", "👤", "human", "✅ Approved: production deploy v1.2.0.");
+                    }}>✅ Approve Deploy</button>
+                    <button class="cd-btn cd-btn--outline cd-btn--sm">⏸ Hold</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `
+              : ""
+          }
         </div>
       </div>
     </div>
