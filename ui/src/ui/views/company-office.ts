@@ -390,12 +390,12 @@ const PROJECTS: Project[] = [
 
 // ── Human input state ──────────────────────────────────────────────────────
 let _humanInput = "";
-let _selectedAgent = "founder-ai";
 let _isPaused = false;
 let _activeProject = "alpha";
 let _showAddProject = false;
 let _newProjectName = "";
 let _rightTab: "log" | "output" | "human" = "log";
+let _logAgentFilter: string = "all"; // "all" or agent id
 
 // ── Animation state ────────────────────────────────────────────────────────
 let _agents: OfficeAgent[] = INITIAL_AGENTS.map((a) => ({ ...a }));
@@ -438,11 +438,11 @@ function addLog(
       id: `bubble-${_bubbleIdCounter++}`,
       agentId: agent,
       text: shortText,
-      timer: 220,
+      timer: 340,
       color,
     });
-    if (_canvasBubbles.length > 6) {
-      _canvasBubbles = _canvasBubbles.slice(-6);
+    if (_canvasBubbles.length > 5) {
+      _canvasBubbles = _canvasBubbles.slice(-5);
     }
   }
 }
@@ -812,10 +812,10 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 if (!agent) {
                   return "";
                 }
-                const fadeIn = (220 - bubble.timer) / 20;
-                const fadeOut = bubble.timer < 40 ? bubble.timer / 40 : 1;
+                const fadeIn = (340 - bubble.timer) / 20;
+                const fadeOut = bubble.timer < 50 ? bubble.timer / 50 : 1;
                 const opacity = Math.min(fadeIn, fadeOut);
-                const offsetY = -TILE * 1.2 - (220 - bubble.timer) * 0.12;
+                const offsetY = -TILE * 1.2 - (340 - bubble.timer) * 0.1;
                 return html`
                   <div class="cd-canvas-bubble" style="
                     left:${agent.x * TILE - 60}px;
@@ -904,16 +904,37 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             <button class="cd-office-panel__tab ${_rightTab === "human" ? "cd-office-panel__tab--active" : ""}"
               @click=${() => {
                 _rightTab = "human";
-              }}>👤 Human Input</button>
+              }}>👤 Talk to Company</button>
           </div>
 
-          <!-- Execution Log tab -->
+          <!-- Execution Log tab — with per-agent filter -->
           ${
             _rightTab === "log"
               ? html`
+            <!-- Agent filter row -->
+            <div class="cd-log-agent-filter">
+              <button class="cd-log-af-btn ${_logAgentFilter === "all" ? "cd-log-af-btn--active" : ""}"
+                @click=${() => {
+                  _logAgentFilter = "all";
+                }}>All</button>
+              ${_agents.map(
+                (a) => html`
+                <button class="cd-log-af-btn ${_logAgentFilter === a.id ? "cd-log-af-btn--active" : ""}"
+                  style="${_logAgentFilter === a.id ? `border-color:${a.color};color:${a.color}` : ""}"
+                  @click=${() => {
+                    _logAgentFilter = _logAgentFilter === a.id ? "all" : a.id;
+                  }}>
+                  ${a.emoji}
+                </button>
+              `,
+              )}
+            </div>
             <div class="cd-office-log">
-              ${[..._execLog].toReversed().map(
-                (entry) => html`
+              ${[..._execLog]
+                .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
+                .toReversed()
+                .map(
+                  (entry) => html`
                 <div class="cd-log-entry ${logTypeClass(entry.type)}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type)}</span>
@@ -925,7 +946,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   <div class="cd-log-entry__content">${entry.content}</div>
                 </div>
               `,
-              )}
+                )}
             </div>
           `
               : ""
@@ -950,9 +971,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   <div class="cd-output-card__content">${entry.content}</div>
                   <div class="cd-output-card__actions">
                     <button class="cd-btn cd-btn--ghost cd-btn--xs">📋 Copy</button>
-                    <button class="cd-btn cd-btn--ghost cd-btn--xs">📤 Export</button>
                     <button class="cd-btn cd-btn--ghost cd-btn--xs">✅ Approve</button>
-                    <button class="cd-btn cd-btn--ghost cd-btn--xs">↩ Request revision</button>
+                    <button class="cd-btn cd-btn--ghost cd-btn--xs">↩ Revise</button>
                   </div>
                 </div>
               `,
@@ -969,87 +989,50 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               : ""
           }
 
-          <!-- Human Input tab -->
+          <!-- Talk to Company tab -->
           ${
             _rightTab === "human"
               ? html`
             <div class="cd-office-human">
               <div class="cd-human-desc">
-                Send a message, override a decision, or stop the fleet. Your input is logged and shown to the relevant agent(s).
+                Send a message to your company. The relevant agent(s) will receive and respond to your instruction.
               </div>
-
-              <!-- Agent selector -->
-              <label class="cd-form-label">Send to agent</label>
-              <div class="cd-human-agents">
-                ${_agents.map(
-                  (a) => html`
-                  <button class="cd-human-agent-btn ${_selectedAgent === a.id ? "cd-human-agent-btn--active" : ""}"
-                    style="border-color:${_selectedAgent === a.id ? a.color : "var(--border)"}"
-                    @click=${() => {
-                      _selectedAgent = a.id;
-                    }}>
-                    ${a.emoji} ${a.name}
-                  </button>
-                `,
-                )}
-                <button class="cd-human-agent-btn ${_selectedAgent === "all" ? "cd-human-agent-btn--active" : ""}"
-                  @click=${() => {
-                    _selectedAgent = "all";
-                  }}>
-                  📢 Broadcast all
-                </button>
-              </div>
-
-              <!-- Message input -->
-              <label class="cd-form-label">Message</label>
+              <label class="cd-form-label">Message to Company</label>
               <textarea class="cd-form-textarea" rows="4"
-                placeholder="Type your instruction, question, or override…"
+                placeholder="Type your instruction, question, or strategic directive…"
                 .value=${_humanInput}
                 @input=${(e: Event) => {
                   _humanInput = (e.target as HTMLTextAreaElement).value;
                 }}></textarea>
-
-              <!-- Actions -->
               <div class="cd-human-actions">
                 <button class="cd-btn cd-btn--primary" @click=${() => {
                   if (!_humanInput.trim()) {
                     return;
                   }
-                  const target = _selectedAgent === "all" ? "all agents" : _selectedAgent;
-                  const targetAgent = _agents.find((a) => a.id === _selectedAgent);
-                  addLog("human", "👤", "human", `[To ${target}] ${_humanInput}`, undefined);
-                  if (targetAgent) {
-                    targetAgent.activity = "Human override received";
-                    targetAgent.status = "thinking";
+                  addLog("human", "👤", "human", `[Founder] ${_humanInput}`);
+                  const founderAgent = _agents.find((a) => a.id === "founder-ai");
+                  if (founderAgent) {
+                    founderAgent.activity = "Processing founder input";
+                    founderAgent.status = "thinking";
                   }
                   _humanInput = "";
-                }}>
-                  📨 Send Message
-                </button>
+                }}>📨 Send</button>
                 <button class="cd-btn cd-btn--outline" @click=${() => {
                   _isPaused = true;
-                  addLog("human", "👤", "human", "[Human] Fleet paused by operator.", undefined);
-                }}>
-                  ⏸ Pause Fleet
-                </button>
-                <button class="cd-btn cd-btn--destructive" @click=${() => {
-                  const a = _agents.find((x) => x.id === _selectedAgent);
-                  if (a) {
-                    a.status = "idle";
-                    a.activity = "Stopped by human";
-                    addLog("human", "👤", "system", `[Human] ${a.name} stopped.`, undefined);
-                  }
-                }}>
-                  ⛔ Stop Agent
-                </button>
+                  addLog("human", "👤", "system", "[Founder] Fleet paused.");
+                }}>⏸ Pause Fleet</button>
+                <button class="cd-btn cd-btn--outline" @click=${() => {
+                  _isPaused = false;
+                  addLog("human", "👤", "system", "[Founder] Fleet resumed.");
+                }}>▶ Resume</button>
               </div>
 
-              <!-- Pending human reviews -->
+              <!-- Pending reviews -->
               <div class="cd-human-reviews">
-                <div class="cd-human-reviews__title">⚠️ Pending Human Review (2)</div>
+                <div class="cd-human-reviews__title">⚠️ Pending Review (2)</div>
                 <div class="cd-human-review-item">
-                  <div class="cd-human-review-item__title">writing-beta requests approval to publish blog post</div>
-                  <div class="cd-human-review-item__desc">"AI Agents in 2026" — 2,480 words, SEO-optimized, pending final approval before publishing to CMS.</div>
+                  <div class="cd-human-review-item__title">writing-beta → Approve blog post</div>
+                  <div class="cd-human-review-item__desc">"AI Agents in 2026" — 2,480 words, ready to publish.</div>
                   <div class="cd-human-review-item__actions">
                     <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
                       addLog(
@@ -1058,18 +1041,17 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                         "human",
                         "✅ Approved: 'AI Agents in 2026' for publish.",
                       );
-                    }}>✅ Approve & Publish</button>
-                    <button class="cd-btn cd-btn--outline cd-btn--sm">📝 Request Revision</button>
-                    <button class="cd-btn cd-btn--ghost cd-btn--sm">👁 Preview</button>
+                    }}>✅ Approve</button>
+                    <button class="cd-btn cd-btn--outline cd-btn--sm">↩ Revise</button>
                   </div>
                 </div>
                 <div class="cd-human-review-item">
-                  <div class="cd-human-review-item__title">code-agent wants to deploy v1.2.0 to production</div>
-                  <div class="cd-human-review-item__desc">PR #42 merged. All tests passing. Requesting authorization for production deployment.</div>
+                  <div class="cd-human-review-item__title">code-agent → Approve deploy v1.2.0</div>
+                  <div class="cd-human-review-item__desc">PR #42 merged. All tests passing.</div>
                   <div class="cd-human-review-item__actions">
                     <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
                       addLog("human", "👤", "human", "✅ Approved: production deploy v1.2.0.");
-                    }}>✅ Approve Deploy</button>
+                    }}>✅ Approve</button>
                     <button class="cd-btn cd-btn--outline cd-btn--sm">⏸ Hold</button>
                   </div>
                 </div>

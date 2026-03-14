@@ -10,15 +10,7 @@ export const TAB_GROUPS = [
   { label: "agent", tabs: ["agents", "skills", "nodes"] },
   {
     label: "company",
-    tabs: [
-      "companyOverview",
-      "companyTeams",
-      "companyFleet",
-      "companyOrgChart",
-      "companyOffice",
-      "roleHub",
-      "companyTasks",
-    ],
+    tabs: ["companyOverview", "companyOrgChart", "companyOffice"],
   },
   {
     label: "settings",

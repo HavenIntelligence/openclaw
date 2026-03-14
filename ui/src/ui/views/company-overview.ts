@@ -1,7 +1,10 @@
 import { html } from "lit";
-import { icons } from "../icons.ts";
 
-// ── Mutable company registry ───────────────────────────────────────────────
+// ── Sub-tab ────────────────────────────────────────────────────────────────
+type OverviewTab = "profile" | "teams" | "fleet" | "roles" | "tasks" | "chats";
+let _subTab: OverviewTab = "profile";
+
+// ── Company data ───────────────────────────────────────────────────────────
 type CompanyProfile = {
   id: string;
   name: string;
@@ -15,24 +18,6 @@ type CompanyProfile = {
   values: { emoji: string; label: string; desc: string }[];
   businessModel: string;
   currentFocus: string[];
-};
-
-type CompanyStatus = {
-  employees: number;
-  netWorth: number;
-  cashBalance: number;
-  monthlyRevenue: number;
-  monthlyBurn: number;
-  runwayMonths: number;
-  mrr: number;
-  arr: number;
-  tasksToday: number;
-  tokensToday: number;
-  uptime: string;
-  health: "healthy" | "degraded" | "critical";
-  activeAgents: number;
-  crashedAgents: number;
-  idleAgents: number;
 };
 
 let _companies: CompanyProfile[] = [
@@ -62,27 +47,6 @@ let _companies: CompanyProfile[] = [
   },
 ];
 
-let _statuses: Record<string, CompanyStatus> = {
-  acme: {
-    employees: 9,
-    netWorth: 2_400_000,
-    cashBalance: 840_000,
-    monthlyRevenue: 180_000,
-    monthlyBurn: 95_000,
-    runwayMonths: 8.8,
-    mrr: 42_000,
-    arr: 504_000,
-    tasksToday: 142,
-    tokensToday: 2_840_000,
-    uptime: "99.4%",
-    health: "degraded",
-    activeAgents: 6,
-    crashedAgents: 1,
-    idleAgents: 2,
-  },
-};
-
-// ── UI state ───────────────────────────────────────────────────────────────
 let _activeCompanyId = "acme";
 let _editing = false;
 let _editDraft: CompanyProfile | null = null;
@@ -91,197 +55,263 @@ let _newCompanyName = "";
 let _newCompanyIndustry = "";
 let _newCompanyStage = "Pre-seed";
 
-const DEMO_EVENTS = [
-  {
-    time: "2m ago",
-    icon: "💥",
-    msg: "review-gamma crashed — supervisor restarting (attempt 2/3)",
-    level: "error",
-  },
-  {
-    time: "5m ago",
-    icon: "✅",
-    msg: "code-agent merged PR #42: add retry logic to MCP client",
-    level: "ok",
-  },
-  {
-    time: "11m ago",
-    icon: "📄",
-    msg: "writing-beta published: 'AI Agents in 2026' blog post",
-    level: "ok",
-  },
-  {
-    time: "18m ago",
-    icon: "🔍",
-    msg: "research-alpha completed competitor analysis (14 sources)",
-    level: "ok",
-  },
-  {
-    time: "32m ago",
-    icon: "📊",
-    msg: "ops-prime filed Q1 OKR report — 87% target completion",
-    level: "ok",
-  },
-  {
-    time: "1h ago",
-    icon: "🚀",
-    msg: "Project Alpha kicked off — 3 agents assigned",
-    level: "info",
-  },
-];
+// ── Agent data (lifecycle + trace) ────────────────────────────────────────
+type AgentLifecycleState = "created" | "running" | "paused" | "crashed" | "archived";
 
-const DEMO_SUPERVISION_TREE = [
+type AgentRecord = {
+  id: string;
+  name: string;
+  emoji: string;
+  role: string;
+  team: string;
+  model: string;
+  color: string;
+  status: AgentLifecycleState;
+  // Lifecycle
+  createdAt: string;
+  lastActiveAt: string;
+  totalTasksCompleted: number;
+  totalTokensUsed: number;
+  uptimePct: number;
+  // Workspace
+  currentWorkspace: string;
+  currentApp: string;
+  currentUrl: string;
+  // Privileges
+  tools: string[];
+  skills: string[];
+  computeBudget: string;
+  memoryAccess: "read" | "read-write" | "none";
+  networkAccess: boolean;
+  fileAccess: string[];
+  // State chain (high-level trace summary)
+  stateChain: { ts: string; state: string; note: string }[];
+  // Recent messages
+  recentMessages: { ts: string; from: string; content: string }[];
+};
+
+const AGENTS: AgentRecord[] = [
   {
-    id: "root",
-    label: "ClawDock Root Supervisor",
+    id: "founder-ai",
+    name: "Founder AI",
+    emoji: "👑",
+    role: "CEO / Founder",
+    team: "Executive",
+    model: "claude-opus-4-5",
+    color: "#ff5c5c",
+    status: "running",
+    createdAt: "2026-01-05 09:00",
+    lastActiveAt: "just now",
+    totalTasksCompleted: 214,
+    totalTokensUsed: 8_420_000,
+    uptimePct: 99.1,
+    currentWorkspace: "Dashboard · Company Overview",
+    currentApp: "ClawDock Control",
+    currentUrl: "/company",
+    tools: ["company-dashboard", "task-manager", "send-message"],
+    skills: ["strategic-planning", "fundraising", "hiring"],
+    computeBudget: "unlimited",
+    memoryAccess: "read-write",
+    networkAccess: true,
+    fileAccess: ["/company/*", "/shared/*"],
+    stateChain: [
+      { ts: "09:41", state: "system:boot", note: "Agent initialized, context loaded" },
+      { ts: "09:42", state: "thinking", note: "Reading Q1 OKR report from ops-prime" },
+      { ts: "09:44", state: "working", note: "Composing strategy brief for content-director" },
+      { ts: "09:47", state: "messaging", note: "Sent strategy brief → content-director" },
+      { ts: "09:48", state: "idle:waiting", note: "Waiting for CMO response" },
+      { ts: "09:51", state: "working", note: "Reviewing PR #42 diff (code-agent)" },
+      { ts: "09:53", state: "human:paused", note: "Operator stopped for context review" },
+      { ts: "09:54", state: "running", note: "Resumed after human override" },
+    ],
+    recentMessages: [
+      { ts: "09:47", from: "→ content-director", content: "📋 Strategy brief for Q1 content push" },
+      { ts: "09:48", from: "← ops-prime", content: "📊 OKR report Q1 — 87% target complete" },
+      { ts: "09:52", from: "← code-agent", content: "💻 PR #42 ready for review" },
+    ],
+  },
+  {
+    id: "ops-prime",
+    name: "Ops Prime",
+    emoji: "🏢",
     role: "COO",
-    status: "healthy" as const,
-    children: [
-      {
-        id: "team-content",
-        label: "content-pipeline",
-        role: "Department Head",
-        strategy: "one-for-one",
-        status: "healthy" as const,
-        children: [
-          {
-            id: "research-alpha",
-            label: "research-alpha",
-            role: "Researcher",
-            status: "healthy" as const,
-            model: "claude-opus-4-5",
-            tasks: 12,
-          },
-          {
-            id: "writing-beta",
-            label: "writing-beta",
-            role: "Writer",
-            status: "healthy" as const,
-            model: "claude-sonnet-4-5",
-            tasks: 8,
-          },
-          {
-            id: "review-gamma",
-            label: "review-gamma",
-            role: "Reviewer",
-            status: "crashed" as const,
-            model: "claude-haiku-4-5",
-            tasks: 0,
-          },
-        ],
-      },
-      {
-        id: "team-devops",
-        label: "devops",
-        role: "Department Head",
-        strategy: "rest-for-one",
-        status: "healthy" as const,
-        children: [
-          {
-            id: "code-agent",
-            label: "code-agent",
-            role: "Engineer",
-            status: "healthy" as const,
-            model: "claude-opus-4-5",
-            tasks: 34,
-          },
-          {
-            id: "test-runner",
-            label: "test-runner",
-            role: "QA",
-            status: "idle" as const,
-            model: "gpt-4o",
-            tasks: 0,
-          },
-        ],
-      },
-      {
-        id: "pa",
-        label: "nanoclaw-primary",
-        role: "Personal Assistant",
-        strategy: "singleton",
-        status: "idle" as const,
-        children: [],
-      },
+    team: "Executive",
+    model: "claude-opus-4-5",
+    color: "#60a5fa",
+    status: "running",
+    createdAt: "2026-01-05 09:00",
+    lastActiveAt: "2m ago",
+    totalTasksCompleted: 189,
+    totalTokensUsed: 5_100_000,
+    uptimePct: 98.4,
+    currentWorkspace: "OKR Dashboard",
+    currentApp: "Internal Analytics",
+    currentUrl: "/analytics/okr",
+    tools: ["task-manager", "send-message", "calendar"],
+    skills: ["operations", "project-management", "reporting"],
+    computeBudget: "500K tokens/day",
+    memoryAccess: "read-write",
+    networkAccess: true,
+    fileAccess: ["/ops/*", "/shared/*"],
+    stateChain: [
+      { ts: "09:40", state: "working", note: "Generating Q1 OKR report" },
+      { ts: "09:45", state: "messaging", note: "Sent OKR report → founder-ai" },
+      { ts: "09:46", state: "working", note: "Delegating deploy task to code-agent" },
+      { ts: "09:50", state: "idle:waiting", note: "Waiting for code-agent test results" },
+    ],
+    recentMessages: [
+      { ts: "09:45", from: "→ founder-ai", content: "📊 Q1 OKR report filed" },
+      { ts: "09:46", from: "→ code-agent", content: "⚙️ Deploy task: v1.2.0 to staging" },
+    ],
+  },
+  {
+    id: "research-alpha",
+    name: "Research Alpha",
+    emoji: "🔍",
+    role: "Researcher",
+    team: "Content",
+    model: "claude-opus-4-5",
+    color: "#f97316",
+    status: "running",
+    createdAt: "2026-01-10 14:00",
+    lastActiveAt: "30s ago",
+    totalTasksCompleted: 142,
+    totalTokensUsed: 12_800_000,
+    uptimePct: 97.2,
+    currentWorkspace: "Web Research",
+    currentApp: "Browser (headless)",
+    currentUrl: "perplexity.ai",
+    tools: ["web-search", "read-url", "save-note"],
+    skills: ["research", "data-extraction", "summarization"],
+    computeBudget: "1M tokens/day",
+    memoryAccess: "read-write",
+    networkAccess: true,
+    fileAccess: ["/research/*", "/shared/data/*"],
+    stateChain: [
+      { ts: "09:41", state: "working", note: "Received task: competitor pricing research" },
+      { ts: "09:41", state: "tool:web_search", note: "Query: 'AI SaaS pricing 2026 comparison'" },
+      { ts: "09:42", state: "thinking", note: "Analyzing 18 sources, extracting pricing tiers" },
+      { ts: "09:43", state: "output", note: "Sent research findings → writing-beta" },
+    ],
+    recentMessages: [
+      { ts: "09:41", from: "← content-director", content: "🔍 Task: Competitor pricing analysis" },
+      { ts: "09:43", from: "→ writing-beta", content: "📄 Research: 18 sources, pricing matrix" },
+    ],
+  },
+  {
+    id: "code-agent",
+    name: "Code Agent",
+    emoji: "💻",
+    role: "Software Engineer",
+    team: "DevOps",
+    model: "claude-opus-4-5",
+    color: "#22c55e",
+    status: "running",
+    createdAt: "2026-01-08 11:00",
+    lastActiveAt: "1m ago",
+    totalTasksCompleted: 98,
+    totalTokensUsed: 9_300_000,
+    uptimePct: 99.8,
+    currentWorkspace: "GitHub / VSCode",
+    currentApp: "Code Editor (headless)",
+    currentUrl: "github.com/acme-ai/core/pull/42",
+    tools: ["bash", "read-file", "write-file", "github-pr", "run-tests"],
+    skills: ["typescript", "node", "testing", "ci-cd"],
+    computeBudget: "800K tokens/day",
+    memoryAccess: "read-write",
+    networkAccess: true,
+    fileAccess: ["/repo/*"],
+    stateChain: [
+      { ts: "09:42", state: "working", note: "Running test suite npm run test --coverage" },
+      { ts: "09:42", state: "tool:bash", note: "142 passed, 2 failed — MCP retry + auth token" },
+      { ts: "09:43", state: "thinking", note: "Diagnosing failures: timeout + 401 response" },
+      { ts: "09:44", state: "working", note: "Fixing retry logic in mcp-client.ts" },
+      { ts: "09:46", state: "output", note: "PR #42 opened — awaiting ops-prime approval" },
+    ],
+    recentMessages: [
+      { ts: "09:42", from: "← ops-prime", content: "⚙️ Deploy task: prepare v1.2.0" },
+      { ts: "09:46", from: "→ ops-prime", content: "💻 PR #42 ready, all tests green" },
+    ],
+  },
+  {
+    id: "review-gamma",
+    name: "Reviewer",
+    emoji: "📝",
+    role: "Content Reviewer",
+    team: "Content",
+    model: "claude-haiku-4-5",
+    color: "#ef4444",
+    status: "crashed",
+    createdAt: "2026-02-01 10:00",
+    lastActiveAt: "8m ago",
+    totalTasksCompleted: 44,
+    totalTokensUsed: 1_200_000,
+    uptimePct: 78.3,
+    currentWorkspace: "—",
+    currentApp: "—",
+    currentUrl: "—",
+    tools: ["read-file", "write-file", "send-message"],
+    skills: ["editing", "seo", "fact-checking"],
+    computeBudget: "200K tokens/day",
+    memoryAccess: "read",
+    networkAccess: false,
+    fileAccess: ["/content/drafts/*"],
+    stateChain: [
+      { ts: "09:38", state: "working", note: "Reviewing draft: 'AI Agents in 2026'" },
+      { ts: "09:39", state: "thinking", note: "Checking SEO score and fact-check sources" },
+      { ts: "09:40", state: "error:crash", note: "Context window exceeded (128K limit hit)" },
+      { ts: "09:40", state: "system:restart", note: "Supervisor restart attempt 1/3" },
+      { ts: "09:41", state: "error:crash", note: "Restart failed — same context too large" },
+      { ts: "09:41", state: "system:restart", note: "Supervisor restart attempt 2/3 (pending)" },
+    ],
+    recentMessages: [
+      { ts: "09:38", from: "← writing-beta", content: "✍️ Draft ready for review" },
+      { ts: "09:40", from: "→ supervisor", content: "❌ CRASH: context window exceeded" },
     ],
   },
 ];
 
+let _selectedAgentId: string | null = null;
+let _agentDetailTab: "trace" | "messages" | "privileges" = "trace";
+
 // ── Helpers ────────────────────────────────────────────────────────────────
-function fmt(n: number, prefix = "") {
-  if (n >= 1_000_000) {
-    return `${prefix}${(n / 1_000_000).toFixed(1)}M`;
+function statusColor(s: AgentLifecycleState) {
+  switch (s) {
+    case "running":
+      return "var(--ok)";
+    case "paused":
+      return "#f59e0b";
+    case "crashed":
+      return "var(--destructive)";
+    case "archived":
+      return "var(--muted-foreground)";
+    default:
+      return "var(--muted-foreground)";
   }
-  if (n >= 1_000) {
-    return `${prefix}${(n / 1_000).toFixed(0)}K`;
-  }
-  return `${prefix}${n}`;
 }
 
-function statusColor(s: string) {
-  if (s === "healthy") {
+function stateColor(state: string) {
+  if (state.startsWith("error") || state.startsWith("crash")) {
+    return "#ef4444";
+  }
+  if (state.startsWith("output") || state === "running") {
     return "var(--ok)";
   }
-  if (s === "crashed") {
-    return "var(--destructive)";
+  if (state.startsWith("tool")) {
+    return "#a78bfa";
   }
-  return "#f59e0b";
+  if (state.startsWith("thinking")) {
+    return "#60a5fa";
+  }
+  if (state.startsWith("human")) {
+    return "#f59e0b";
+  }
+  if (state.startsWith("system")) {
+    return "var(--muted-foreground)";
+  }
+  return "var(--text-strong)";
 }
 
-function strategyBadge(strategy?: string) {
-  const map: Record<string, { label: string; cls: string }> = {
-    "one-for-one": { label: "1:1", cls: "cd-badge--strategy-ofo" },
-    "one-for-all": { label: "1:all", cls: "cd-badge--strategy-ofa" },
-    "rest-for-one": { label: "rest:1", cls: "cd-badge--strategy-rfo" },
-    singleton: { label: "singleton", cls: "cd-badge--strategy-sg" },
-  };
-  const s = map[strategy ?? ""] ?? { label: strategy ?? "", cls: "" };
-  return html`<span class="cd-badge ${s.cls}">${s.label}</span>`;
-}
-
-function renderAgentLeaf(agent: {
-  id: string;
-  label: string;
-  role: string;
-  status: string;
-  model?: string;
-  tasks?: number;
-}) {
-  return html`
-    <div class="cd-sup-leaf">
-      <span class="cd-sup-leaf__dot" style="background:${statusColor(agent.status)}"></span>
-      <span class="cd-sup-leaf__name">${agent.label}</span>
-      <span class="cd-sup-leaf__role">${agent.role}</span>
-      ${agent.model ? html`<span class="cd-badge cd-badge--model">${agent.model}</span>` : ""}
-      ${agent.tasks !== undefined ? html`<span class="cd-sup-leaf__tasks">${agent.tasks} tasks</span>` : ""}
-    </div>
-  `;
-}
-
-function renderTeamNode(team: {
-  id: string;
-  label: string;
-  role: string;
-  status: string;
-  strategy?: string;
-  children: Parameters<typeof renderAgentLeaf>[0][];
-}) {
-  return html`
-    <div class="cd-sup-team">
-      <div class="cd-sup-team__header">
-        <span class="cd-sup-team__dot" style="background:${statusColor(team.status)}"></span>
-        <span class="cd-sup-team__name">${team.label}</span>
-        <span class="cd-sup-team__role">${team.role}</span>
-        ${team.strategy ? strategyBadge(team.strategy) : ""}
-      </div>
-      <div class="cd-sup-team__members">
-        ${team.children.map(renderAgentLeaf)}
-      </div>
-    </div>
-  `;
-}
-
-// ── Edit helpers ───────────────────────────────────────────────────────────
 function startEdit(co: CompanyProfile) {
   _editing = true;
   _editDraft = {
@@ -290,7 +320,6 @@ function startEdit(co: CompanyProfile) {
     currentFocus: [...co.currentFocus],
   };
 }
-
 function saveEdit() {
   if (!_editDraft) {
     return;
@@ -302,12 +331,10 @@ function saveEdit() {
   _editing = false;
   _editDraft = null;
 }
-
 function cancelEdit() {
   _editing = false;
   _editDraft = null;
 }
-
 function createCompany() {
   if (!_newCompanyName.trim()) {
     return;
@@ -330,424 +357,519 @@ function createCompany() {
     businessModel: "Describe your business model.",
     currentFocus: ["Define your first priority"],
   });
-  _statuses[id] = {
-    employees: 1,
-    netWorth: 0,
-    cashBalance: 0,
-    monthlyRevenue: 0,
-    monthlyBurn: 0,
-    runwayMonths: 0,
-    mrr: 0,
-    arr: 0,
-    tasksToday: 0,
-    tokensToday: 0,
-    uptime: "100%",
-    health: "healthy",
-    activeAgents: 0,
-    crashedAgents: 0,
-    idleAgents: 0,
-  };
   _activeCompanyId = id;
   _showNewCompanyForm = false;
   _newCompanyName = "";
+}
+
+// ── Agent detail panel ─────────────────────────────────────────────────────
+function renderAgentDetail(agent: AgentRecord) {
+  return html`
+    <div class="cd-agent-detail">
+      <!-- Header -->
+      <div class="cd-agent-detail__header" style="border-left:3px solid ${agent.color}">
+        <div class="cd-agent-detail__avatar">${agent.emoji}</div>
+        <div class="cd-agent-detail__meta">
+          <div class="cd-agent-detail__name">${agent.name}</div>
+          <div class="cd-agent-detail__role">${agent.role} · ${agent.team}</div>
+          <div class="cd-agent-detail__badges">
+            <span class="cd-ad-badge" style="background:${statusColor(agent.status)}22;color:${statusColor(agent.status)};border-color:${statusColor(agent.status)}44">
+              ${agent.status}
+            </span>
+            <span class="cd-ad-badge cd-ad-badge--model">${agent.model}</span>
+          </div>
+        </div>
+        <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+          _selectedAgentId = null;
+        }}>✕</button>
+      </div>
+
+      <!-- Quick stats row -->
+      <div class="cd-agent-detail__stats">
+        <div class="cd-ad-stat">
+          <div class="cd-ad-stat__val">${agent.totalTasksCompleted}</div>
+          <div class="cd-ad-stat__label">Tasks done</div>
+        </div>
+        <div class="cd-ad-stat">
+          <div class="cd-ad-stat__val">${(agent.totalTokensUsed / 1_000_000).toFixed(1)}M</div>
+          <div class="cd-ad-stat__label">Tokens used</div>
+        </div>
+        <div class="cd-ad-stat">
+          <div class="cd-ad-stat__val">${agent.uptimePct}%</div>
+          <div class="cd-ad-stat__label">Uptime</div>
+        </div>
+        <div class="cd-ad-stat">
+          <div class="cd-ad-stat__val">${agent.lastActiveAt}</div>
+          <div class="cd-ad-stat__label">Last active</div>
+        </div>
+      </div>
+
+      <!-- Workspace row -->
+      <div class="cd-agent-detail__workspace">
+        <span class="cd-ad-ws-label">📍 Workspace</span>
+        <span class="cd-ad-ws-val">${agent.currentWorkspace}</span>
+        ${agent.currentApp !== "—" ? html`<span class="cd-ad-ws-app">${agent.currentApp}</span>` : ""}
+        ${agent.currentUrl !== "—" ? html`<span class="cd-ad-ws-url">${agent.currentUrl}</span>` : ""}
+      </div>
+
+      <!-- Detail tabs -->
+      <div class="cd-agent-detail__tabs">
+        ${(["trace", "messages", "privileges"] as const).map(
+          (t) => html`
+          <button class="cd-agent-detail__tab ${_agentDetailTab === t ? "cd-agent-detail__tab--active" : ""}"
+            @click=${() => {
+              _agentDetailTab = t;
+            }}>
+            ${{ trace: "🔗 State Chain", messages: "💬 Messages", privileges: "🔐 Privileges" }[t]}
+          </button>
+        `,
+        )}
+      </div>
+
+      <!-- State chain tab -->
+      ${
+        _agentDetailTab === "trace"
+          ? html`
+        <div class="cd-agent-detail__trace">
+          ${agent.stateChain.map(
+            (step, i) => html`
+            <div class="cd-trace-step">
+              <div class="cd-trace-step__connector ${i === 0 ? "cd-trace-step__connector--first" : ""}">
+                <div class="cd-trace-step__dot" style="background:${stateColor(step.state)}"></div>
+                ${
+                  i < agent.stateChain.length - 1
+                    ? html`
+                        <div class="cd-trace-step__line"></div>
+                      `
+                    : ""
+                }
+              </div>
+              <div class="cd-trace-step__body">
+                <div class="cd-trace-step__header">
+                  <span class="cd-trace-step__state" style="color:${stateColor(step.state)}">${step.state}</span>
+                  <span class="cd-trace-step__ts">${step.ts}</span>
+                </div>
+                <div class="cd-trace-step__note">${step.note}</div>
+              </div>
+            </div>
+          `,
+          )}
+        </div>
+      `
+          : ""
+      }
+
+      <!-- Messages tab -->
+      ${
+        _agentDetailTab === "messages"
+          ? html`
+        <div class="cd-agent-detail__msgs">
+          ${agent.recentMessages.map(
+            (msg) => html`
+            <div class="cd-ad-msg ${msg.from.startsWith("→") ? "cd-ad-msg--out" : "cd-ad-msg--in"}">
+              <div class="cd-ad-msg__meta">
+                <span class="cd-ad-msg__dir">${msg.from}</span>
+                <span class="cd-ad-msg__ts">${msg.ts}</span>
+              </div>
+              <div class="cd-ad-msg__content">${msg.content}</div>
+            </div>
+          `,
+          )}
+          ${
+            agent.recentMessages.length === 0
+              ? html`
+                  <div class="cd-office-empty">No messages yet.</div>
+                `
+              : ""
+          }
+        </div>
+      `
+          : ""
+      }
+
+      <!-- Privileges tab -->
+      ${
+        _agentDetailTab === "privileges"
+          ? html`
+        <div class="cd-agent-detail__privs">
+          <div class="cd-priv-section">
+            <div class="cd-priv-section__title">🔧 Tools</div>
+            <div class="cd-priv-tags">
+              ${agent.tools.map((t) => html`<span class="cd-priv-tag cd-priv-tag--tool">${t}</span>`)}
+            </div>
+          </div>
+          <div class="cd-priv-section">
+            <div class="cd-priv-section__title">⚡ Skills</div>
+            <div class="cd-priv-tags">
+              ${agent.skills.map((s) => html`<span class="cd-priv-tag cd-priv-tag--skill">${s}</span>`)}
+            </div>
+          </div>
+          <div class="cd-priv-section">
+            <div class="cd-priv-section__title">💎 Compute</div>
+            <div class="cd-priv-row">
+              <span>Budget</span><span class="cd-priv-val">${agent.computeBudget}</span>
+            </div>
+            <div class="cd-priv-row">
+              <span>Memory</span><span class="cd-priv-val">${agent.memoryAccess}</span>
+            </div>
+            <div class="cd-priv-row">
+              <span>Network</span>
+              <span class="cd-priv-val" style="color:${agent.networkAccess ? "var(--ok)" : "var(--destructive)"}">
+                ${agent.networkAccess ? "✅ Allowed" : "❌ Blocked"}
+              </span>
+            </div>
+          </div>
+          <div class="cd-priv-section">
+            <div class="cd-priv-section__title">📁 File Access</div>
+            <div class="cd-priv-tags">
+              ${agent.fileAccess.map((f) => html`<span class="cd-priv-tag cd-priv-tag--file">${f}</span>`)}
+            </div>
+          </div>
+          <div class="cd-priv-section">
+            <div class="cd-priv-section__title">🔀 Lifecycle Controls</div>
+            <div class="cd-priv-actions">
+              <button class="cd-btn cd-btn--outline cd-btn--sm">⏸ Pause</button>
+              <button class="cd-btn cd-btn--outline cd-btn--sm">🔄 Restart</button>
+              <button class="cd-btn cd-btn--outline cd-btn--sm">🔀 Split</button>
+              <button class="cd-btn cd-btn--outline cd-btn--sm">🔗 Merge</button>
+              <button class="cd-btn cd-btn--outline cd-btn--sm">↩ Backtrack</button>
+              <button class="cd-btn cd-btn--destructive cd-btn--sm">🗃 Archive</button>
+            </div>
+          </div>
+        </div>
+      `
+          : ""
+      }
+    </div>
+  `;
+}
+
+// ── Sub-tab: Fleet (agent list) ─────────────────────────────────────────────
+function renderFleet() {
+  return html`
+    <div class="cd-fleet-view">
+      <div class="cd-fleet-header">
+        <span class="cd-fleet-header__title">Agent Fleet</span>
+        <span class="cd-fleet-header__sub">${AGENTS.length} agents · ${AGENTS.filter((a) => a.status === "running").length} running · ${AGENTS.filter((a) => a.status === "crashed").length} crashed</span>
+        <button class="cd-btn cd-btn--primary cd-btn--sm">+ New Agent</button>
+      </div>
+      <div class="cd-fleet-table">
+        <div class="cd-fleet-thead">
+          <span>Agent</span><span>Role</span><span>Workspace</span><span>Status</span><span>Tasks</span><span>Tokens</span><span>Uptime</span>
+        </div>
+        ${AGENTS.map(
+          (a) => html`
+          <div class="cd-fleet-row ${_selectedAgentId === a.id ? "cd-fleet-row--selected" : ""}"
+            @click=${() => {
+              _selectedAgentId = _selectedAgentId === a.id ? null : a.id;
+              _agentDetailTab = "trace";
+            }}>
+            <span class="cd-fleet-agent">
+              <span class="cd-fleet-dot" style="background:${statusColor(a.status)}"></span>
+              ${a.emoji} <strong>${a.name}</strong>
+            </span>
+            <span class="cd-muted">${a.role}</span>
+            <span class="cd-muted cd-mono" style="font-size:11px">${a.currentWorkspace}</span>
+            <span class="cd-ad-badge" style="background:${statusColor(a.status)}22;color:${statusColor(a.status)};border-color:${statusColor(a.status)}44">${a.status}</span>
+            <span>${a.totalTasksCompleted}</span>
+            <span>${(a.totalTokensUsed / 1_000_000).toFixed(1)}M</span>
+            <span>${a.uptimePct}%</span>
+          </div>
+          ${
+            _selectedAgentId === a.id
+              ? html`
+            <div class="cd-fleet-row-detail">
+              ${renderAgentDetail(a)}
+            </div>
+          `
+              : ""
+          }
+        `,
+        )}
+      </div>
+    </div>
+  `;
+}
+
+// ── Sub-tab stubs ──────────────────────────────────────────────────────────
+function renderTeams() {
+  return html`
+    <div class="cd-subtab-stub">
+      <div class="cd-subtab-stub__icon">👥</div>
+      <div class="cd-subtab-stub__title">Teams</div>
+      <div class="cd-subtab-stub__desc">
+        Manage agent teams, supervision strategies, and department structure.
+      </div>
+      <div class="cd-subtab-stub__hint">Team management available in full agent control plane</div>
+    </div>
+  `;
+}
+function renderRoles() {
+  return html`
+    <div class="cd-subtab-stub">
+      <div class="cd-subtab-stub__icon">🎭</div>
+      <div class="cd-subtab-stub__title">Role Hub</div>
+      <div class="cd-subtab-stub__desc">
+        Browse 100+ agent role templates with pre-configured tools, skills, and system prompts.
+      </div>
+      <div class="cd-subtab-stub__hint">Role Hub available at <strong>/company/roles</strong></div>
+    </div>
+  `;
+}
+function renderTasks() {
+  return html`
+    <div class="cd-subtab-stub">
+      <div class="cd-subtab-stub__icon">📋</div>
+      <div class="cd-subtab-stub__title">Task Kanban</div>
+      <div class="cd-subtab-stub__desc">
+        Global kanban board tracking all agent tasks across projects and teams.
+      </div>
+      <div class="cd-subtab-stub__hint">Task board available at <strong>/company/tasks</strong></div>
+    </div>
+  `;
+}
+function renderChats() {
+  return html`
+    <div class="cd-subtab-stub">
+      <div class="cd-subtab-stub__icon">💬</div>
+      <div class="cd-subtab-stub__title">Company Chats</div>
+      <div class="cd-subtab-stub__desc">
+        View all inter-agent messages, human overrides, and decision logs across the fleet.
+      </div>
+      <div class="cd-subtab-stub__hint">Full chat log in the main Chat view</div>
+    </div>
+  `;
+}
+
+// ── Company profile sub-tab ────────────────────────────────────────────────
+function renderProfile() {
+  const co = _companies.find((c) => c.id === _activeCompanyId) ?? _companies[0];
+  const draft = _editDraft ?? co;
+
+  return html`
+    <!-- Company switcher -->
+    <div class="cd-co-switcher">
+      ${_companies.map(
+        (c) => html`
+        <button class="cd-co-switch-btn ${_activeCompanyId === c.id ? "cd-co-switch-btn--active" : ""}"
+          @click=${() => {
+            _activeCompanyId = c.id;
+            _editing = false;
+          }}>
+          🦀 ${c.name}
+          <span class="cd-chip cd-chip--xs">${c.stage}</span>
+        </button>
+      `,
+      )}
+      <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
+        _showNewCompanyForm = !_showNewCompanyForm;
+      }}>
+        + New Company
+      </button>
+    </div>
+
+    ${
+      _showNewCompanyForm
+        ? html`
+      <div class="cd-new-co-form">
+        <input class="cd-form-input" placeholder="Company name…" .value=${_newCompanyName}
+          @input=${(e: Event) => {
+            _newCompanyName = (e.target as HTMLInputElement).value;
+          }} />
+        <input class="cd-form-input" placeholder="Industry…" .value=${_newCompanyIndustry}
+          @input=${(e: Event) => {
+            _newCompanyIndustry = (e.target as HTMLInputElement).value;
+          }} />
+        <select class="cd-form-select" @change=${(e: Event) => {
+          _newCompanyStage = (e.target as HTMLSelectElement).value;
+        }}>
+          ${["Pre-seed", "Seed", "Series A", "Series B", "Series C", "Public"].map((s) => html`<option>${s}</option>`)}
+        </select>
+        <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${createCompany}>Create</button>
+        <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
+          _showNewCompanyForm = false;
+        }}>Cancel</button>
+      </div>
+    `
+        : ""
+    }
+
+    <!-- Profile card -->
+    <div class="cd-profile-card">
+      <div class="cd-profile-card__left">
+        <div class="cd-profile-card__logo">🦀</div>
+        <div class="cd-profile-card__meta">
+          ${
+            _editing
+              ? html`
+            <input class="cd-edit-input cd-edit-input--title" .value=${draft.name}
+              @input=${(e: Event) => {
+                if (_editDraft) {
+                  _editDraft.name = (e.target as HTMLInputElement).value;
+                }
+              }} />
+            <input class="cd-edit-input" .value=${draft.tagline}
+              @input=${(e: Event) => {
+                if (_editDraft) {
+                  _editDraft.tagline = (e.target as HTMLInputElement).value;
+                }
+              }} />
+          `
+              : html`
+            <h1 class="cd-profile-card__name">${co.name}</h1>
+            <p class="cd-profile-card__tag">${co.tagline}</p>
+          `
+          }
+          <div class="cd-profile-card__chips">
+            ${
+              _editing
+                ? html`
+              <input class="cd-edit-input cd-edit-input--sm" placeholder="Stage" .value=${draft.stage}
+                @input=${(e: Event) => {
+                  if (_editDraft) {
+                    _editDraft.stage = (e.target as HTMLInputElement).value;
+                  }
+                }} />
+              <input class="cd-edit-input cd-edit-input--sm" placeholder="Industry" .value=${draft.industry}
+                @input=${(e: Event) => {
+                  if (_editDraft) {
+                    _editDraft.industry = (e.target as HTMLInputElement).value;
+                  }
+                }} />
+              <input class="cd-edit-input cd-edit-input--sm" placeholder="HQ" .value=${draft.hq}
+                @input=${(e: Event) => {
+                  if (_editDraft) {
+                    _editDraft.hq = (e.target as HTMLInputElement).value;
+                  }
+                }} />
+            `
+                : html`
+              <span class="cd-chip">${co.stage}</span>
+              <span class="cd-chip">${co.industry}</span>
+              <span class="cd-chip">Est. ${co.founded}</span>
+              <span class="cd-chip">📍 ${co.hq}</span>
+            `
+            }
+          </div>
+        </div>
+      </div>
+      <div class="cd-profile-card__right">
+        <div class="cd-profile-section">
+          <div class="cd-profile-section__label">Mission</div>
+          ${
+            _editing
+              ? html`
+            <textarea class="cd-edit-textarea" rows="3" .value=${draft.mission}
+              @input=${(e: Event) => {
+                if (_editDraft) {
+                  _editDraft.mission = (e.target as HTMLTextAreaElement).value;
+                }
+              }}></textarea>
+          `
+              : html`<p class="cd-profile-section__text">${co.mission}</p>`
+          }
+        </div>
+        <div class="cd-profile-section">
+          <div class="cd-profile-section__label">Vision</div>
+          ${
+            _editing
+              ? html`
+            <textarea class="cd-edit-textarea" rows="2" .value=${draft.vision}
+              @input=${(e: Event) => {
+                if (_editDraft) {
+                  _editDraft.vision = (e.target as HTMLTextAreaElement).value;
+                }
+              }}></textarea>
+          `
+              : html`<p class="cd-profile-section__text">${co.vision}</p>`
+          }
+        </div>
+        <div class="cd-profile-actions">
+          ${
+            _editing
+              ? html`
+            <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${saveEdit}>✅ Save</button>
+            <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${cancelEdit}>Cancel</button>
+          `
+              : html`
+            <button class="cd-btn cd-btn--outline cd-btn--sm" @click=${() => startEdit(co)}>✏️ Edit</button>
+          `
+          }
+        </div>
+      </div>
+    </div>
+
+    <!-- Values + Focus -->
+    <div class="cd-overview-row">
+      <div class="cd-values-card cd-card">
+        <div class="cd-card__title">Core Values</div>
+        <div class="cd-values-grid">
+          ${co.values.map(
+            (v) => html`
+            <div class="cd-value-item">
+              <span class="cd-value-item__emoji">${v.emoji}</span>
+              <strong>${v.label}</strong>
+              <span>${v.desc}</span>
+            </div>
+          `,
+          )}
+        </div>
+      </div>
+      <div class="cd-focus-card cd-card">
+        <div class="cd-card__title">Current Focus</div>
+        <ul class="cd-focus-list">
+          ${co.currentFocus.map(
+            (f) => html`
+            <li class="cd-focus-list__item"><span class="cd-focus-list__dot"></span>${f}</li>
+          `,
+          )}
+        </ul>
+        <div class="cd-card__title" style="margin-top:14px">Business Model</div>
+        <p class="cd-biz-model">${co.businessModel}</p>
+      </div>
+    </div>
+  `;
 }
 
 // ── Main render ────────────────────────────────────────────────────────────
 export type CompanyOverviewProps = Record<string, never>;
 
 export function renderCompanyOverview(_props: CompanyOverviewProps) {
-  const co = _companies.find((c) => c.id === _activeCompanyId) ?? _companies[0];
-  const st = _statuses[co.id] ?? _statuses["acme"];
-  const runway = st.runwayMonths;
-  const runwayColor = runway < 3 ? "var(--destructive)" : runway < 6 ? "#f59e0b" : "var(--ok)";
-  const draft = _editDraft ?? co;
+  const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
+    { id: "profile", icon: "🦀", label: "Company" },
+    { id: "fleet", icon: "🤖", label: "Fleet" },
+    { id: "teams", icon: "👥", label: "Teams" },
+    { id: "roles", icon: "🎭", label: "Role Hub" },
+    { id: "tasks", icon: "📋", label: "Tasks" },
+    { id: "chats", icon: "💬", label: "Chats" },
+  ];
 
   return html`
     <div class="cd-page cd-page--overview">
 
-      <!-- Company switcher bar -->
-      <div class="cd-co-switcher">
-        ${_companies.map(
-          (c) => html`
-          <button class="cd-co-switch-btn ${_activeCompanyId === c.id ? "cd-co-switch-btn--active" : ""}"
+      <!-- Sub-navigation -->
+      <div class="cd-subnav">
+        ${SUB_TABS.map(
+          (t) => html`
+          <button class="cd-subnav__btn ${_subTab === t.id ? "cd-subnav__btn--active" : ""}"
             @click=${() => {
-              _activeCompanyId = c.id;
-              _editing = false;
+              _subTab = t.id;
             }}>
-            🦀 ${c.name}
-            <span class="cd-chip cd-chip--xs">${c.stage}</span>
+            ${t.icon} ${t.label}
           </button>
         `,
         )}
-        <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
-          _showNewCompanyForm = !_showNewCompanyForm;
-        }}>
-          ${icons.plus} New Company
-        </button>
       </div>
 
-      <!-- New company inline form -->
-      ${
-        _showNewCompanyForm
-          ? html`
-        <div class="cd-new-co-form">
-          <input class="cd-form-input" placeholder="Company name…"
-            .value=${_newCompanyName}
-            @input=${(e: Event) => {
-              _newCompanyName = (e.target as HTMLInputElement).value;
-            }} />
-          <input class="cd-form-input" placeholder="Industry…"
-            .value=${_newCompanyIndustry}
-            @input=${(e: Event) => {
-              _newCompanyIndustry = (e.target as HTMLInputElement).value;
-            }} />
-          <select class="cd-form-select" @change=${(e: Event) => {
-            _newCompanyStage = (e.target as HTMLSelectElement).value;
-          }}>
-            ${["Pre-seed", "Seed", "Series A", "Series B", "Series C", "Public"].map((s) => html`<option value="${s}">${s}</option>`)}
-          </select>
-          <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${createCompany}>Create</button>
-          <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
-            _showNewCompanyForm = false;
-          }}>Cancel</button>
-        </div>
-      `
-          : ""
-      }
-
-      <!-- Company Profile Card -->
-      <div class="cd-profile-card">
-        <div class="cd-profile-card__left">
-          <div class="cd-profile-card__logo">🦀</div>
-          <div class="cd-profile-card__meta">
-            ${
-              _editing
-                ? html`
-              <input class="cd-edit-input cd-edit-input--title" .value=${draft.name}
-                @input=${(e: Event) => {
-                  if (_editDraft) {
-                    _editDraft.name = (e.target as HTMLInputElement).value;
-                  }
-                }} />
-              <input class="cd-edit-input" placeholder="Tagline…" .value=${draft.tagline}
-                @input=${(e: Event) => {
-                  if (_editDraft) {
-                    _editDraft.tagline = (e.target as HTMLInputElement).value;
-                  }
-                }} />
-            `
-                : html`
-              <h1 class="cd-profile-card__name">${co.name}</h1>
-              <p class="cd-profile-card__tag">${co.tagline}</p>
-            `
-            }
-            <div class="cd-profile-card__chips">
-              ${
-                _editing
-                  ? html`
-                <input class="cd-edit-input cd-edit-input--sm" placeholder="Stage" .value=${draft.stage}
-                  @input=${(e: Event) => {
-                    if (_editDraft) {
-                      _editDraft.stage = (e.target as HTMLInputElement).value;
-                    }
-                  }} />
-                <input class="cd-edit-input cd-edit-input--sm" placeholder="Industry" .value=${draft.industry}
-                  @input=${(e: Event) => {
-                    if (_editDraft) {
-                      _editDraft.industry = (e.target as HTMLInputElement).value;
-                    }
-                  }} />
-                <input class="cd-edit-input cd-edit-input--sm" placeholder="Founded" .value=${draft.founded}
-                  @input=${(e: Event) => {
-                    if (_editDraft) {
-                      _editDraft.founded = (e.target as HTMLInputElement).value;
-                    }
-                  }} />
-                <input class="cd-edit-input cd-edit-input--sm" placeholder="HQ" .value=${draft.hq}
-                  @input=${(e: Event) => {
-                    if (_editDraft) {
-                      _editDraft.hq = (e.target as HTMLInputElement).value;
-                    }
-                  }} />
-              `
-                  : html`
-                <span class="cd-chip">${co.stage}</span>
-                <span class="cd-chip">${co.industry}</span>
-                <span class="cd-chip">Est. ${co.founded}</span>
-                <span class="cd-chip">📍 ${co.hq}</span>
-              `
-              }
-            </div>
-          </div>
-        </div>
-        <div class="cd-profile-card__right">
-          <div class="cd-profile-section">
-            <div class="cd-profile-section__label">Mission</div>
-            ${
-              _editing
-                ? html`
-              <textarea class="cd-edit-textarea" rows="3"
-                .value=${draft.mission}
-                @input=${(e: Event) => {
-                  if (_editDraft) {
-                    _editDraft.mission = (e.target as HTMLTextAreaElement).value;
-                  }
-                }}></textarea>
-            `
-                : html`<p class="cd-profile-section__text">${co.mission}</p>`
-            }
-          </div>
-          <div class="cd-profile-section">
-            <div class="cd-profile-section__label">Vision</div>
-            ${
-              _editing
-                ? html`
-              <textarea class="cd-edit-textarea" rows="2"
-                .value=${draft.vision}
-                @input=${(e: Event) => {
-                  if (_editDraft) {
-                    _editDraft.vision = (e.target as HTMLTextAreaElement).value;
-                  }
-                }}></textarea>
-            `
-                : html`<p class="cd-profile-section__text">${co.vision}</p>`
-            }
-          </div>
-          <!-- Edit controls -->
-          <div class="cd-profile-actions">
-            ${
-              _editing
-                ? html`
-              <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${saveEdit}>✅ Save</button>
-              <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${cancelEdit}>Cancel</button>
-            `
-                : html`
-              <button class="cd-btn cd-btn--outline cd-btn--sm" @click=${() => startEdit(co)}>✏️ Edit Company</button>
-            `
-            }
-          </div>
-        </div>
+      <!-- Content -->
+      <div class="cd-subnav-content">
+        ${_subTab === "profile" ? renderProfile() : ""}
+        ${_subTab === "fleet" ? renderFleet() : ""}
+        ${_subTab === "teams" ? renderTeams() : ""}
+        ${_subTab === "roles" ? renderRoles() : ""}
+        ${_subTab === "tasks" ? renderTasks() : ""}
+        ${_subTab === "chats" ? renderChats() : ""}
       </div>
-
-      <!-- Values + Business Model -->
-      <div class="cd-overview-row">
-        <div class="cd-values-card cd-card">
-          <div class="cd-card__title">Core Values</div>
-          <div class="cd-values-grid">
-            ${(_editing ? draft : co).values.map(
-              (v, i) => html`
-              <div class="cd-value-item">
-                ${
-                  _editing
-                    ? html`
-                  <input class="cd-edit-input cd-edit-input--sm" .value=${v.emoji}
-                    @input=${(e: Event) => {
-                      if (_editDraft) {
-                        _editDraft.values[i].emoji = (e.target as HTMLInputElement).value;
-                      }
-                    }} style="width:40px" />
-                  <input class="cd-edit-input cd-edit-input--sm" .value=${v.label}
-                    @input=${(e: Event) => {
-                      if (_editDraft) {
-                        _editDraft.values[i].label = (e.target as HTMLInputElement).value;
-                      }
-                    }} />
-                  <input class="cd-edit-input cd-edit-input--sm" .value=${v.desc}
-                    @input=${(e: Event) => {
-                      if (_editDraft) {
-                        _editDraft.values[i].desc = (e.target as HTMLInputElement).value;
-                      }
-                    }} />
-                `
-                    : html`
-                  <span class="cd-value-item__emoji">${v.emoji}</span>
-                  <strong>${v.label}</strong>
-                  <span>${v.desc}</span>
-                `
-                }
-              </div>
-            `,
-            )}
-          </div>
-        </div>
-        <div class="cd-focus-card cd-card">
-          <div class="cd-card__title">Current Focus</div>
-          ${
-            _editing
-              ? html`
-            <textarea class="cd-edit-textarea" rows="4"
-              .value=${draft.currentFocus.join("\n")}
-              @input=${(e: Event) => {
-                if (_editDraft) {
-                  _editDraft.currentFocus = (e.target as HTMLTextAreaElement).value
-                    .split("\n")
-                    .filter(Boolean);
-                }
-              }}></textarea>
-          `
-              : html`
-            <ul class="cd-focus-list">
-              ${co.currentFocus.map(
-                (f) => html`
-                <li class="cd-focus-list__item"><span class="cd-focus-list__dot"></span>${f}</li>
-              `,
-              )}
-            </ul>
-          `
-          }
-          <div class="cd-card__title" style="margin-top:14px">Business Model</div>
-          ${
-            _editing
-              ? html`
-            <textarea class="cd-edit-textarea" rows="3"
-              .value=${draft.businessModel}
-              @input=${(e: Event) => {
-                if (_editDraft) {
-                  _editDraft.businessModel = (e.target as HTMLTextAreaElement).value;
-                }
-              }}></textarea>
-          `
-              : html`<p class="cd-biz-model">${co.businessModel}</p>`
-          }
-        </div>
-      </div>
-
-      <!-- Status Dashboard -->
-      <div class="cd-status-grid">
-        ${[
-          {
-            icon: "👥",
-            val: `${st.employees}`,
-            label: "AI Employees",
-            sub: `${st.activeAgents} active · ${st.crashedAgents} crashed`,
-          },
-          { icon: "💎", val: fmt(st.netWorth, "$"), label: "Net Worth", sub: "Valuation est." },
-          {
-            icon: "💵",
-            val: fmt(st.cashBalance, "$"),
-            label: "Cash Balance",
-            sub: "Available runway funds",
-          },
-          { icon: "📈", val: fmt(st.mrr, "$"), label: "MRR", sub: `ARR ${fmt(st.arr, "$")}` },
-          {
-            icon: "🔥",
-            val: fmt(st.monthlyBurn, "$"),
-            label: "Monthly Burn",
-            sub: "Operating cost",
-          },
-          {
-            icon: "⏳",
-            val: runway > 0 ? `${runway.toFixed(1)}mo` : "—",
-            label: "Runway",
-            sub: runway < 3 ? "⚠️ Critical" : runway < 6 ? "⚠️ Fundraise soon" : "✅ Healthy",
-            color: runwayColor,
-          },
-          {
-            icon: "⚡",
-            val: `${st.tasksToday}`,
-            label: "Tasks Today",
-            sub: `${(st.tokensToday / 1_000_000).toFixed(2)}M tokens`,
-          },
-          {
-            icon: "📡",
-            val: st.uptime,
-            label: "Uptime",
-            sub: st.health === "degraded" ? "⚠️ Degraded" : "✅ Healthy",
-          },
-        ].map(
-          (s) => html`
-          <div class="cd-stat-tile">
-            <div class="cd-stat-tile__icon">${s.icon}</div>
-            <div class="cd-stat-tile__val" style="${"color" in s && s.color ? `color:${s.color}` : ""}">${s.val}</div>
-            <div class="cd-stat-tile__label">${s.label}</div>
-            <div class="cd-stat-tile__sub">${s.sub}</div>
-          </div>
-        `,
-        )}
-      </div>
-
-      <!-- Alert banner (only when degraded) -->
-      ${
-        st.health !== "healthy"
-          ? html`
-              <div class="cd-alert-banner">
-                ⚠️
-                <strong>Degraded:</strong>&nbsp;review-gamma is crashed (restart 2/3). Writing pipeline impacted.
-                <button class="cd-btn cd-btn--xs cd-btn--ghost" style="margin-left: auto">View Logs</button>
-              </div>
-            `
-          : ""
-      }
-
-      <!-- Supervision Tree + Quick Actions -->
-      <div class="cd-overview-row">
-        <div class="cd-card" style="flex:2">
-          <div class="cd-card__title">Supervision Tree</div>
-          <div class="cd-sup-tree">
-            ${DEMO_SUPERVISION_TREE.map(
-              (root) => html`
-              <div class="cd-sup-root">
-                <div class="cd-sup-root__header">
-                  <span class="cd-sup-root__icon">${icons.network}</span>
-                  <span class="cd-sup-root__label">${root.label}</span>
-                  <span class="cd-badge cd-badge--ok">${root.role}</span>
-                </div>
-                <div class="cd-sup-root__teams">
-                  ${root.children.map((child) =>
-                    child.children.length > 0
-                      ? renderTeamNode(child as Parameters<typeof renderTeamNode>[0])
-                      : renderAgentLeaf(child),
-                  )}
-                </div>
-              </div>
-            `,
-            )}
-          </div>
-        </div>
-        <div class="cd-card" style="flex:1">
-          <div class="cd-card__title">Quick Actions</div>
-          <div class="cd-quick-actions">
-            <button class="cd-btn cd-btn--primary">${icons.play} Start All Agents</button>
-            <button class="cd-btn cd-btn--outline">${icons.pause} Pause Fleet</button>
-            <button class="cd-btn cd-btn--outline">${icons.rotateCounterClockwise} Restart Crashed</button>
-            <button class="cd-btn cd-btn--outline">${icons.activity} View Logs</button>
-            <button class="cd-btn cd-btn--outline">${icons.terminal2} Open Console</button>
-          </div>
-          <div class="cd-card__title" style="margin-top:20px">System Health</div>
-          ${[
-            { label: "Gateway", val: "Connected", ok: true },
-            { label: "Scheduler", val: "Running", ok: true },
-            { label: "Message Bus", val: "Running", ok: true },
-            { label: "Supervisor", val: "Degraded (1 crash)", ok: false },
-            { label: "Storage", val: "OK", ok: true },
-          ].map(
-            (row) => html`
-            <div class="cd-health-row">
-              <span class="cd-health-dot" style="background:${row.ok ? "var(--ok)" : "var(--destructive)"}"></span>
-              <span class="cd-health-label">${row.label}</span>
-              <span class="cd-health-val ${row.ok ? "" : "cd-health-val--err"}">${row.val}</span>
-            </div>
-          `,
-          )}
-        </div>
-      </div>
-
-      <!-- Recent Events -->
-      <div class="cd-card">
-        <div class="cd-card__title">Recent Events</div>
-        <div class="cd-event-feed">
-          ${DEMO_EVENTS.map(
-            (e) => html`
-            <div class="cd-event-row cd-event-row--${e.level}">
-              <span class="cd-event-icon">${e.icon}</span>
-              <span class="cd-event-time">${e.time}</span>
-              <span class="cd-event-msg">${e.msg}</span>
-            </div>
-          `,
-          )}
-        </div>
-      </div>
-
     </div>
   `;
 }
