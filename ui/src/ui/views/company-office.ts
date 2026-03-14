@@ -562,11 +562,11 @@ function simulationStep() {
       continue;
     }
 
-    if (_tick % 80 === Math.abs(agent.id.charCodeAt(0)) % 80) {
+    if (_tick % 60 === Math.abs(agent.id.charCodeAt(0)) % 60) {
       const thoughts = THOUGHTS[agent.id] ?? [];
       if (thoughts.length > 0) {
-        agent.thoughtBubble = thoughts[Math.floor(_tick / 80) % thoughts.length];
-        agent.thoughtTimer = 100;
+        agent.thoughtBubble = thoughts[Math.floor(_tick / 60) % thoughts.length];
+        agent.thoughtTimer = 180;
       }
     }
     if (agent.thoughtTimer > 0) {
@@ -851,10 +851,10 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 if (!agent) {
                   return "";
                 }
-                const fadeIn = (340 - bubble.timer) / 20;
+                const fadeIn = (340 - bubble.timer) / 15;
                 const fadeOut = bubble.timer < 50 ? bubble.timer / 50 : 1;
                 const opacity = Math.min(fadeIn, fadeOut);
-                const offsetY = -TILE * 1.2 - (340 - bubble.timer) * 0.1;
+                const offsetY = -TILE * 0.6 - (340 - bubble.timer) * 0.04;
                 return html`
                   <div class="cd-canvas-bubble" style="
                     left:${agent.x * TILE - 60}px;
