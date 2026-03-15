@@ -162,20 +162,28 @@ function edgesFromTree(
   return out;
 }
 
-/** Convert ClawDockAgent[] into an OrgNode tree using reportTo / directReports. */
+/** Convert ClawDockAgent[] into an OrgNode tree using reportTo to derive hierarchy. */
 function agentsToOrgTree(agents: ClawDockAgent[]): OrgNode {
   if (!agents.length) {
     return ORG_TREE;
   }
   const agentMap = new Map(agents.map((a) => [a.id, a]));
-  const childIds = new Set(agents.flatMap((a) => a.directReports ?? []));
-  const roots = agents.filter((a) => !childIds.has(a.id));
+
+  // Build children map from reportTo (reverse lookup)
+  const childrenMap = new Map<string, ClawDockAgent[]>();
+  for (const a of agents) {
+    if (a.reportTo && agentMap.has(a.reportTo)) {
+      const list = childrenMap.get(a.reportTo) ?? [];
+      list.push(a);
+      childrenMap.set(a.reportTo, list);
+    }
+  }
+
+  // Roots = agents whose reportTo is null/undefined or points to a non-existent agent
+  const roots = agents.filter((a) => !a.reportTo || !agentMap.has(a.reportTo));
 
   function toOrgNode(agent: ClawDockAgent): OrgNode {
-    const kids = (agent.directReports ?? [])
-      .map((id) => agentMap.get(id))
-      .filter(Boolean)
-      .map((a) => toOrgNode(a!));
+    const kids = (childrenMap.get(agent.id) ?? []).map((a) => toOrgNode(a));
     return {
       id: agent.id,
       name: agent.name,
