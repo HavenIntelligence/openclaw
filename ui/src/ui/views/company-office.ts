@@ -336,6 +336,15 @@ function logTypeClass(type: LogEntry["type"]) {
 function logTypeIcon(type: LogEntry["type"], content?: string) {
   // Special icon for delegation-related system entries
   if (type === "system" && content) {
+    if (content.includes("[TASK_ASSIGNED]")) {
+      return "📌";
+    }
+    if (content.includes("[TASK_DONE]")) {
+      return "✅";
+    }
+    if (content.includes("[TASK_FAILED]")) {
+      return "💥";
+    }
     if (content.includes("Delegated to")) {
       return "📋";
     }
@@ -462,6 +471,20 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       const recent = entries.filter((e) => e.ts > recentCutoff);
       if (recent.length > 0) {
         const latest = recent[recent.length - 1];
+        // Update agent activity and status based on task lifecycle events
+        for (const e of recent) {
+          if (e.type === "system" && e.content.includes("[TASK_ASSIGNED]")) {
+            const taskDesc = e.content.replace(/\[TASK_ASSIGNED\]\s*\S+\s*picked up:\s*/, "");
+            agent.activity = taskDesc.slice(0, 40);
+            agent.status = "working";
+          } else if (e.type === "system" && e.content.includes("[TASK_DONE]")) {
+            agent.activity = "";
+            agent.status = "idle";
+          } else if (e.type === "system" && e.content.includes("[TASK_FAILED]")) {
+            agent.activity = "";
+            agent.status = "crashed";
+          }
+        }
         // Show latest log as thought bubble if agent doesn't already have one
         if (agent.thoughtTimer <= 0) {
           const text = latest.content.slice(0, 60);
@@ -769,6 +792,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     </span>
                     <span class="cd-office-agent__name-pill">${agent.name}</span>
                     <span class="cd-office-agent__role-text">${agent.team}</span>
+                    ${agent.activity ? html`<span class="cd-office-agent__task-pill">📌 ${agent.activity}</span>` : ""}
                     ${agent.thoughtBubble ? html`<div class="cd-office-thought">${agent.thoughtBubble}</div>` : ""}
                     ${
                       agent.status === "crashed"
