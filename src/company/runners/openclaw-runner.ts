@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import type { CliAgentRunner, ParsedOutput, RunOpts } from "./base.js";
 import { isBinaryAvailable } from "./base.js";
 
@@ -19,6 +23,9 @@ export class OpenClawRunner implements CliAgentRunner {
   readonly name = "openclaw" as const;
 
   async isAvailable(): Promise<boolean> {
+    if (resolveOpenClawEntryPath()) {
+      return true;
+    }
     return isBinaryAvailable("openclaw");
   }
 
@@ -29,8 +36,9 @@ export class OpenClawRunner implements CliAgentRunner {
     const fullPrompt = opts?.systemPrompt ? `[Role: ${opts.systemPrompt}]\n\n${prompt}` : prompt;
 
     const args = ["agent", "--local", "--json", "--agent", openclawAgent, "-m", fullPrompt];
+    const invocation = resolveOpenClawSpawnInvocation(args);
 
-    return spawn("openclaw", args, {
+    return spawn(invocation.command, invocation.args, {
       cwd: opts?.cwd,
       env: { ...process.env, ...opts?.env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -63,8 +71,11 @@ export class OpenClawRunner implements CliAgentRunner {
       return null;
     }
 
-    if (trimmed.startsWith("[tools]") || trimmed.startsWith("[warn]")) {
-      return { type: "log", entry: { type: "system", content: trimmed } };
+    // `openclaw agent --json` should ultimately emit a JSON object. Ignore
+    // any preamble/banner/plugin lines on stdout so they do not poison
+    // downstream JSON parsing.
+    if (!trimmed.startsWith("{")) {
+      return null;
     }
 
     // Try to parse directly as complete JSON (handles single-line output):
@@ -72,8 +83,8 @@ export class OpenClawRunner implements CliAgentRunner {
       const obj = JSON.parse(trimmed) as Record<string, unknown>;
       return parseJsonResult(obj);
     } catch {
-      // Multi-line — emit as raw output; process-manager will accumulate.
-      return { type: "log", entry: { type: "output", content: trimmed } };
+      // Multi-line JSON is handled by createOpenClawLineParser().
+      return null;
     }
   }
 }
@@ -99,9 +110,9 @@ export function createOpenClawLineParser(): (line: string) => ParsedOutput | nul
       return null;
     }
 
-    // Suppress CLI warnings/info lines.
-    if (trimmed.startsWith("[tools]") || trimmed.startsWith("[warn]")) {
-      return { type: "log", entry: { type: "system", content: trimmed } };
+    // Ignore any stdout preamble until the real JSON payload starts.
+    if (buf.length === 0 && !trimmed.startsWith("{")) {
+      return null;
     }
 
     buf.push(line);
@@ -117,6 +128,63 @@ export function createOpenClawLineParser(): (line: string) => ParsedOutput | nul
       return null;
     }
   };
+}
+
+type OpenClawSpawnDeps = {
+  argv?: string[];
+  cwd?: string;
+  execPath?: string;
+  existsSync?: (filePath: string) => boolean;
+  moduleUrl?: string;
+};
+
+function looksLikeOpenClawEntry(filePath: string): boolean {
+  const base = path.basename(filePath).toLowerCase();
+  return base === "openclaw.mjs" || base === "entry.js" || base === "entry.mjs";
+}
+
+export function resolveOpenClawEntryPath(deps: OpenClawSpawnDeps = {}): string | null {
+  const existsSync = deps.existsSync ?? fs.existsSync;
+
+  try {
+    const here = fileURLToPath(deps.moduleUrl ?? import.meta.url);
+    const candidates = [
+      path.resolve(path.dirname(here), "../../../openclaw.mjs"),
+      path.resolve(path.dirname(here), "../../entry.js"),
+      path.resolve(path.dirname(here), "../../entry.mjs"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const argv1 = (deps.argv ?? process.argv)[1]?.trim();
+  if (!argv1) {
+    return null;
+  }
+  const resolved = path.isAbsolute(argv1) ? argv1 : path.resolve(deps.cwd ?? process.cwd(), argv1);
+  if (!looksLikeOpenClawEntry(resolved) || !existsSync(resolved)) {
+    return null;
+  }
+  return resolved;
+}
+
+export function resolveOpenClawSpawnInvocation(
+  args: string[],
+  deps: OpenClawSpawnDeps = {},
+): { command: string; args: string[] } {
+  const entryPath = resolveOpenClawEntryPath(deps);
+  if (entryPath) {
+    return {
+      command: deps.execPath ?? process.execPath,
+      args: [entryPath, ...args],
+    };
+  }
+  return { command: "openclaw", args };
 }
 
 function parseJsonResult(obj: Record<string, unknown>): ParsedOutput | null {

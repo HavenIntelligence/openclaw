@@ -1939,6 +1939,7 @@ export function renderApp(state: AppViewState) {
           state.tab === "companyOverview"
             ? lazyRender(lazyCompanyOverview, (m) =>
                 m.renderCompanyOverview({
+                  requestUpdate: requestHostUpdate,
                   profile: state.companyProfile,
                   agents: state.companyAgents,
                   teams: state.companyTeams,
@@ -1966,7 +1967,6 @@ export function renderApp(state: AppViewState) {
                     state.companyTeams = state.companyTeams.filter((t) => t.id !== id);
                     requestHostUpdate?.();
                   },
-                  requestUpdate: () => requestHostUpdate?.(),
                 }),
               )
             : nothing
