@@ -1002,11 +1002,13 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               const totalTokens = filteredLog.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
               return html`
                 <!-- Fleet: Pause / Resume / Stop all (real task control) -->
-                ${_runningCount > 0 || _pausedCount > 0
-                  ? html`
+                ${
+                  _runningCount > 0 || _pausedCount > 0
+                    ? html`
                       <div class="cd-fleet-ctrl">
-                        ${_runningCount > 0
-                          ? html`
+                        ${
+                          _runningCount > 0
+                            ? html`
                               <button class="cd-fleet-btn cd-fleet-btn--pause" title="Pause all running agents"
                                 @click=${() => void _onPauseAll?.()}>
                                 ⏸ Pause all (${_runningCount})
@@ -1016,18 +1018,22 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                                 ⏹ Stop all (${_runningCount})
                               </button>
                             `
-                          : ""}
-                        ${_pausedCount > 0
-                          ? html`
+                            : ""
+                        }
+                        ${
+                          _pausedCount > 0
+                            ? html`
                               <button class="cd-fleet-btn cd-fleet-btn--resume" title="Resume all paused agents"
                                 @click=${() => void _onResumeAll?.()}>
                                 ▶ Resume all (${_pausedCount})
                               </button>
                             `
-                          : ""}
+                            : ""
+                        }
                       </div>
                     `
-                  : ""}
+                    : ""
+                }
 
                 <!-- Agent donut ring -->
                 <div class="cd-stat-card cd-stat-card--agents">

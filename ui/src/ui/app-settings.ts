@@ -285,7 +285,10 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadConfig(host as unknown as OpenClawApp);
     await loadCron(host);
     const app = host as unknown as OpenClawApp;
-    const config = app.configForm ?? (app.configSnapshot as { config?: Record<string, unknown> } | null)?.config ?? null;
+    const config =
+      app.configForm ??
+      (app.configSnapshot as { config?: Record<string, unknown> } | null)?.config ??
+      null;
     for (const agent of app.companyAgents ?? []) {
       if (agent?.id && findAgentConfigEntryIndex(config, agent.id) < 0) {
         ensureAgentConfigEntry(app, agent.id);

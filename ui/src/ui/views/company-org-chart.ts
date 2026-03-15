@@ -503,7 +503,9 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
     currentRow.push({ chip, x: rowX, w });
     rowX += w + CHIP_GAP;
   }
-  if (currentRow.length > 0) {rows.push({ items: currentRow, y: rowY });}
+  if (currentRow.length > 0) {
+    rows.push({ items: currentRow, y: rowY });
+  }
 
   const chipRects = rows.flatMap((row) =>
     row.items.map(({ chip, x, w }) => ({ ...chip, x, w, y: row.y })),
@@ -863,7 +865,9 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
             ?disabled=${_organizationRunning}
             title=${_organizationRunning ? "Disabled while organization is running" : ""}
             @click=${() => {
-              if (_organizationRunning) {return;}
+              if (_organizationRunning) {
+                return;
+              }
               _deleteMode = !_deleteMode;
               _addTargetId = null;
             }}>
@@ -874,7 +878,9 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
             ?disabled=${_organizationRunning}
             title=${_organizationRunning ? "Disabled while organization is running" : ""}
             @click=${() => {
-              if (_organizationRunning) {return;}
+              if (_organizationRunning) {
+                return;
+              }
               _addTargetId = _selectedId ?? nodes[nodes.length - 1]?.id ?? null;
               _deleteMode = false;
             }}>
@@ -1053,7 +1059,9 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
               ${
                 _organizationRunning
                   ? html`
-                      <p class="cd-oc-detail__running-hint">Organization is running. Changes are disabled until all agents are idle.</p>
+                      <p class="cd-oc-detail__running-hint">
+                        Organization is running. Changes are disabled until all agents are idle.
+                      </p>
                     `
                   : html`
               <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {

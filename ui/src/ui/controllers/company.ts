@@ -255,7 +255,9 @@ export async function resumeAgent(state: CompanyState, agentId: string): Promise
 
 /** Stop all agents that are currently active or starting. */
 export async function stopAllAgents(state: CompanyState): Promise<void> {
-  if (!state.client) {return;}
+  if (!state.client) {
+    return;
+  }
   const running = state.companyAgents.filter(
     (a) => a.status === "active" || a.status === "starting",
   );
@@ -266,7 +268,9 @@ export async function stopAllAgents(state: CompanyState): Promise<void> {
 
 /** Pause all agents that are currently active or starting. */
 export async function pauseAllAgents(state: CompanyState): Promise<void> {
-  if (!state.client) {return;}
+  if (!state.client) {
+    return;
+  }
   const running = state.companyAgents.filter(
     (a) => a.status === "active" || a.status === "starting",
   );
@@ -277,7 +281,9 @@ export async function pauseAllAgents(state: CompanyState): Promise<void> {
 
 /** Resume all agents that are currently paused. */
 export async function resumeAllAgents(state: CompanyState): Promise<void> {
-  if (!state.client) {return;}
+  if (!state.client) {
+    return;
+  }
   const paused = state.companyAgents.filter((a) => a.status === "paused");
   for (const a of paused) {
     await state.client.request("company.agents.resume", { id: a.id });

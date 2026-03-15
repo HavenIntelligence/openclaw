@@ -31,142 +31,328 @@
 }
 
 /* ── Hardcoded hex backgrounds → system ── */
-#monitor-react-root .bg-\[\#0a0a0a\] { background-color: var(--monitor-bg) !important; }
-#monitor-react-root .bg-\[\#0f0f0f\] { background-color: var(--monitor-card) !important; }
-#monitor-react-root .bg-\[\#141414\] { background-color: var(--monitor-elevated) !important; }
-#monitor-react-root .bg-\[\#1a1a1a\] { background-color: var(--monitor-hover) !important; }
-#monitor-react-root .bg-\[\#18181b\] { background-color: var(--monitor-card) !important; }
-#monitor-react-root .bg-\[\#141619\] { background-color: var(--monitor-elevated) !important; }
-#monitor-react-root .text-\[\#0a0a0a\] { color: var(--monitor-text-strong) !important; }
+#monitor-react-root .bg-\[\#0a0a0a\] {
+  background-color: var(--monitor-bg) !important;
+}
+#monitor-react-root .bg-\[\#0f0f0f\] {
+  background-color: var(--monitor-card) !important;
+}
+#monitor-react-root .bg-\[\#141414\] {
+  background-color: var(--monitor-elevated) !important;
+}
+#monitor-react-root .bg-\[\#1a1a1a\] {
+  background-color: var(--monitor-hover) !important;
+}
+#monitor-react-root .bg-\[\#18181b\] {
+  background-color: var(--monitor-card) !important;
+}
+#monitor-react-root .bg-\[\#141619\] {
+  background-color: var(--monitor-elevated) !important;
+}
+#monitor-react-root .text-\[\#0a0a0a\] {
+  color: var(--monitor-text-strong) !important;
+}
 
 /* ── Zinc text → system text ── */
-#monitor-react-root .text-zinc-100 { color: var(--monitor-text-strong) !important; }
-#monitor-react-root .text-zinc-200 { color: var(--monitor-text-strong) !important; }
-#monitor-react-root .text-zinc-300 { color: var(--monitor-text) !important; }
-#monitor-react-root .text-zinc-400 { color: var(--muted-foreground, #636370) !important; }
-#monitor-react-root .text-zinc-500 { color: var(--monitor-muted) !important; }
-#monitor-react-root .text-zinc-600 { color: var(--monitor-muted) !important; }
-#monitor-react-root .hover\:text-zinc-200:hover { color: var(--monitor-text-strong) !important; }
-#monitor-react-root .hover\:text-zinc-300:hover { color: var(--monitor-text) !important; }
-#monitor-react-root .placeholder\:text-zinc-600::placeholder { color: var(--monitor-muted) !important; }
+#monitor-react-root .text-zinc-100 {
+  color: var(--monitor-text-strong) !important;
+}
+#monitor-react-root .text-zinc-200 {
+  color: var(--monitor-text-strong) !important;
+}
+#monitor-react-root .text-zinc-300 {
+  color: var(--monitor-text) !important;
+}
+#monitor-react-root .text-zinc-400 {
+  color: var(--muted-foreground, #636370) !important;
+}
+#monitor-react-root .text-zinc-500 {
+  color: var(--monitor-muted) !important;
+}
+#monitor-react-root .text-zinc-600 {
+  color: var(--monitor-muted) !important;
+}
+#monitor-react-root .hover\:text-zinc-200:hover {
+  color: var(--monitor-text-strong) !important;
+}
+#monitor-react-root .hover\:text-zinc-300:hover {
+  color: var(--monitor-text) !important;
+}
+#monitor-react-root .placeholder\:text-zinc-600::placeholder {
+  color: var(--monitor-muted) !important;
+}
 
 /* ── Zinc borders → system borders ── */
 #monitor-react-root .border-zinc-800\/50,
 #monitor-react-root .border-zinc-800\/30,
-#monitor-react-root .border-zinc-700\/50 { border-color: var(--monitor-border) !important; }
+#monitor-react-root .border-zinc-700\/50 {
+  border-color: var(--monitor-border) !important;
+}
 #monitor-react-root .border-zinc-800\/80,
 #monitor-react-root .border-zinc-700,
-#monitor-react-root .border-zinc-700\/80 { border-color: var(--monitor-border-strong) !important; }
+#monitor-react-root .border-zinc-700\/80 {
+  border-color: var(--monitor-border-strong) !important;
+}
 #monitor-react-root .border-zinc-500,
 #monitor-react-root .border-zinc-500\/50,
-#monitor-react-root .border-zinc-600 { border-color: var(--monitor-border-strong) !important; }
+#monitor-react-root .border-zinc-600 {
+  border-color: var(--monitor-border-strong) !important;
+}
 
 /* ── Zinc backgrounds → system ── */
-#monitor-react-root .bg-zinc-700 { background-color: var(--monitor-border-strong) !important; }
-#monitor-react-root .bg-zinc-800 { background-color: var(--monitor-hover) !important; }
-#monitor-react-root .bg-zinc-800\/10 { background-color: color-mix(in srgb, var(--monitor-hover) 10%, transparent) !important; }
-#monitor-react-root .bg-zinc-800\/20 { background-color: color-mix(in srgb, var(--monitor-hover) 20%, transparent) !important; }
-#monitor-react-root .bg-zinc-800\/30 { background-color: color-mix(in srgb, var(--monitor-hover) 30%, transparent) !important; }
-#monitor-react-root .bg-zinc-800\/40 { background-color: color-mix(in srgb, var(--monitor-hover) 40%, transparent) !important; }
-#monitor-react-root .bg-zinc-800\/50 { background-color: color-mix(in srgb, var(--monitor-hover) 50%, transparent) !important; }
-#monitor-react-root .bg-zinc-800\/80 { background-color: color-mix(in srgb, var(--monitor-hover) 80%, transparent) !important; }
-#monitor-react-root .bg-zinc-900 { background-color: var(--bg-accent, #13151b) !important; }
-#monitor-react-root .bg-zinc-900\/50 { background-color: color-mix(in srgb, var(--bg-accent) 50%, transparent) !important; }
-#monitor-react-root .bg-zinc-900\/80 { background-color: color-mix(in srgb, var(--bg-accent) 80%, transparent) !important; }
-#monitor-react-root .bg-zinc-900\/95 { background-color: color-mix(in srgb, var(--bg-accent) 95%, transparent) !important; }
-#monitor-react-root .hover\:bg-zinc-700:hover { background-color: var(--monitor-hover) !important; }
-#monitor-react-root .hover\:bg-zinc-800\/10:hover { background-color: color-mix(in srgb, var(--monitor-hover) 10%, transparent) !important; }
-#monitor-react-root .hover\:bg-zinc-800\/20:hover { background-color: color-mix(in srgb, var(--monitor-hover) 20%, transparent) !important; }
-#monitor-react-root .hover\:bg-zinc-800\/40:hover { background-color: color-mix(in srgb, var(--monitor-hover) 40%, transparent) !important; }
-#monitor-react-root .hover\:bg-zinc-800\/50:hover { background-color: color-mix(in srgb, var(--monitor-hover) 50%, transparent) !important; }
+#monitor-react-root .bg-zinc-700 {
+  background-color: var(--monitor-border-strong) !important;
+}
+#monitor-react-root .bg-zinc-800 {
+  background-color: var(--monitor-hover) !important;
+}
+#monitor-react-root .bg-zinc-800\/10 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 10%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-800\/20 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 20%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-800\/30 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 30%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-800\/40 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 40%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-800\/50 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 50%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-800\/80 {
+  background-color: color-mix(in srgb, var(--monitor-hover) 80%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-900 {
+  background-color: var(--bg-accent, #13151b) !important;
+}
+#monitor-react-root .bg-zinc-900\/50 {
+  background-color: color-mix(in srgb, var(--bg-accent) 50%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-900\/80 {
+  background-color: color-mix(in srgb, var(--bg-accent) 80%, transparent) !important;
+}
+#monitor-react-root .bg-zinc-900\/95 {
+  background-color: color-mix(in srgb, var(--bg-accent) 95%, transparent) !important;
+}
+#monitor-react-root .hover\:bg-zinc-700:hover {
+  background-color: var(--monitor-hover) !important;
+}
+#monitor-react-root .hover\:bg-zinc-800\/10:hover {
+  background-color: color-mix(in srgb, var(--monitor-hover) 10%, transparent) !important;
+}
+#monitor-react-root .hover\:bg-zinc-800\/20:hover {
+  background-color: color-mix(in srgb, var(--monitor-hover) 20%, transparent) !important;
+}
+#monitor-react-root .hover\:bg-zinc-800\/40:hover {
+  background-color: color-mix(in srgb, var(--monitor-hover) 40%, transparent) !important;
+}
+#monitor-react-root .hover\:bg-zinc-800\/50:hover {
+  background-color: color-mix(in srgb, var(--monitor-hover) 50%, transparent) !important;
+}
 
 /* ── Emerald → --ok ── */
-#monitor-react-root .text-emerald-300 { color: var(--monitor-ok) !important; }
-#monitor-react-root .text-emerald-400 { color: var(--monitor-ok) !important; }
-#monitor-react-root .text-emerald-500 { color: var(--monitor-ok) !important; }
-#monitor-react-root .bg-emerald-400 { background-color: var(--monitor-ok) !important; }
-#monitor-react-root .bg-emerald-500 { background-color: var(--monitor-ok) !important; }
+#monitor-react-root .text-emerald-300 {
+  color: var(--monitor-ok) !important;
+}
+#monitor-react-root .text-emerald-400 {
+  color: var(--monitor-ok) !important;
+}
+#monitor-react-root .text-emerald-500 {
+  color: var(--monitor-ok) !important;
+}
+#monitor-react-root .bg-emerald-400 {
+  background-color: var(--monitor-ok) !important;
+}
+#monitor-react-root .bg-emerald-500 {
+  background-color: var(--monitor-ok) !important;
+}
 #monitor-react-root .bg-emerald-400\/10,
-#monitor-react-root .bg-emerald-500\/10 { background-color: color-mix(in srgb, var(--monitor-ok) 10%, transparent) !important; }
-#monitor-react-root .bg-emerald-500\/20 { background-color: color-mix(in srgb, var(--monitor-ok) 20%, transparent) !important; }
-#monitor-react-root .bg-emerald-500\/30 { background-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important; }
-#monitor-react-root .bg-emerald-500\/40 { background-color: color-mix(in srgb, var(--monitor-ok) 40%, transparent) !important; }
-#monitor-react-root .bg-emerald-500\/50 { background-color: color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important; }
+#monitor-react-root .bg-emerald-500\/10 {
+  background-color: color-mix(in srgb, var(--monitor-ok) 10%, transparent) !important;
+}
+#monitor-react-root .bg-emerald-500\/20 {
+  background-color: color-mix(in srgb, var(--monitor-ok) 20%, transparent) !important;
+}
+#monitor-react-root .bg-emerald-500\/30 {
+  background-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important;
+}
+#monitor-react-root .bg-emerald-500\/40 {
+  background-color: color-mix(in srgb, var(--monitor-ok) 40%, transparent) !important;
+}
+#monitor-react-root .bg-emerald-500\/50 {
+  background-color: color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important;
+}
 #monitor-react-root .hover\:bg-emerald-400:hover,
-#monitor-react-root .hover\:bg-emerald-500\/40:hover { background-color: color-mix(in srgb, var(--monitor-ok) 60%, transparent) !important; }
+#monitor-react-root .hover\:bg-emerald-500\/40:hover {
+  background-color: color-mix(in srgb, var(--monitor-ok) 60%, transparent) !important;
+}
 #monitor-react-root .border-emerald-400\/20,
 #monitor-react-root .border-emerald-400\/30,
 #monitor-react-root .border-emerald-500\/20,
 #monitor-react-root .border-emerald-500\/30,
-#monitor-react-root .border-emerald-500\/50 { border-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important; }
+#monitor-react-root .border-emerald-500\/50 {
+  border-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important;
+}
 #monitor-react-root .border-emerald-500,
-#monitor-react-root .border-emerald-500\/80 { border-color: var(--monitor-ok) !important; }
-#monitor-react-root .accent-emerald-500 { accent-color: var(--monitor-ok) !important; }
-#monitor-react-root .fill-emerald-400\/20 { fill: color-mix(in srgb, var(--monitor-ok) 20%, transparent) !important; }
-#monitor-react-root .shadow-\[0_0_8px_rgba\(16\,185\,129\,0\.5\)\] { box-shadow: 0 0 8px color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important; }
+#monitor-react-root .border-emerald-500\/80 {
+  border-color: var(--monitor-ok) !important;
+}
+#monitor-react-root .accent-emerald-500 {
+  accent-color: var(--monitor-ok) !important;
+}
+#monitor-react-root .fill-emerald-400\/20 {
+  fill: color-mix(in srgb, var(--monitor-ok) 20%, transparent) !important;
+}
+#monitor-react-root .shadow-\[0_0_8px_rgba\(16\,185\,129\,0\.5\)\] {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important;
+}
 
 /* ── Rose → --destructive ── */
-#monitor-react-root .text-rose-400 { color: var(--monitor-destructive) !important; }
-#monitor-react-root .text-rose-500 { color: var(--monitor-destructive) !important; }
-#monitor-react-root .bg-rose-400\/10 { background-color: color-mix(in srgb, var(--monitor-destructive) 10%, transparent) !important; }
-#monitor-react-root .bg-rose-500 { background-color: var(--monitor-destructive) !important; }
-#monitor-react-root .bg-rose-500\/20 { background-color: color-mix(in srgb, var(--monitor-destructive) 20%, transparent) !important; }
-#monitor-react-root .bg-rose-950 { background-color: color-mix(in srgb, var(--monitor-destructive) 15%, var(--monitor-bg)) !important; }
-#monitor-react-root .border-rose-400\/20 { border-color: color-mix(in srgb, var(--monitor-destructive) 20%, transparent) !important; }
+#monitor-react-root .text-rose-400 {
+  color: var(--monitor-destructive) !important;
+}
+#monitor-react-root .text-rose-500 {
+  color: var(--monitor-destructive) !important;
+}
+#monitor-react-root .bg-rose-400\/10 {
+  background-color: color-mix(in srgb, var(--monitor-destructive) 10%, transparent) !important;
+}
+#monitor-react-root .bg-rose-500 {
+  background-color: var(--monitor-destructive) !important;
+}
+#monitor-react-root .bg-rose-500\/20 {
+  background-color: color-mix(in srgb, var(--monitor-destructive) 20%, transparent) !important;
+}
+#monitor-react-root .bg-rose-950 {
+  background-color: color-mix(
+    in srgb,
+    var(--monitor-destructive) 15%,
+    var(--monitor-bg)
+  ) !important;
+}
+#monitor-react-root .border-rose-400\/20 {
+  border-color: color-mix(in srgb, var(--monitor-destructive) 20%, transparent) !important;
+}
 #monitor-react-root .border-rose-400\/50,
-#monitor-react-root .border-rose-500\/50 { border-color: color-mix(in srgb, var(--monitor-destructive) 40%, transparent) !important; }
+#monitor-react-root .border-rose-500\/50 {
+  border-color: color-mix(in srgb, var(--monitor-destructive) 40%, transparent) !important;
+}
 
 /* ── Amber → --warn ── */
-#monitor-react-root .text-amber-400 { color: var(--monitor-warn) !important; }
-#monitor-react-root .text-amber-500 { color: var(--monitor-warn) !important; }
-#monitor-react-root .bg-amber-400 { background-color: var(--monitor-warn) !important; }
+#monitor-react-root .text-amber-400 {
+  color: var(--monitor-warn) !important;
+}
+#monitor-react-root .text-amber-500 {
+  color: var(--monitor-warn) !important;
+}
+#monitor-react-root .bg-amber-400 {
+  background-color: var(--monitor-warn) !important;
+}
 #monitor-react-root .bg-amber-400\/10,
-#monitor-react-root .bg-amber-500\/10 { background-color: color-mix(in srgb, var(--monitor-warn) 10%, transparent) !important; }
-#monitor-react-root .bg-amber-500 { background-color: var(--monitor-warn) !important; }
-#monitor-react-root .bg-amber-500\/20 { background-color: color-mix(in srgb, var(--monitor-warn) 20%, transparent) !important; }
-#monitor-react-root .bg-amber-500\/40 { background-color: color-mix(in srgb, var(--monitor-warn) 40%, transparent) !important; }
-#monitor-react-root .bg-amber-950 { background-color: color-mix(in srgb, var(--monitor-warn) 15%, var(--monitor-bg)) !important; }
+#monitor-react-root .bg-amber-500\/10 {
+  background-color: color-mix(in srgb, var(--monitor-warn) 10%, transparent) !important;
+}
+#monitor-react-root .bg-amber-500 {
+  background-color: var(--monitor-warn) !important;
+}
+#monitor-react-root .bg-amber-500\/20 {
+  background-color: color-mix(in srgb, var(--monitor-warn) 20%, transparent) !important;
+}
+#monitor-react-root .bg-amber-500\/40 {
+  background-color: color-mix(in srgb, var(--monitor-warn) 40%, transparent) !important;
+}
+#monitor-react-root .bg-amber-950 {
+  background-color: color-mix(in srgb, var(--monitor-warn) 15%, var(--monitor-bg)) !important;
+}
 #monitor-react-root .border-amber-400\/30,
 #monitor-react-root .border-amber-500\/20,
-#monitor-react-root .border-amber-500\/30 { border-color: color-mix(in srgb, var(--monitor-warn) 30%, transparent) !important; }
+#monitor-react-root .border-amber-500\/30 {
+  border-color: color-mix(in srgb, var(--monitor-warn) 30%, transparent) !important;
+}
 #monitor-react-root .border-amber-400\/50,
 #monitor-react-root .border-amber-500,
-#monitor-react-root .border-amber-500\/50 { border-color: color-mix(in srgb, var(--monitor-warn) 50%, transparent) !important; }
-#monitor-react-root .fill-amber-400\/20 { fill: color-mix(in srgb, var(--monitor-warn) 20%, transparent) !important; }
+#monitor-react-root .border-amber-500\/50 {
+  border-color: color-mix(in srgb, var(--monitor-warn) 50%, transparent) !important;
+}
+#monitor-react-root .fill-amber-400\/20 {
+  fill: color-mix(in srgb, var(--monitor-warn) 20%, transparent) !important;
+}
 
 /* ── Blue → --info ── */
-#monitor-react-root .text-blue-300 { color: var(--monitor-info) !important; }
-#monitor-react-root .text-blue-400 { color: var(--monitor-info) !important; }
-#monitor-react-root .bg-blue-500 { background-color: var(--monitor-info) !important; }
-#monitor-react-root .bg-blue-500\/10 { background-color: color-mix(in srgb, var(--monitor-info) 10%, transparent) !important; }
-#monitor-react-root .bg-blue-500\/15 { background-color: color-mix(in srgb, var(--monitor-info) 15%, transparent) !important; }
-#monitor-react-root .bg-blue-950 { background-color: color-mix(in srgb, var(--monitor-info) 15%, var(--monitor-bg)) !important; }
-#monitor-react-root .border-blue-400\/50 { border-color: color-mix(in srgb, var(--monitor-info) 40%, transparent) !important; }
-#monitor-react-root .border-blue-500\/30 { border-color: color-mix(in srgb, var(--monitor-info) 30%, transparent) !important; }
+#monitor-react-root .text-blue-300 {
+  color: var(--monitor-info) !important;
+}
+#monitor-react-root .text-blue-400 {
+  color: var(--monitor-info) !important;
+}
+#monitor-react-root .bg-blue-500 {
+  background-color: var(--monitor-info) !important;
+}
+#monitor-react-root .bg-blue-500\/10 {
+  background-color: color-mix(in srgb, var(--monitor-info) 10%, transparent) !important;
+}
+#monitor-react-root .bg-blue-500\/15 {
+  background-color: color-mix(in srgb, var(--monitor-info) 15%, transparent) !important;
+}
+#monitor-react-root .bg-blue-950 {
+  background-color: color-mix(in srgb, var(--monitor-info) 15%, var(--monitor-bg)) !important;
+}
+#monitor-react-root .border-blue-400\/50 {
+  border-color: color-mix(in srgb, var(--monitor-info) 40%, transparent) !important;
+}
+#monitor-react-root .border-blue-500\/30 {
+  border-color: color-mix(in srgb, var(--monitor-info) 30%, transparent) !important;
+}
 
 /* ── Purple ── */
-#monitor-react-root .text-purple-400 { color: var(--monitor-purple) !important; }
-#monitor-react-root .bg-purple-950 { background-color: color-mix(in srgb, var(--monitor-purple) 15%, var(--monitor-bg)) !important; }
-#monitor-react-root .border-purple-400\/50 { border-color: color-mix(in srgb, var(--monitor-purple) 40%, transparent) !important; }
+#monitor-react-root .text-purple-400 {
+  color: var(--monitor-purple) !important;
+}
+#monitor-react-root .bg-purple-950 {
+  background-color: color-mix(in srgb, var(--monitor-purple) 15%, var(--monitor-bg)) !important;
+}
+#monitor-react-root .border-purple-400\/50 {
+  border-color: color-mix(in srgb, var(--monitor-purple) 40%, transparent) !important;
+}
 
 /* ── Indigo ── */
-#monitor-react-root .text-indigo-400 { color: var(--monitor-indigo) !important; }
-#monitor-react-root .bg-indigo-400\/10 { background-color: color-mix(in srgb, var(--monitor-indigo) 10%, transparent) !important; }
-#monitor-react-root .bg-indigo-500\/20 { background-color: color-mix(in srgb, var(--monitor-indigo) 20%, transparent) !important; }
-#monitor-react-root .bg-indigo-500\/40 { background-color: color-mix(in srgb, var(--monitor-indigo) 40%, transparent) !important; }
+#monitor-react-root .text-indigo-400 {
+  color: var(--monitor-indigo) !important;
+}
+#monitor-react-root .bg-indigo-400\/10 {
+  background-color: color-mix(in srgb, var(--monitor-indigo) 10%, transparent) !important;
+}
+#monitor-react-root .bg-indigo-500\/20 {
+  background-color: color-mix(in srgb, var(--monitor-indigo) 20%, transparent) !important;
+}
+#monitor-react-root .bg-indigo-500\/40 {
+  background-color: color-mix(in srgb, var(--monitor-indigo) 40%, transparent) !important;
+}
 #monitor-react-root .border-indigo-400\/30,
-#monitor-react-root .border-indigo-500\/30 { border-color: color-mix(in srgb, var(--monitor-indigo) 30%, transparent) !important; }
-#monitor-react-root .border-indigo-500\/50 { border-color: color-mix(in srgb, var(--monitor-indigo) 50%, transparent) !important; }
+#monitor-react-root .border-indigo-500\/30 {
+  border-color: color-mix(in srgb, var(--monitor-indigo) 30%, transparent) !important;
+}
+#monitor-react-root .border-indigo-500\/50 {
+  border-color: color-mix(in srgb, var(--monitor-indigo) 50%, transparent) !important;
+}
 
 /* ── Selection / Focus ── */
 #monitor-react-root .selection\:bg-emerald-500\/30 ::selection {
   background-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important;
 }
-#monitor-react-root .focus\:border-emerald-500\/80:focus { border-color: var(--monitor-ok) !important; }
-#monitor-react-root .focus\:ring-emerald-500\/50:focus { --tw-ring-color: color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important; }
+#monitor-react-root .focus\:border-emerald-500\/80:focus {
+  border-color: var(--monitor-ok) !important;
+}
+#monitor-react-root .focus\:ring-emerald-500\/50:focus {
+  --tw-ring-color: color-mix(in srgb, var(--monitor-ok) 50%, transparent) !important;
+}
 
 /* ── Hover text on rose ── */
-#monitor-react-root .group:hover .group-hover\:text-rose-400 { color: var(--monitor-destructive) !important; }
+#monitor-react-root .group:hover .group-hover\:text-rose-400 {
+  color: var(--monitor-destructive) !important;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    Status grid — responsive columns based on container width
@@ -178,20 +364,48 @@
 }
 
 /* ── Light mode: buttons & controls ── */
-:root[data-theme-mode="light"] #monitor-react-root .bg-indigo-500\/15 { background-color: color-mix(in srgb, var(--monitor-indigo) 8%, transparent) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .border-indigo-500\/20 { border-color: color-mix(in srgb, var(--monitor-indigo) 15%, transparent) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-800\/30 { background-color: rgba(0, 0, 0, 0.06) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-800\/20 { background-color: rgba(0, 0, 0, 0.04) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .hover\:bg-zinc-800\/50:hover { background-color: rgba(0, 0, 0, 0.08) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .hover\:bg-zinc-800\/40:hover { background-color: rgba(0, 0, 0, 0.07) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .border-zinc-700\/20 { border-color: rgba(0, 0, 0, 0.08) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .hover\:border-zinc-700\/40:hover { border-color: rgba(0, 0, 0, 0.12) !important; }
-:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-700\/30 { background-color: rgba(0, 0, 0, 0.06) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-indigo-500\/15 {
+  background-color: color-mix(in srgb, var(--monitor-indigo) 8%, transparent) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .border-indigo-500\/20 {
+  border-color: color-mix(in srgb, var(--monitor-indigo) 15%, transparent) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-800\/30 {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-800\/20 {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .hover\:bg-zinc-800\/50:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .hover\:bg-zinc-800\/40:hover {
+  background-color: rgba(0, 0, 0, 0.07) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .border-zinc-700\/20 {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .hover\:border-zinc-700\/40:hover {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+:root[data-theme-mode="light"] #monitor-react-root .bg-zinc-700\/30 {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    Scrollbar
    ═══════════════════════════════════════════════════════════════════════ */
-.custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background-color: var(--border-strong, #2e3040); border-radius: 10px; }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: var(--border-hover, #3e4050); }
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong, #2e3040);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-hover, #3e4050);
+}

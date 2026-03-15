@@ -2121,7 +2121,9 @@ export function renderApp(state: AppViewState) {
                   },
                   onSelectFile: (name) => {
                     state.agentFileActive = name;
-                    if (expandedId) {void loadAgentFileContent(state, expandedId, name);}
+                    if (expandedId) {
+                      void loadAgentFileContent(state, expandedId, name);
+                    }
                     requestHostUpdate?.();
                   },
                   onFileDraftChange: (name, content) => {
@@ -2135,7 +2137,9 @@ export function renderApp(state: AppViewState) {
                     requestHostUpdate?.();
                   },
                   onFileSave: async (name) => {
-                    if (!expandedId) {return;}
+                    if (!expandedId) {
+                      return;
+                    }
                     await saveAgentFile(state, expandedId, name);
                     requestHostUpdate?.();
                   },
@@ -2153,7 +2157,9 @@ export function renderApp(state: AppViewState) {
                   },
                   onAgentSkillToggle: (aid, skillName, enabled) => {
                     const index = ensureAgentIndex(aid);
-                    if (index < 0) {return;}
+                    if (index < 0) {
+                      return;
+                    }
                     const list = (
                       getCurrentConfigValue() as { agents?: { list?: unknown[] } } | null
                     )?.agents?.list;
@@ -2161,7 +2167,9 @@ export function renderApp(state: AppViewState) {
                       ? (list[index] as { skills?: unknown })
                       : undefined;
                     const normalizedSkill = skillName.trim();
-                    if (!normalizedSkill) {return;}
+                    if (!normalizedSkill) {
+                      return;
+                    }
                     const allSkills =
                       state.agentSkillsReport?.skills?.map((s) => s.name).filter(Boolean) ?? [];
                     const existing = Array.isArray(entry?.skills)
@@ -2169,20 +2177,27 @@ export function renderApp(state: AppViewState) {
                       : undefined;
                     const base = existing ?? allSkills;
                     const next = new Set(base);
-                    if (enabled) {next.add(normalizedSkill);}
-                    else {next.delete(normalizedSkill);}
+                    if (enabled) {
+                      next.add(normalizedSkill);
+                    } else {
+                      next.delete(normalizedSkill);
+                    }
                     updateConfigFormValue(state, ["agents", "list", index, "skills"], [...next]);
                     requestHostUpdate?.();
                   },
                   onAgentSkillsClear: (aid) => {
                     const index = findAgentIndex(aid);
-                    if (index < 0) {return;}
+                    if (index < 0) {
+                      return;
+                    }
                     removeConfigFormValue(state, ["agents", "list", index, "skills"]);
                     requestHostUpdate?.();
                   },
                   onAgentSkillsDisableAll: (aid) => {
                     const index = ensureAgentIndex(aid);
-                    if (index < 0) {return;}
+                    if (index < 0) {
+                      return;
+                    }
                     updateConfigFormValue(state, ["agents", "list", index, "skills"], []);
                     requestHostUpdate?.();
                   },
@@ -2197,14 +2212,18 @@ export function renderApp(state: AppViewState) {
                   onToolsProfileChange: (aid, profile, clearAllow) => {
                     const index =
                       profile || clearAllow ? ensureAgentIndex(aid) : findAgentIndex(aid);
-                    if (index < 0) {return;}
+                    if (index < 0) {
+                      return;
+                    }
                     const basePath = ["agents", "list", index, "tools"];
                     if (profile) {
                       updateConfigFormValue(state, [...basePath, "profile"], profile);
                     } else {
                       removeConfigFormValue(state, [...basePath, "profile"]);
                     }
-                    if (clearAllow) {removeConfigFormValue(state, [...basePath, "allow"]);}
+                    if (clearAllow) {
+                      removeConfigFormValue(state, [...basePath, "allow"]);
+                    }
                     requestHostUpdate?.();
                   },
                   onToolsOverridesChange: (aid, alsoAllow, deny) => {
@@ -2212,7 +2231,9 @@ export function renderApp(state: AppViewState) {
                       alsoAllow.length > 0 || deny.length > 0
                         ? ensureAgentIndex(aid)
                         : findAgentIndex(aid);
-                    if (index < 0) {return;}
+                    if (index < 0) {
+                      return;
+                    }
                     const basePath = ["agents", "list", index, "tools"];
                     if (alsoAllow.length > 0) {
                       updateConfigFormValue(state, [...basePath, "alsoAllow"], alsoAllow);
@@ -2236,7 +2257,9 @@ export function renderApp(state: AppViewState) {
                   },
                   onCronRunNow: (jobId) => {
                     const job = state.cronJobs.find((entry) => entry.id === jobId);
-                    if (job) {void runCronJob(state, job, "force");}
+                    if (job) {
+                      void runCronJob(state, job, "force");
+                    }
                     requestHostUpdate?.();
                   },
                   onStart: async (agentId) => {
@@ -2280,10 +2303,9 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "companyOrgChart"
             ? lazyRender(lazyCompanyOrgChart, (m) => {
-                const organizationRunning =
-                  state.companyAgents.some(
-                    (a) => a.status === "active" || a.status === "starting",
-                  );
+                const organizationRunning = state.companyAgents.some(
+                  (a) => a.status === "active" || a.status === "starting",
+                );
                 return m.renderCompanyOrgChart({
                   agents: state.companyAgents,
                   organizationRunning,
@@ -2306,9 +2328,7 @@ export function renderApp(state: AppViewState) {
                 const runningCount = state.companyAgents.filter(
                   (a) => a.status === "active" || a.status === "starting",
                 ).length;
-                const pausedCount = state.companyAgents.filter(
-                  (a) => a.status === "paused",
-                ).length;
+                const pausedCount = state.companyAgents.filter((a) => a.status === "paused").length;
                 return m.renderCompanyOffice({
                   requestUpdate: requestHostUpdate,
                   agents: state.companyAgents,

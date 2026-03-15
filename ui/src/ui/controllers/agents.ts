@@ -74,11 +74,7 @@ export async function loadToolsCatalog(
     if (state.toolsCatalogLoadingAgentId !== resolvedAgentId) {
       return;
     }
-    if (
-      !skipAgentCheck &&
-      state.agentsSelectedId &&
-      state.agentsSelectedId !== resolvedAgentId
-    ) {
+    if (!skipAgentCheck && state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
       return;
     }
     state.toolsCatalogResult = res;
@@ -86,11 +82,7 @@ export async function loadToolsCatalog(
     if (state.toolsCatalogLoadingAgentId !== resolvedAgentId) {
       return;
     }
-    if (
-      !skipAgentCheck &&
-      state.agentsSelectedId &&
-      state.agentsSelectedId !== resolvedAgentId
-    ) {
+    if (!skipAgentCheck && state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
       return;
     }
     state.toolsCatalogResult = null;

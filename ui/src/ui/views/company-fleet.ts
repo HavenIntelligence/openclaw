@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import type { ClawDockAgent, ClawDockRuntime, LogEntry } from "../company-types.ts";
+import { icons } from "../icons.ts";
 import type {
   AgentsFilesListResult,
   ChannelsStatusSnapshot,
@@ -8,13 +9,12 @@ import type {
   SkillStatusReport,
   ToolsCatalogResult,
 } from "../types.ts";
-import { icons } from "../icons.ts";
-import { renderCompanyAgentLogsPanel } from "./company-agent-logs.ts";
-import { renderAgentFiles } from "./agents-panels-status-files.ts";
-import { renderAgentTools, renderAgentSkills } from "./agents-panels-tools-skills.ts";
-import { renderAgentChannels, renderAgentCron } from "./agents-panels-status-files.ts";
 import type { AgentsListResult } from "../types.ts";
+import { renderAgentFiles } from "./agents-panels-status-files.ts";
+import { renderAgentChannels, renderAgentCron } from "./agents-panels-status-files.ts";
+import { renderAgentTools, renderAgentSkills } from "./agents-panels-tools-skills.ts";
 import { buildAgentContext } from "./agents-utils.ts";
+import { renderCompanyAgentLogsPanel } from "./company-agent-logs.ts";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) {
@@ -158,7 +158,10 @@ function renderFleetRow(agent: ClawDockAgent, props: CompanyFleetProps) {
                       `
                     : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Resume" @click=${() => props.onResume?.(agent.id)}>${icons.play}</button>`
           }
-          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Config" @click=${(e: Event) => { e.stopPropagation(); toggleExpand(agent.id, agent, props); }}>${icons.edit}</button>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Config" @click=${(e: Event) => {
+            e.stopPropagation();
+            toggleExpand(agent.id, agent, props);
+          }}>${icons.edit}</button>
           <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs" @click=${() => {
             void openAgentLogs(agent, props);
           }}>${icons.terminal2}</button>
@@ -273,7 +276,9 @@ function toggleExpand(agentId: string, agent: ClawDockAgent | undefined, props: 
   } else {
     _expandedAgentId = agentId;
     _companyConfigPanel = "overview";
-    if (agent) {beginEditAgent(agent, props);}
+    if (agent) {
+      beginEditAgent(agent, props);
+    }
     props.onExpandedAgentChange?.(agentId);
   }
   props._requestUpdate?.();
@@ -313,15 +318,14 @@ function renderExpandedConfig(agent: ClawDockAgent, props: CompanyFleetProps) {
   const isEditingThis = _editingAgentId === agent.id;
   const panel = props.configPanel ?? _companyConfigPanel;
   // Treat as ready when parent state matches or this row is locally expanded (avoids one-frame "Loading…" and keeps panel usable)
-  const dataReady =
-    props.expandedDataAgentId === agent.id || _expandedAgentId === agent.id;
+  const dataReady = props.expandedDataAgentId === agent.id || _expandedAgentId === agent.id;
   const fileCount =
     dataReady && props.agentFiles?.list?.agentId === agent.id
-      ? props.agentFiles.list.files?.length ?? null
+      ? (props.agentFiles.list.files?.length ?? null)
       : null;
   const skillCount =
     dataReady && props.agentSkills?.agentId === agent.id
-      ? props.agentSkills.report?.skills?.length ?? null
+      ? (props.agentSkills.report?.skills?.length ?? null)
       : null;
   const channelCount = props.channels?.snapshot
     ? Object.keys(props.channels.snapshot.channelAccounts ?? {}).length
@@ -404,7 +408,9 @@ function renderExpandedConfig(agent: ClawDockAgent, props: CompanyFleetProps) {
                   class="cd-btn cd-btn--sm cd-btn--primary"
                   ?disabled=${agentRunning || _updateLoading || !(isEditingThis ? _editFormData.role : agent.role).trim() || !(isEditingThis ? _editFormData.team : agent.team).trim()}
                   @click=${async () => {
-                    if (_updateLoading) {return;}
+                    if (_updateLoading) {
+                      return;
+                    }
                     _updateLoading = true;
                     _updateError = null;
                     props._requestUpdate?.();
@@ -414,8 +420,12 @@ function renderExpandedConfig(agent: ClawDockAgent, props: CompanyFleetProps) {
                         team: (isEditingThis ? _editFormData.team : agent.team).trim(),
                         runtime: isEditingThis ? _editFormData.runtime : agent.runtime,
                         emoji: isEditingThis ? _editFormData.emoji : agent.emoji,
-                        description: (isEditingThis ? _editFormData.description : agent.description ?? "").trim(),
-                        reportTo: (isEditingThis ? _editFormData.reportTo : agent.reportTo ?? "") || null,
+                        description: (isEditingThis
+                          ? _editFormData.description
+                          : (agent.description ?? "")
+                        ).trim(),
+                        reportTo:
+                          (isEditingThis ? _editFormData.reportTo : (agent.reportTo ?? "")) || null,
                       });
                       _expandedAgentId = null;
                       props.onExpandedAgentChange?.(null);
@@ -522,7 +532,7 @@ function renderExpandedOverview(
                 <option value="">None</option>
                 ${managerOptions.map(
                   (entry) => html`
-                    <option value=${entry.id} ?selected=${(isEditingThis ? _editFormData.reportTo : agent.reportTo ?? "") === entry.id}>
+                    <option value=${entry.id} ?selected=${(isEditingThis ? _editFormData.reportTo : (agent.reportTo ?? "")) === entry.id}>
                       ${entry.emoji} ${entry.name}
                     </option>
                   `,
@@ -589,7 +599,11 @@ function renderExpandedOverview(
   `;
 }
 
-function renderExpandedPanelFiles(agent: ClawDockAgent, props: CompanyFleetProps, dataReady: boolean) {
+function renderExpandedPanelFiles(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
   if (!dataReady || !props.onLoadFiles || !props.onSelectFile) {
     return html`
       <div class="cd-agent-config-section">
@@ -619,9 +633,15 @@ function renderExpandedPanelFiles(agent: ClawDockAgent, props: CompanyFleetProps
   `;
 }
 
-function renderExpandedPanelTools(agent: ClawDockAgent, props: CompanyFleetProps, dataReady: boolean) {
+function renderExpandedPanelTools(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
   if (!dataReady) {
-    return html`<div class="cd-agent-config-section"><p class="cd-muted">Loading tools…</p></div>`;
+    return html`
+      <div class="cd-agent-config-section"><p class="cd-muted">Loading tools…</p></div>
+    `;
   }
   const tc = props.toolsCatalog;
   return html`
@@ -644,9 +664,15 @@ function renderExpandedPanelTools(agent: ClawDockAgent, props: CompanyFleetProps
   `;
 }
 
-function renderExpandedPanelSkills(agent: ClawDockAgent, props: CompanyFleetProps, dataReady: boolean) {
+function renderExpandedPanelSkills(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
   if (!dataReady) {
-    return html`<div class="cd-agent-config-section"><p class="cd-muted">Loading skills…</p></div>`;
+    return html`
+      <div class="cd-agent-config-section"><p class="cd-muted">Loading skills…</p></div>
+    `;
   }
   const sk = props.agentSkills;
   return html`
@@ -674,7 +700,11 @@ function renderExpandedPanelSkills(agent: ClawDockAgent, props: CompanyFleetProp
   `;
 }
 
-function renderExpandedPanelChannels(agent: ClawDockAgent, props: CompanyFleetProps, _dataReady: boolean) {
+function renderExpandedPanelChannels(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  _dataReady: boolean,
+) {
   const ch = props.channels;
   const agentForContext = agent as unknown as AgentsListResult["agents"][number];
   const context = buildAgentContext(
@@ -699,7 +729,11 @@ function renderExpandedPanelChannels(agent: ClawDockAgent, props: CompanyFleetPr
   `;
 }
 
-function renderExpandedPanelCron(agent: ClawDockAgent, props: CompanyFleetProps, _dataReady: boolean) {
+function renderExpandedPanelCron(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  _dataReady: boolean,
+) {
   const cr = props.cron;
   const agentForContext = agent as unknown as AgentsListResult["agents"][number];
   const context = buildAgentContext(
@@ -950,13 +984,7 @@ function renderEmptyState(props: CompanyFleetProps) {
   `;
 }
 
-export type CompanyConfigPanel =
-  | "overview"
-  | "files"
-  | "tools"
-  | "skills"
-  | "channels"
-  | "cron";
+export type CompanyConfigPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
 
 export type CompanyFleetProps = {
   agents?: ClawDockAgent[];
@@ -1042,16 +1070,8 @@ export type CompanyFleetProps = {
   onAgentSkillsDisableAll?: (agentId: string) => void;
   onConfigReload?: () => void;
   onConfigSave?: () => void;
-  onToolsProfileChange?: (
-    agentId: string,
-    profile: string | null,
-    clearAllow: boolean,
-  ) => void;
-  onToolsOverridesChange?: (
-    agentId: string,
-    alsoAllow: string[],
-    deny: string[],
-  ) => void;
+  onToolsProfileChange?: (agentId: string, profile: string | null, clearAllow: boolean) => void;
+  onToolsOverridesChange?: (agentId: string, alsoAllow: string[], deny: string[]) => void;
   onChannelsRefresh?: () => void;
   onCronRefresh?: () => void;
   onCronRunNow?: (jobId: string) => void;
@@ -1147,7 +1167,8 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
           </thead>
           <tbody>
             ${(props.agents ?? []).map(
-              (a) => html`${renderFleetRow(a, props)}${_expandedAgentId === a.id ? renderExpandedConfigRow(a, props) : nothing}`,
+              (a) =>
+                html`${renderFleetRow(a, props)}${_expandedAgentId === a.id ? renderExpandedConfigRow(a, props) : nothing}`,
             )}
           </tbody>
         </table>
