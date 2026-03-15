@@ -62,25 +62,164 @@ type LogEntry = {
 
 // ── (Project type removed — projects UI stripped) ───────────────────────────
 
-// ── Layout — matches Orchestrator + 4 department structure ────────────────
-// Canvas is a compact grid: orchestrator at top center, 4 leads in a row below.
+// ── Layout constants ──────────────────────────────────────────────────────
 const TILE = 80;
-const COLS = 12;
-const ROWS = 5;
 
-// Fixed desk positions: orchestrator top-center, departments spaced below
-const DESKS: Record<string, { x: number; y: number }> = {
-  orchestrator: { x: 5, y: 0 },
-  engineering: { x: 1, y: 3 },
-  marketing: { x: 4, y: 3 },
-  operations: { x: 7, y: 3 },
-  finance: { x: 10, y: 3 },
+// Team color palette — assigns stable colors per team name
+const TEAM_PALETTE = [
+  { bg: "rgba(99,102,241,0.07)", border: "rgba(99,102,241,0.25)" },
+  { bg: "rgba(34,197,94,0.07)", border: "rgba(34,197,94,0.25)" },
+  { bg: "rgba(249,115,22,0.07)", border: "rgba(249,115,22,0.25)" },
+  { bg: "rgba(96,165,250,0.07)", border: "rgba(96,165,250,0.25)" },
+  { bg: "rgba(234,179,8,0.07)", border: "rgba(234,179,8,0.25)" },
+  { bg: "rgba(236,72,153,0.07)", border: "rgba(236,72,153,0.25)" },
+  { bg: "rgba(132,204,22,0.07)", border: "rgba(132,204,22,0.25)" },
+  { bg: "rgba(6,182,212,0.07)", border: "rgba(6,182,212,0.25)" },
+];
+
+type DynamicZone = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  color: string;
+  border: string;
 };
+/** Compute floor zones and desk positions from real agent data, grouped by team. */
+function computeLayout(agents: ClawDockAgent[]): {
+  zones: DynamicZone[];
+  desks: Map<string, { x: number; y: number }>;
+  cols: number;
+  rows: number;
+} {
+  if (agents.length === 0) {
+    return { zones: [], desks: new Map(), cols: 6, rows: 4 };
+  }
 
-const _THOUGHTS: Record<string, string[]> = {};
-const _MESSAGE_SCRIPTS: { from: string; to: string; emoji: string; label: string }[] = [];
+  // Group agents by team
+  const teamMap = new Map<string, ClawDockAgent[]>();
+  for (const a of agents) {
+    const team = a.team || "general";
+    if (!teamMap.has(team)) {
+      teamMap.set(team, []);
+    }
+    teamMap.get(team)!.push(a);
+  }
 
-const _INITIAL_AGENTS: OfficeAgent[] = [];
+  // Find the director/orchestrator — place in a top row
+  const director = agents.find(
+    (a) =>
+      a.role?.toLowerCase().includes("director") ||
+      a.role?.toLowerCase().includes("ceo") ||
+      a.role?.toLowerCase().includes("orchestrator") ||
+      a.id === "ai-director" ||
+      a.id === "orchestrator" ||
+      a.id === "ceo",
+  );
+  const directorTeam = director?.team || "";
+
+  const teamNames = [...teamMap.keys()].toSorted((a, b) => {
+    // Director's team first
+    if (a === directorTeam) {
+      return -1;
+    }
+    if (b === directorTeam) {
+      return 1;
+    }
+    return a.localeCompare(b);
+  });
+
+  const zones: DynamicZone[] = [];
+  const desks = new Map<string, { x: number; y: number }>();
+
+  // Layout: director row at top (row 0-1), team columns below (row 2+)
+  // Each team gets a column; agents in a team are stacked vertically within that column.
+  const ZONE_W = 3; // tiles per team column
+  const nonDirTeams = director ? teamNames.filter((t) => t !== directorTeam) : teamNames;
+  const dirTeamAgents = director
+    ? (teamMap.get(directorTeam) ?? []).filter((a) => a.id !== director.id)
+    : [];
+
+  // Director zone spans the top
+  const totalTeamCols = Math.max(nonDirTeams.length + (dirTeamAgents.length > 0 ? 1 : 0), 1);
+  const totalW = totalTeamCols * ZONE_W;
+
+  if (director) {
+    // Director at top center
+    const dirX = Math.floor(totalW / 2);
+    desks.set(director.id, { x: dirX, y: 0 });
+    zones.push({
+      x: Math.max(0, dirX - 2),
+      y: 0,
+      w: Math.min(5, totalW),
+      h: 2,
+      label: directorTeam || "Executive",
+      color: TEAM_PALETTE[0].bg,
+      border: TEAM_PALETTE[0].border,
+    });
+  }
+
+  // Team columns below
+  const teamStartY = director ? 2 : 0;
+  let colIdx = 0;
+
+  // If director's team has other members, show them as a column too
+  if (dirTeamAgents.length > 0) {
+    const palIdx = 0;
+    const maxAgentsInTeam = dirTeamAgents.length;
+    zones.push({
+      x: colIdx * ZONE_W,
+      y: teamStartY,
+      w: ZONE_W,
+      h: Math.max(2, maxAgentsInTeam + 1),
+      label: directorTeam || "Executive",
+      color: TEAM_PALETTE[palIdx % TEAM_PALETTE.length].bg,
+      border: TEAM_PALETTE[palIdx % TEAM_PALETTE.length].border,
+    });
+    for (let i = 0; i < dirTeamAgents.length; i++) {
+      desks.set(dirTeamAgents[i].id, { x: colIdx * ZONE_W + 1, y: teamStartY + i + 1 });
+    }
+    colIdx++;
+  }
+
+  for (let t = 0; t < nonDirTeams.length; t++) {
+    const teamName = nonDirTeams[t];
+    const teamAgents = teamMap.get(teamName) ?? [];
+    const palIdx = (t + 1) % TEAM_PALETTE.length;
+    const maxAgentsInTeam = teamAgents.length;
+    zones.push({
+      x: colIdx * ZONE_W,
+      y: teamStartY,
+      w: ZONE_W,
+      h: Math.max(2, maxAgentsInTeam + 1),
+      label: teamName,
+      color: TEAM_PALETTE[palIdx].bg,
+      border: TEAM_PALETTE[palIdx].border,
+    });
+    for (let i = 0; i < teamAgents.length; i++) {
+      desks.set(teamAgents[i].id, { x: colIdx * ZONE_W + 1, y: teamStartY + i + 1 });
+    }
+    colIdx++;
+  }
+
+  const maxZoneBottom = zones.reduce((m, z) => Math.max(m, z.y + z.h), 0);
+  return {
+    zones,
+    desks,
+    cols: Math.max(totalW, 6),
+    rows: Math.max(maxZoneBottom + 1, 4),
+  };
+}
+
+// ── Cached layout (recomputed when agents change) ────────────────────────
+let _cachedLayout: ReturnType<typeof computeLayout> = {
+  zones: [],
+  desks: new Map(),
+  cols: 6,
+  rows: 4,
+};
+let _cachedAgentIds = "";
 
 // ── Demo execution log ────────────────────────────────────────────────────
 let _execLog: LogEntry[] = [];
@@ -95,6 +234,8 @@ let _isPaused = false;
 let _rightTab: "log" | "output" = "log";
 let _logAgentFilter: string = "all";
 let _expandedOutputIds: Set<string> = new Set();
+let _panelWidth = 380; // px — right panel width, draggable
+let _isDragging = false;
 let _lastVisibleLogId = "";
 
 // ── Callbacks from props (module-level to be accessible in renderFn) ────────
@@ -321,58 +462,7 @@ function startSimulation(update: () => void) {
   _animFrame = requestAnimationFrame(loop);
 }
 
-// ── Floor zones — orchestrator + 4 departments ────────────────────────────
-const FLOOR_TILES = [
-  {
-    x: 3,
-    y: 0,
-    w: 6,
-    h: 2,
-    label: "Orchestrator",
-    color: "rgba(99,102,241,0.06)",
-    border: "rgba(99,102,241,0.2)",
-  },
-  {
-    x: 0,
-    y: 2,
-    w: 3,
-    h: 3,
-    label: "Engineering",
-    color: "rgba(34,197,94,0.06)",
-    border: "rgba(34,197,94,0.2)",
-  },
-  {
-    x: 3,
-    y: 2,
-    w: 3,
-    h: 3,
-    label: "Marketing",
-    color: "rgba(249,115,22,0.06)",
-    border: "rgba(249,115,22,0.2)",
-  },
-  {
-    x: 6,
-    y: 2,
-    w: 3,
-    h: 3,
-    label: "Operations",
-    color: "rgba(96,165,250,0.06)",
-    border: "rgba(96,165,250,0.2)",
-  },
-  {
-    x: 9,
-    y: 2,
-    w: 3,
-    h: 3,
-    label: "Finance",
-    color: "rgba(234,179,8,0.06)",
-    border: "rgba(234,179,8,0.2)",
-  },
-];
-
-const DESK_ITEMS = Object.entries(DESKS).map(([_id, pos]) => {
-  return { ...pos, emoji: "🖥️" };
-});
+// (Floor zones and desk items are now computed dynamically by computeLayout())
 
 // ── Log type helpers ───────────────────────────────────────────────────────
 function logTypeClass(type: LogEntry["type"]) {
@@ -448,6 +538,16 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
   // Rebuild agent list from real backend data on first seed or when the list changes.
   if (props.agents && props.agents.length > 0) {
+    // Recompute layout when agent list changes
+    const agentIdKey = props.agents
+      .map((a) => a.id)
+      .toSorted()
+      .join(",");
+    if (agentIdKey !== _cachedAgentIds) {
+      _cachedLayout = computeLayout(props.agents);
+      _cachedAgentIds = agentIdKey;
+    }
+
     const statusMap: Record<string, OfficeAgent["status"]> = {
       active: "working",
       idle: "idle",
@@ -457,9 +557,6 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       paused: "idle",
     };
 
-    // Seed new agents. Match by agent ID to DESKS layout; orchestrator at top,
-    // department leads spaced evenly below. Extra agents get dynamic positions.
-    let dynamicIdx = 0;
     for (let i = 0; i < props.agents.length; i++) {
       const realAgent = props.agents[i];
       const existing = _agents.find((a) => a.id === realAgent.id);
@@ -473,20 +570,17 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
         if (realAgent.currentTask && existing.status === "working") {
           existing.activity = realAgent.currentTask.slice(0, 40);
         }
-      } else {
-        // Match agent to a named desk position, or assign dynamic grid slot
-        let deskX: number;
-        let deskY: number;
-        const desk = DESKS[realAgent.id];
-        if (desk) {
-          deskX = desk.x;
-          deskY = desk.y;
-        } else {
-          // Space extra agents evenly on row 3
-          deskX = 1 + dynamicIdx * 3;
-          deskY = 3;
-          dynamicIdx++;
+        // Update desk position if layout changed
+        const desk = _cachedLayout.desks.get(realAgent.id);
+        if (desk && (existing.deskX !== desk.x || existing.deskY !== desk.y)) {
+          existing.deskX = desk.x;
+          existing.deskY = desk.y;
+          existing.x = desk.x;
+          existing.y = desk.y;
         }
+      } else {
+        // Compute desk from dynamic layout
+        const desk = _cachedLayout.desks.get(realAgent.id) ?? { x: 1 + i * 3, y: 2 };
         _agents.push({
           id: realAgent.id,
           name: realAgent.name || realAgent.id,
@@ -499,12 +593,12 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
           thoughtBubble: "",
           thoughtTimer: 0,
           messageTo: null,
-          x: deskX,
-          y: deskY,
-          targetX: deskX,
-          targetY: deskY,
-          deskX,
-          deskY,
+          x: desk.x,
+          y: desk.y,
+          targetX: desk.x,
+          targetY: desk.y,
+          deskX: desk.x,
+          deskY: desk.y,
         });
         _agentsSeededFromBackend = true;
       }
@@ -650,8 +744,9 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   );
   const displayLog = dedupeDisplayLog(combined).slice(-80);
 
-  const W = COLS * TILE;
-  const H = ROWS * TILE;
+  const { zones, cols: layoutCols, rows: layoutRows } = _cachedLayout;
+  const W = layoutCols * TILE;
+  const H = layoutRows * TILE;
 
   // Filter out noise: [tools]/[warn]/[info], and backend duplicate of human message
   const filteredLog = displayLog.filter((e) => !isNoiseLogEntry(e));
@@ -664,24 +759,21 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   }
 
   return html`
-    <div class="cd-page cd-page--office">
-
-      <!-- ── Top bar ─────────────────────────────────────────────────── -->
-      <div class="cd-office-bar">
-        <div class="cd-office-bar__left">
-          <span class="cd-office-bar__title">🏢 Live Office</span>
-          <span class="cd-office-bar__sub">Real-time agent orchestration</span>
-        </div>
-        <div class="cd-office-bar__chips">
-          <button class="cd-btn cd-btn--${_isPaused ? "primary" : "outline"} cd-btn--sm" @click=${() => {
-            _isPaused = !_isPaused;
-          }}>
-            ${_isPaused ? "▶ Resume" : "⏸ Pause"}
-          </button>
-          <span>${_agents.filter((a) => a.status !== "crashed").length} active</span>
-          ${_messages.length > 0 ? html`<span class="cd-office-bar__msgs">${_messages.length} msgs</span>` : ""}
-        </div>
-      </div>
+    <div class="cd-page cd-page--office"
+      @mousemove=${(e: MouseEvent) => {
+        if (!_isDragging) {
+          return;
+        }
+        const page = e.currentTarget as HTMLElement;
+        const newW = page.getBoundingClientRect().right - e.clientX;
+        _panelWidth = Math.max(240, Math.min(800, newW));
+      }}
+      @mouseup=${() => {
+        _isDragging = false;
+      }}
+      @mouseleave=${() => {
+        _isDragging = false;
+      }}>
 
       <!-- ── Main split layout ───────────────────────────────────────── -->
       <div class="cd-office-split">
@@ -705,8 +797,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   : ""
               }
 
-              <!-- Zones -->
-              ${FLOOR_TILES.map(
+              <!-- Zones (dynamic from real team structure) -->
+              ${zones.map(
                 (zone) => html`
                 <div class="cd-office-zone"
                   style="left:${zone.x * TILE}px;top:${zone.y * TILE}px;width:${zone.w * TILE}px;height:${zone.h * TILE}px;background:${zone.color};border-color:${zone.border}">
@@ -715,10 +807,10 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
               )}
 
-              <!-- Desk items -->
-              ${DESK_ITEMS.map(
-                (d) => html`
-                <div class="cd-office-desk-item" style="left:${d.x * TILE + TILE / 2 - 10}px;top:${d.y * TILE + TILE - 16}px">🖥️</div>
+              <!-- Desk items (one per agent) -->
+              ${_agents.map(
+                (a) => html`
+                <div class="cd-office-desk-item" style="left:${a.deskX * TILE + TILE / 2 - 10}px;top:${a.deskY * TILE + TILE - 16}px">🖥️</div>
               `,
               )}
 
@@ -744,27 +836,33 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     </g>
                   `;
                 })}
-                <!-- Static edges: orchestrator to each department -->
+                <!-- Static edges: reportTo relationships from real agent data -->
                 ${(() => {
-                  const orch = _agents.find(
-                    (a) => a.role === "Orchestrator" || a.id === "orchestrator",
-                  );
-                  if (!orch) {
+                  if (!props.agents) {
                     return "";
                   }
-                  return _agents
-                    .filter((a) => a.id !== orch.id)
-                    .map((dept) => {
-                      const x1 = orch.x * TILE + TILE / 2;
-                      const y1 = orch.y * TILE + TILE - 4;
-                      const x2 = dept.x * TILE + TILE / 2;
-                      const y2 = dept.y * TILE + 4;
-                      return html`
-                        <g class="cd-office-edge">
-                          <path d="M ${x1} ${y1} L ${x2} ${y2}" class="cd-office-edge__line"/>
-                        </g>
-                      `;
-                    });
+                  const edges: { from: OfficeAgent; to: OfficeAgent }[] = [];
+                  for (const ra of props.agents) {
+                    if (!ra.reportTo) {
+                      continue;
+                    }
+                    const child = _agents.find((a) => a.id === ra.id);
+                    const parent = _agents.find((a) => a.id === ra.reportTo);
+                    if (child && parent) {
+                      edges.push({ from: parent, to: child });
+                    }
+                  }
+                  return edges.map(({ from, to }) => {
+                    const x1 = from.x * TILE + TILE / 2;
+                    const y1 = from.y * TILE + TILE - 4;
+                    const x2 = to.x * TILE + TILE / 2;
+                    const y2 = to.y * TILE + 4;
+                    return html`
+                      <g class="cd-office-edge">
+                        <path d="M ${x1} ${y1} L ${x2} ${y2}" class="cd-office-edge__line"/>
+                      </g>
+                    `;
+                  });
                 })()}
               </svg>
 
@@ -871,44 +969,82 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               const messaging = _agents.filter((a) => a.status === "messaging");
               const total = _agents.length;
               const workingPct = total > 0 ? Math.round((working.length / total) * 100) : 0;
+              const idlePct = total > 0 ? Math.round((idle.length / total) * 100) : 0;
+              const crashPct = total > 0 ? Math.round((crashed.length / total) * 100) : 0;
+              const msgPct = total > 0 ? Math.round((messaging.length / total) * 100) : 0;
               const totalOutputs = filteredLog.filter((e) => e.type === "output").length;
               const totalTools = filteredLog.filter((e) => e.type === "tool_call").length;
               const totalErrors = filteredLog.filter((e) => e.type === "error").length;
+              const totalTokens = filteredLog.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
               return html`
-                <!-- Agent status ring -->
+                <!-- Pause / Resume control -->
+                <button class="cd-stat-ctrl ${_isPaused ? "cd-stat-ctrl--paused" : ""}" @click=${() => {
+                  _isPaused = !_isPaused;
+                }}
+                  title="${_isPaused ? "Resume animation" : "Pause animation"}">
+                  ${_isPaused ? "▶" : "⏸"}
+                </button>
+
+                <!-- Agent donut ring -->
                 <div class="cd-stat-card cd-stat-card--agents">
                   <div class="cd-stat-ring">
                     <svg viewBox="0 0 36 36" class="cd-stat-ring__svg">
-                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="2.5"/>
-                      ${
-                        working.length > 0
-                          ? html`<circle cx="18" cy="18" r="15.9" fill="none" stroke="#22c55e" stroke-width="2.5"
-                        stroke-dasharray="${workingPct} ${100 - workingPct}" stroke-dashoffset="25" stroke-linecap="round"/>`
-                          : ""
-                      }
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="3" opacity="0.2"/>
+                      ${(() => {
+                        // Multi-segment donut: working (green) → messaging (blue) → idle (amber) → crashed (red)
+                        const r = 15.9;
+                        const segments: { pct: number; color: string }[] = [];
+                        if (workingPct > 0) {
+                          segments.push({ pct: workingPct, color: "#22c55e" });
+                        }
+                        if (msgPct > 0) {
+                          segments.push({ pct: msgPct, color: "#60a5fa" });
+                        }
+                        if (idlePct > 0) {
+                          segments.push({ pct: idlePct, color: "#f59e0b" });
+                        }
+                        if (crashPct > 0) {
+                          segments.push({ pct: crashPct, color: "#ef4444" });
+                        }
+                        let offset = 25; // start from top
+                        return segments.map((s) => {
+                          const el = html`<circle cx="18" cy="18" r="${r}" fill="none"
+                            stroke="${s.color}" stroke-width="3"
+                            stroke-dasharray="${s.pct} ${100 - s.pct}"
+                            stroke-dashoffset="${offset}" stroke-linecap="round"/>`;
+                          offset -= s.pct;
+                          return el;
+                        });
+                      })()}
                     </svg>
-                    <span class="cd-stat-ring__value">${working.length}</span>
+                    <span class="cd-stat-ring__value">${total}</span>
                   </div>
                   <div class="cd-stat-card__info">
                     <span class="cd-stat-card__title">Agents</span>
+                    <div class="cd-stat-card__dots">
+                      ${_agents.map((a) => {
+                        const dotColor =
+                          a.status === "working" || a.status === "thinking"
+                            ? "#22c55e"
+                            : a.status === "messaging"
+                              ? "#60a5fa"
+                              : a.status === "crashed"
+                                ? "#ef4444"
+                                : "#f59e0b";
+                        return html`<span class="cd-stat-agent-dot" style="background:${dotColor}" title="${a.name}: ${a.status}"></span>`;
+                      })}
+                    </div>
                     <div class="cd-stat-card__badges">
                       ${working.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--ok">${working.length} active</span>` : ""}
                       ${idle.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--warn">${idle.length} idle</span>` : ""}
-                      ${messaging.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--info">${messaging.length} messaging</span>` : ""}
-                      ${crashed.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--danger">${crashed.length} crashed</span>` : ""}
-                      ${
-                        total === 0
-                          ? html`
-                              <span class="cd-stat-badge">none</span>
-                            `
-                          : ""
-                      }
+                      ${messaging.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--info">${messaging.length} msg</span>` : ""}
+                      ${crashed.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--danger">${crashed.length} err</span>` : ""}
                     </div>
                   </div>
                 </div>
 
                 <!-- Activity metrics -->
-                <div class="cd-stat-card">
+                <div class="cd-stat-card cd-stat-card--metrics">
                   <div class="cd-stat-card__metrics">
                     <div class="cd-stat-metric">
                       <span class="cd-stat-metric__value">${totalOutputs}</span>
@@ -916,16 +1052,29 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     </div>
                     <div class="cd-stat-metric">
                       <span class="cd-stat-metric__value">${totalTools}</span>
-                      <span class="cd-stat-metric__label">tool calls</span>
+                      <span class="cd-stat-metric__label">tools</span>
                     </div>
                     <div class="cd-stat-metric">
                       <span class="cd-stat-metric__value ${totalErrors > 0 ? "cd-stat-metric__value--danger" : ""}">${totalErrors}</span>
                       <span class="cd-stat-metric__label">errors</span>
                     </div>
+                    <div class="cd-stat-metric">
+                      <span class="cd-stat-metric__value">${totalTokens > 1000 ? (totalTokens / 1000).toFixed(1) + "K" : totalTokens}</span>
+                      <span class="cd-stat-metric__label">tokens</span>
+                    </div>
                   </div>
                 </div>
 
-                <!-- Live feed -->
+                <!-- In-flight messages -->
+                <div class="cd-stat-card cd-stat-card--msgs">
+                  <span class="cd-stat-card__icon ${_messages.length > 0 ? "cd-stat-card__icon--pulse" : ""}">${_messages.length > 0 ? "📡" : "📭"}</span>
+                  <div class="cd-stat-card__info">
+                    <span class="cd-stat-card__title">${_messages.length} in flight</span>
+                    <span class="cd-stat-card__sub">${_canvasBubbles.length} bubbles</span>
+                  </div>
+                </div>
+
+                <!-- Live feed ticker -->
                 <div class="cd-stat-card cd-stat-card--feed">
                   <div class="cd-stat-feed">
                     ${
@@ -940,19 +1089,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                               : "cd-stat-feed__dot--info"
                         }"></span>
                         <span class="cd-stat-feed__text">${displayLog[displayLog.length - 1].agentEmoji} ${displayLog[displayLog.length - 1].content.slice(0, 50)}${displayLog[displayLog.length - 1].content.length > 50 ? "..." : ""}</span>
-                        <span class="cd-stat-feed__ts">${displayLog[displayLog.length - 1].ts}</span>
                       </div>
-                      ${
-                        displayLog.length > 1
-                          ? html`
-                        <div class="cd-stat-feed__line cd-stat-feed__line--dim">
-                          <span class="cd-stat-feed__dot"></span>
-                          <span class="cd-stat-feed__text">${displayLog[displayLog.length - 2].agentEmoji} ${displayLog[displayLog.length - 2].content.slice(0, 50)}${displayLog[displayLog.length - 2].content.length > 50 ? "..." : ""}</span>
-                          <span class="cd-stat-feed__ts">${displayLog[displayLog.length - 2].ts}</span>
-                        </div>
-                      `
-                          : ""
-                      }
                     `
                         : html`
                             <div class="cd-stat-feed__empty">Waiting for activity...</div>
@@ -960,22 +1097,20 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     }
                   </div>
                 </div>
-
-                <!-- Messages in flight -->
-                <div class="cd-stat-card cd-stat-card--msgs">
-                  <span class="cd-stat-card__icon">${_messages.length > 0 ? "📡" : "📭"}</span>
-                  <div class="cd-stat-card__info">
-                    <span class="cd-stat-card__title">${_messages.length} in flight</span>
-                    <span class="cd-stat-card__sub">${_canvasBubbles.length} bubbles</span>
-                  </div>
-                </div>
               `;
             })()}
           </div>
         </div>
 
+        <!-- Resize handle -->
+        <div class="cd-office-resize-handle"
+          @mousedown=${(e: MouseEvent) => {
+            e.preventDefault();
+            _isDragging = true;
+          }}></div>
+
         <!-- RIGHT: execution panel ─────────────────────────────────── -->
-        <div class="cd-office-panel">
+        <div class="cd-office-panel" style="width:${_panelWidth}px;min-width:${_panelWidth}px">
 
           <!-- Panel tabs -->
           <div class="cd-office-panel__tabs">

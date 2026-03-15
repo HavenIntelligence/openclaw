@@ -1765,62 +1765,79 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  user-select: none;
 }
 
-.cd-office-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 20px;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+/* Resize handle between canvas and panel */
+.cd-office-resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
   flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
 }
-
-.cd-office-bar__left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.cd-office-bar__title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-strong);
-}
-
-.cd-office-bar__sub {
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-
-.cd-office-bar__chips {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-strong);
-}
-
-.cd-office-bar__msgs {
-  background: var(--accent);
-  color: var(--accent-foreground, #fff);
-  border-radius: 20px;
-  padding: 2px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  animation: cd-pulse-in 0.3s ease;
+.cd-office-resize-handle:hover,
+.cd-office-resize-handle:active {
+  background: var(--accent, #6366f1);
+  opacity: 0.5;
 }
 
 @keyframes cd-pulse-in {
-  from {
-    transform: scale(0.8);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Pause/Resume control button */
+.cd-stat-ctrl {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg, #0f1117);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cd-stat-ctrl:hover {
+  background: var(--accent, #6366f1);
+  color: #fff;
+  border-color: var(--accent);
+}
+.cd-stat-ctrl--paused {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* Per-agent status dots row */
+.cd-stat-card__dots {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.cd-stat-agent-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background 0.3s;
+}
+
+/* Pulsing icon for in-flight messages */
+.cd-stat-card__icon--pulse {
+  animation: cd-icon-pulse 1.2s ease-in-out infinite;
+}
+@keyframes cd-icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
 }
 
 .cd-office-canvas-wrap {
@@ -3226,15 +3243,14 @@
   font-size: 12px;
 }
 
-/* Execution panel (right side) */
+/* Execution panel (right side — width set via inline style + resize handle) */
 .cd-office-panel {
-  width: 380px;
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   background: var(--card);
   min-height: 0;
+  overflow: hidden;
 }
 
 .cd-office-panel__tabs {
@@ -5882,6 +5898,10 @@
 }
 
 .cd-stat-card--agents {
+  flex-shrink: 0;
+}
+
+.cd-stat-card--metrics {
   flex-shrink: 0;
 }
 

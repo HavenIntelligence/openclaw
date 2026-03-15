@@ -616,7 +616,7 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
         ${
-          state.tab === "config"
+          state.tab === "config" || state.tab === "companyOffice"
             ? nothing
             : html`<section class="content-header">
               <div>
