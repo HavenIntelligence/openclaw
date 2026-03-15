@@ -18,7 +18,7 @@ export class CodexRunner implements CliAgentRunner {
   }
 
   runTask(agentId: string, prompt: string, opts?: RunOpts): ChildProcess {
-    const args = [prompt, "--full-auto"];
+    const args = ["exec", prompt, "--full-auto"];
 
     return spawn("codex", args, {
       cwd: opts?.cwd,

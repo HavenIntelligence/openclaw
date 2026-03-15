@@ -6376,3 +6376,39 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Agent checklist (team form) ────────────────────────────────────────── */
+.cd-agent-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+.cd-agent-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.cd-agent-check-item:hover {
+  background: var(--accent-muted, rgba(255,255,255,0.05));
+}
+.cd-agent-check-item input[type="checkbox"] {
+  flex-shrink: 0;
+}
+.cd-agent-check-item__name {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.cd-agent-check-item__role {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  margin-left: auto;
+}

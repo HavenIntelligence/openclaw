@@ -46,7 +46,14 @@ export class TeamStore {
     if (idx < 0) {
       return null;
     }
-    this.teams[idx] = { ...this.teams[idx], ...partial, id };
+    // Filter out undefined values so they don't overwrite existing fields
+    const filtered: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(partial)) {
+      if (v !== undefined) {
+        filtered[k] = v;
+      }
+    }
+    this.teams[idx] = { ...this.teams[idx], ...filtered, id };
     await this.persist();
     return this.teams[idx];
   }

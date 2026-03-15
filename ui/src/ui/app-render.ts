@@ -1941,6 +1941,7 @@ export function renderApp(state: AppViewState) {
                 m.renderCompanyOverview({
                   profile: state.companyProfile,
                   agents: state.companyAgents,
+                  teams: state.companyTeams,
                   tasks: state.companyTasks,
                   messages: state.companyMessages,
                   onSaveProfile: async (partial) => {
@@ -1952,6 +1953,20 @@ export function renderApp(state: AppViewState) {
                     await loadCompanyMessages(state);
                     requestHostUpdate?.();
                   },
+                  onCreateTeam: async (params) => {
+                    await createTeam(state, params);
+                    requestHostUpdate?.();
+                  },
+                  onUpdateTeam: async (id, partial) => {
+                    await updateTeam(state, id, partial);
+                    requestHostUpdate?.();
+                  },
+                  onDeleteTeam: async (id) => {
+                    await deleteTeam(state, id);
+                    state.companyTeams = state.companyTeams.filter((t) => t.id !== id);
+                    requestHostUpdate?.();
+                  },
+                  requestUpdate: () => requestHostUpdate?.(),
                 }),
               )
             : nothing
@@ -1976,6 +1991,7 @@ export function renderApp(state: AppViewState) {
                     state.companyTeams = state.companyTeams.filter((t) => t.id !== id);
                     requestHostUpdate?.();
                   },
+                  _requestUpdate: () => requestHostUpdate?.(),
                 }),
               )
             : nothing

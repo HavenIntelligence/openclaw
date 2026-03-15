@@ -132,6 +132,26 @@ export async function createAgent(
   }
 }
 
+export async function updateAgent(
+  state: CompanyState,
+  agentId: string,
+  partial: Record<string, unknown>,
+): Promise<ClawDockAgent | null> {
+  if (!state.client) {
+    return null;
+  }
+  try {
+    const agent = await state.client.request<ClawDockAgent>("company.agents.update", {
+      id: agentId,
+      ...partial,
+    });
+    await loadCompanyAgents(state);
+    return agent;
+  } catch {
+    return null;
+  }
+}
+
 // ── Agent actions ─────────────────────────────────────────────────────────
 
 export async function startAgent(

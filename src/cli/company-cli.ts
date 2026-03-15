@@ -6,8 +6,9 @@ import { callGatewayCli } from "../gateway/call.js";
 async function companyRpc<T = unknown>(
   method: string,
   params: Record<string, unknown> = {},
+  opts?: { timeoutMs?: number },
 ): Promise<T> {
-  return await callGatewayCli<T>({ method, params });
+  return await callGatewayCli<T>({ method, params, timeoutMs: opts?.timeoutMs });
 }
 
 // ── Table formatters ──────────────────────────────────────────────────────
@@ -192,11 +193,15 @@ export function registerClawDockCli(program: Command): void {
         subtasks: Array<{ agentId: string; content: string; tokensUsed: number }>;
         phase: string;
         durationMs: number;
-      }>("company.orchestrate.run", {
-        id,
-        prompt: opts.message,
-        maxDepth: parseInt(String(opts.maxDepth), 10),
-      });
+      }>(
+        "company.orchestrate.run",
+        {
+          id,
+          prompt: opts.message,
+          maxDepth: parseInt(String(opts.maxDepth), 10),
+        },
+        { timeoutMs: 5 * 60_000 },
+      );
       // Print subtask results
       if (result.subtasks?.length) {
         for (const sub of result.subtasks) {

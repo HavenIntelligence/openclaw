@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, nothing } from "lit";
 import type { ClawDockAgent, TeamConfig } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
@@ -21,102 +21,10 @@ type TeamEntry = {
   description: string;
   strategy: SupervisionStrategy;
   agents: AgentEntry[];
+  agentIds: string[];
   status: "healthy" | "degraded" | "stopped";
   tasksToday: number;
 };
-
-const _DEMO_TEAMS: TeamEntry[] = [
-  {
-    id: "content-pipeline",
-    name: "content-pipeline",
-    description: "Research → Write → Review assembly line for content production.",
-    strategy: "one-for-one",
-    status: "degraded",
-    tasksToday: 40,
-    agents: [
-      {
-        id: "research-alpha",
-        name: "research-alpha",
-        role: "Researcher",
-        model: "claude-opus-4-5",
-        status: "running",
-        tasksCompleted: 12,
-        tasksRunning: 1,
-        uptime: "4h 22m",
-      },
-      {
-        id: "writing-beta",
-        name: "writing-beta",
-        role: "Writer",
-        model: "claude-sonnet-4-5",
-        status: "running",
-        tasksCompleted: 28,
-        tasksRunning: 2,
-        uptime: "4h 22m",
-      },
-      {
-        id: "review-gamma",
-        name: "review-gamma",
-        role: "Reviewer",
-        model: "claude-haiku-4-5",
-        status: "crashed",
-        tasksCompleted: 0,
-        tasksRunning: 0,
-        uptime: "—",
-      },
-    ],
-  },
-  {
-    id: "devops",
-    name: "devops",
-    description: "CI/CD automation: code generation, testing, and deployment pipelines.",
-    strategy: "rest-for-one",
-    status: "healthy",
-    tasksToday: 78,
-    agents: [
-      {
-        id: "code-agent",
-        name: "code-agent",
-        role: "Engineer",
-        model: "claude-opus-4-5",
-        status: "running",
-        tasksCompleted: 47,
-        tasksRunning: 3,
-        uptime: "6h 10m",
-      },
-      {
-        id: "test-runner",
-        name: "test-runner",
-        role: "QA",
-        model: "gpt-4o",
-        status: "running",
-        tasksCompleted: 31,
-        tasksRunning: 1,
-        uptime: "6h 10m",
-      },
-    ],
-  },
-  {
-    id: "personal-assistant",
-    name: "personal-assistant",
-    description: "Singleton executive assistant for direct founder interaction.",
-    strategy: "singleton",
-    status: "healthy",
-    tasksToday: 24,
-    agents: [
-      {
-        id: "nanoclaw-primary",
-        name: "nanoclaw-primary",
-        role: "Personal AI",
-        model: "claude-sonnet-4-5",
-        status: "idle",
-        tasksCompleted: 24,
-        tasksRunning: 0,
-        uptime: "8h 00m",
-      },
-    ],
-  },
-];
 
 const STRATEGY_INFO: Record<
   SupervisionStrategy,
@@ -143,6 +51,52 @@ const STRATEGY_INFO: Record<
     description: "Single instance, auto-restarted on failure. For executive assistants.",
   },
 };
+
+const STRATEGIES: { value: SupervisionStrategy; label: string }[] = [
+  { value: "one-for-one", label: "One-for-One" },
+  { value: "one-for-all", label: "One-for-All" },
+  { value: "rest-for-one", label: "Rest-for-One" },
+  { value: "singleton", label: "Singleton" },
+];
+
+// ── Form state ────────────────────────────────────────────────────────────
+type TeamFormData = {
+  name: string;
+  description: string;
+  strategy: SupervisionStrategy;
+  agents: string[];
+};
+
+let _showForm = false;
+let _editingTeamId: string | null = null;
+let _formData: TeamFormData = { name: "", description: "", strategy: "one-for-one", agents: [] };
+let _formLoading = false;
+let _confirmDeleteId: string | null = null;
+
+function resetForm() {
+  _showForm = false;
+  _editingTeamId = null;
+  _formData = { name: "", description: "", strategy: "one-for-one", agents: [] };
+  _formLoading = false;
+}
+
+function openCreateForm() {
+  resetForm();
+  _showForm = true;
+}
+
+function openEditForm(team: TeamEntry) {
+  _editingTeamId = team.id;
+  _formData = {
+    name: team.name,
+    description: team.description,
+    strategy: team.strategy,
+    agents: [...team.agentIds],
+  };
+  _showForm = true;
+}
+
+// ── Rendering helpers ─────────────────────────────────────────────────────
 
 function agentStatusIcon(status: string) {
   if (status === "running") {
@@ -197,7 +151,7 @@ function renderTeamAgent(agent: AgentEntry) {
   `;
 }
 
-function renderTeamCard(team: TeamEntry, props?: CompanyTeamsProps) {
+function renderTeamCard(team: TeamEntry, props: CompanyTeamsProps) {
   const info = STRATEGY_INFO[team.strategy];
   const crashedCount = team.agents.filter((a) => a.status === "crashed").length;
   const runningCount = team.agents.filter((a) => a.status === "running").length;
@@ -226,10 +180,26 @@ function renderTeamCard(team: TeamEntry, props?: CompanyTeamsProps) {
                 `
           }
           ${
-            props?.onDeleteTeam
+            props.onUpdateTeam
+              ? html`
+            <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Edit team"
+              @click=${() => {
+                openEditForm(team);
+                props._requestUpdate?.();
+              }}>
+              ${icons.edit}
+            </button>
+          `
+              : ""
+          }
+          ${
+            props.onDeleteTeam
               ? html`
             <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Delete team"
-              @click=${() => props.onDeleteTeam?.(team.id)}>
+              @click=${() => {
+                _confirmDeleteId = team.id;
+                props._requestUpdate?.();
+              }}>
               ${icons.trash}
             </button>
           `
@@ -294,6 +264,219 @@ function renderTeamCard(team: TeamEntry, props?: CompanyTeamsProps) {
   `;
 }
 
+// ── Delete confirmation dialog ────────────────────────────────────────────
+
+function renderDeleteConfirm(props: CompanyTeamsProps, teamList: TeamEntry[]) {
+  if (!_confirmDeleteId) {
+    return nothing;
+  }
+  const team = teamList.find((t) => t.id === _confirmDeleteId);
+  if (!team) {
+    return nothing;
+  }
+
+  return html`
+    <div class="cd-create-agent-overlay" @click=${(e: Event) => {
+      if ((e.target as HTMLElement).classList.contains("cd-create-agent-overlay")) {
+        _confirmDeleteId = null;
+        props._requestUpdate?.();
+      }
+    }}>
+      <div class="cd-create-agent-panel" style="max-width:420px">
+        <div class="cd-create-agent-panel__header">
+          <h3>Delete Team</h3>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" @click=${() => {
+            _confirmDeleteId = null;
+            props._requestUpdate?.();
+          }}>
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="cd-create-agent-panel__body">
+          <p style="margin:0;color:var(--foreground)">
+            Are you sure you want to delete team <strong>${team.name}</strong>?
+          </p>
+          <p style="margin:8px 0 0;color:var(--muted-foreground);font-size:0.9rem">
+            This will remove the team configuration. Agents in this team will not be deleted.
+          </p>
+        </div>
+
+        <div class="cd-create-agent-panel__footer">
+          <button class="cd-btn cd-btn--sm cd-btn--ghost" @click=${() => {
+            _confirmDeleteId = null;
+            props._requestUpdate?.();
+          }}>Cancel</button>
+          <button class="cd-btn cd-btn--sm cd-btn--danger" @click=${async () => {
+            props.onDeleteTeam?.(_confirmDeleteId!);
+            _confirmDeleteId = null;
+            props._requestUpdate?.();
+          }}>Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Create / Edit form ────────────────────────────────────────────────────
+
+function renderTeamForm(props: CompanyTeamsProps) {
+  if (!_showForm) {
+    return nothing;
+  }
+
+  const isEditing = _editingTeamId !== null;
+  const allAgents = props.agents ?? [];
+
+  return html`
+    <div class="cd-create-agent-overlay" @click=${(e: Event) => {
+      if ((e.target as HTMLElement).classList.contains("cd-create-agent-overlay")) {
+        resetForm();
+        props._requestUpdate?.();
+      }
+    }}>
+      <div class="cd-create-agent-panel">
+        <div class="cd-create-agent-panel__header">
+          <h3>${isEditing ? "Edit Team" : "Create New Team"}</h3>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" @click=${() => {
+            resetForm();
+            props._requestUpdate?.();
+          }}>
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="cd-create-agent-panel__body">
+          <div class="cd-form-group">
+            <label class="cd-form-label">Team Name *</label>
+            <input
+              class="cd-form-input"
+              type="text"
+              placeholder="e.g. engineering"
+              .value=${_formData.name}
+              @input=${(e: Event) => {
+                _formData.name = (e.target as HTMLInputElement).value;
+              }}
+            />
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Description</label>
+            <input
+              class="cd-form-input"
+              type="text"
+              placeholder="What does this team do?"
+              .value=${_formData.description}
+              @input=${(e: Event) => {
+                _formData.description = (e.target as HTMLInputElement).value;
+              }}
+            />
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Supervision Strategy</label>
+            <div class="cd-runtime-picker">
+              ${STRATEGIES.map(
+                (s) => html`
+                <button
+                  class="cd-runtime-chip ${s.value === _formData.strategy ? "cd-runtime-chip--active" : ""}"
+                  @click=${() => {
+                    _formData.strategy = s.value;
+                    props._requestUpdate?.();
+                  }}
+                  title="${STRATEGY_INFO[s.value].description}"
+                >${s.label}</button>
+              `,
+              )}
+            </div>
+            <p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted-foreground)">
+              ${STRATEGY_INFO[_formData.strategy].description}
+            </p>
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Agents</label>
+            ${
+              allAgents.length > 0
+                ? html`
+              <div class="cd-agent-checklist">
+                ${allAgents.map(
+                  (a) => html`
+                  <label class="cd-agent-check-item">
+                    <input
+                      type="checkbox"
+                      .checked=${_formData.agents.includes(a.id)}
+                      @change=${(e: Event) => {
+                        const checked = (e.target as HTMLInputElement).checked;
+                        if (checked) {
+                          _formData.agents = [..._formData.agents, a.id];
+                        } else {
+                          _formData.agents = _formData.agents.filter((id) => id !== a.id);
+                        }
+                        props._requestUpdate?.();
+                      }}
+                    />
+                    <span class="cd-agent-check-item__name">${a.name || a.id}</span>
+                    <span class="cd-agent-check-item__role">${a.role}</span>
+                  </label>
+                `,
+                )}
+              </div>
+            `
+                : html`
+                    <p style="margin: 0; color: var(--muted-foreground); font-size: 0.9rem">
+                      No agents available. Create agents in the Fleet tab first.
+                    </p>
+                  `
+            }
+          </div>
+        </div>
+
+        <div class="cd-create-agent-panel__footer">
+          <button class="cd-btn cd-btn--sm cd-btn--ghost" @click=${() => {
+            resetForm();
+            props._requestUpdate?.();
+          }}>Cancel</button>
+          <button
+            class="cd-btn cd-btn--sm cd-btn--primary"
+            ?disabled=${!_formData.name.trim() || _formLoading}
+            @click=${async () => {
+              if (!_formData.name.trim() || _formLoading) {
+                return;
+              }
+              _formLoading = true;
+              props._requestUpdate?.();
+              try {
+                if (isEditing) {
+                  props.onUpdateTeam?.(_editingTeamId!, {
+                    name: _formData.name.trim(),
+                    description: _formData.description.trim(),
+                    strategy: _formData.strategy,
+                    agents: _formData.agents,
+                  });
+                } else {
+                  props.onCreateTeam?.({
+                    name: _formData.name.trim(),
+                    description: _formData.description.trim(),
+                    strategy: _formData.strategy,
+                    agents: _formData.agents,
+                  });
+                }
+                resetForm();
+              } finally {
+                _formLoading = false;
+                props._requestUpdate?.();
+              }
+            }}
+          >
+            ${_formLoading ? (isEditing ? "Saving…" : "Creating…") : isEditing ? "Save Changes" : "Create Team"}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 /** Convert real TeamConfig + ClawDockAgent data to internal TeamEntry format. */
 function toTeamEntry(team: TeamConfig, allAgents: ClawDockAgent[]): TeamEntry {
   const memberAgents = allAgents.filter((a) => team.agents.includes(a.id));
@@ -327,6 +510,7 @@ function toTeamEntry(team: TeamConfig, allAgents: ClawDockAgent[]): TeamEntry {
     description: team.description ?? "",
     strategy: team.strategy,
     agents: entries,
+    agentIds: team.agents,
     status: hasCrashed ? "degraded" : "healthy",
     tasksToday: entries.reduce((s, a) => s + a.tasksCompleted, 0),
   };
@@ -338,6 +522,7 @@ export type CompanyTeamsProps = {
   onCreateTeam?: (params: Omit<TeamConfig, "id">) => void;
   onUpdateTeam?: (id: string, partial: Partial<Omit<TeamConfig, "id">>) => void;
   onDeleteTeam?: (id: string) => void;
+  _requestUpdate?: () => void;
 };
 
 export function renderCompanyTeams(props: CompanyTeamsProps) {
@@ -373,18 +558,15 @@ export function renderCompanyTeams(props: CompanyTeamsProps) {
               <div style="font-size:2rem;margin-bottom:12px">${icons.users}</div>
               <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px">No teams configured yet</div>
               <div style="color:var(--muted-foreground);margin-bottom:16px">
-                Teams are created when you add agents and assign them to groups.
-                Use the Fleet tab to create agents, then organize them into teams here.
+                Teams group agents with a supervision strategy that controls restart behavior.
+                Create a team and assign agents from your fleet.
               </div>
               ${
                 props.onCreateTeam
                   ? html`
                 <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-                  props.onCreateTeam?.({
-                    name: "engineering",
-                    agents: [],
-                    strategy: "one-for-one",
-                  });
+                  openCreateForm();
+                  props._requestUpdate?.();
                 }}>
                   ${icons.plus} Create First Team
                 </button>
@@ -402,11 +584,8 @@ export function renderCompanyTeams(props: CompanyTeamsProps) {
           ? html`
         <div style="margin-top:16px">
           <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
-            props.onCreateTeam?.({
-              name: "New Team",
-              agents: [],
-              strategy: "one-for-one",
-            });
+            openCreateForm();
+            props._requestUpdate?.();
           }}>
             ${icons.plus} Add Team
           </button>
@@ -414,6 +593,9 @@ export function renderCompanyTeams(props: CompanyTeamsProps) {
       `
           : ""
       }
+
+      ${renderTeamForm(props)}
+      ${renderDeleteConfirm(props, teamList)}
     </div>
   `;
 }
