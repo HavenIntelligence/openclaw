@@ -163,7 +163,7 @@ function edgesFromTree(
   return out;
 }
 
-/** Convert ClawDockAgent[] into an OrgNode tree using reportTo to derive hierarchy. */
+/** Convert ClawDockAgent[] into an OrgNode tree using reportTo. Includes all agents regardless of status (idle, active, crashed) so the chart stays stable. */
 function agentsToOrgTree(agents: ClawDockAgent[]): OrgNode {
   if (!agents.length) {
     return ORG_TREE;
@@ -431,7 +431,7 @@ let _onDeleteAgent: CompanyOrgChartProps["onDeleteAgent"];
 function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
   const isSelected = n.id === _selectedId;
   const isAddTarget = n.id === _addTargetId;
-  const isDeletable = _deleteMode && n.id !== _activeOrgTree.id;
+  const isDeletable = !_organizationRunning && _deleteMode && n.id !== _activeOrgTree.id;
   const statusC = statusColor(n.status);
   const modelShort = truncate(shortModel(n.model), 14);
   const reportCount = (n.children as LayoutNode[] | undefined)?.length ?? 0;
@@ -480,16 +480,37 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
     });
   }
 
-  // Layout chips from left
-  const CHIP_Y = NODE_H - 28;
+  // Layout chips in rows so nothing overflows the card (wrap to new line when needed)
   const CHIP_H = 16;
-  let chipX = 12;
-  const chipRects = chips.map((chip) => {
+  const CHIP_GAP = 6;
+  const ROW_GAP = 4;
+  const PAD = 12;
+  const maxRowW = NODE_W - PAD * 2;
+  type RowItem = { chip: Chip; x: number; w: number };
+  const rows: Array<{ items: RowItem[]; y: number }> = [];
+  let rowY = NODE_H - 28;
+  let currentRow: RowItem[] = [];
+  let rowX = PAD;
+
+  for (const chip of chips) {
     const w = chipW(chip.text);
-    const x = chipX;
-    chipX += w + 6;
-    return { ...chip, x, w };
-  });
+    if (currentRow.length > 0 && rowX + w > maxRowW) {
+      rows.push({ items: currentRow, y: rowY });
+      currentRow = [];
+      rowX = PAD;
+      rowY -= CHIP_H + ROW_GAP;
+    }
+    currentRow.push({ chip, x: rowX, w });
+    rowX += w + CHIP_GAP;
+  }
+  if (currentRow.length > 0) {
+    rows.push({ items: currentRow, y: rowY });
+  }
+
+  const chipRects = rows.flatMap((row) =>
+    row.items.map(({ chip, x, w }) => ({ ...chip, x, w, y: row.y })),
+  );
+  const CHIP_Y = rowY;
 
   const borderColor = isAddTarget
     ? "#22c55e"
@@ -519,17 +540,7 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
       }}
       style="cursor:${isDeletable ? "not-allowed" : "pointer"}"
     >
-      <!-- Selection glow halo -->
-      ${
-        isSelected
-          ? svg`
-        <rect x="-4" y="-4" width="${NODE_W + 8}" height="${NODE_H + 8}" rx="16"
-          fill="none" stroke="${n.color}" stroke-width="2.5" opacity="0.35" />
-      `
-          : ""
-      }
-
-      <!-- Card background -->
+      <!-- Card background (single frame; selected = thicker border only) -->
       <rect x="0" y="0" width="${NODE_W}" height="${NODE_H}" rx="12"
         fill="var(--card)"
         stroke="${borderColor}"
@@ -586,10 +597,10 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
       <!-- Chip row -->
       ${chipRects.map(
         (chip) => svg`
-        <rect x="${chip.x}" y="${CHIP_Y}" width="${chip.w}" height="${CHIP_H}" rx="${CHIP_H / 2}"
+        <rect x="${chip.x}" y="${(chip as { y?: number }).y ?? CHIP_Y}" width="${chip.w}" height="${CHIP_H}" rx="${CHIP_H / 2}"
           fill="${chip.bg}" />
         <text
-          x="${chip.x + chip.w / 2}" y="${CHIP_Y + CHIP_H / 2}"
+          x="${chip.x + chip.w / 2}" y="${((chip as { y?: number }).y ?? CHIP_Y) + CHIP_H / 2}"
           text-anchor="middle" dominant-baseline="central"
           font-size="9.5" fill="${chip.color}" font-family="monospace"
         >${chip.text}</text>
@@ -612,6 +623,8 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
 // ── Main render ───────────────────────────────────────────────────────────────
 export type CompanyOrgChartProps = {
   agents?: ClawDockAgent[];
+  /** When true, add/remove agents are disabled and a hint is shown. */
+  organizationRunning?: boolean;
   onCreateAgent?: (params: {
     name: string;
     role?: string;
@@ -622,9 +635,12 @@ export type CompanyOrgChartProps = {
   onDeleteAgent?: (agentId: string) => void | Promise<void>;
 };
 
+let _organizationRunning = false;
+
 export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
   _onCreateAgent = props.onCreateAgent;
   _onDeleteAgent = props.onDeleteAgent;
+  _organizationRunning = props.organizationRunning ?? false;
   const hasRealAgents = props.agents && props.agents.length > 0;
   // Update active tree from real agents each render
   if (hasRealAgents) {
@@ -741,7 +757,7 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
             <!-- Dot grid background -->
             <defs>
               <pattern id="cd-dot-grid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" fill="rgba(148,163,184,0.10)" />
+                <circle cx="1" cy="1" r="1" fill="var(--cd-oc-grid-dot, rgba(148,163,184,0.10))" />
               </pattern>
               <clipPath id="cd-oc-avatar-clip">
                 <circle cx="28" cy="42" r="17" />
@@ -845,16 +861,26 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
           <div class="cd-oc-float-toolbar__sep"></div>
 
           <button
-            class="cd-oc-float-btn ${_deleteMode ? "cd-oc-float-btn--danger" : ""}"
+            class="cd-oc-float-btn ${_deleteMode ? "cd-oc-float-btn--danger" : ""} ${_organizationRunning ? "cd-oc-float-btn--disabled" : ""}"
+            ?disabled=${_organizationRunning}
+            title=${_organizationRunning ? "Disabled while organization is running" : ""}
             @click=${() => {
+              if (_organizationRunning) {
+                return;
+              }
               _deleteMode = !_deleteMode;
               _addTargetId = null;
             }}>
             ${_deleteMode ? "✅ Done" : "🗑️ Remove"}
           </button>
           <button
-            class="cd-oc-float-btn cd-oc-float-btn--primary"
+            class="cd-oc-float-btn cd-oc-float-btn--primary ${_organizationRunning ? "cd-oc-float-btn--disabled" : ""}"
+            ?disabled=${_organizationRunning}
+            title=${_organizationRunning ? "Disabled while organization is running" : ""}
             @click=${() => {
+              if (_organizationRunning) {
+                return;
+              }
               _addTargetId = _selectedId ?? nodes[nodes.length - 1]?.id ?? null;
               _deleteMode = false;
             }}>
@@ -1030,6 +1056,14 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
                 : ""
             }
             <div class="cd-oc-detail__actions">
+              ${
+                _organizationRunning
+                  ? html`
+                      <p class="cd-oc-detail__running-hint">
+                        Organization is running. Changes are disabled until all agents are idle.
+                      </p>
+                    `
+                  : html`
               <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
                 _addTargetId = selected.id;
                 _selectedId = null;
@@ -1047,6 +1081,8 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
                 }}>🗑️ Remove</button>
               `
                   : ""
+              }
+                    `
               }
             </div>
           </div>

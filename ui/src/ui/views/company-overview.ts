@@ -179,7 +179,7 @@ const _AGENTS: AgentRecord[] = [
     totalTokensUsed: 8_420_000,
     uptimePct: 99.1,
     currentWorkspace: "Dashboard · Company Overview",
-    currentApp: "Haven Clawdock company",
+    currentApp: "ClawDock",
     currentUrl: "/company",
     tools: ["company-dashboard", "task-manager", "send-message"],
     skills: ["strategic-planning", "fundraising", "hiring"],
@@ -633,7 +633,7 @@ function _renderAgentDetail(agent: AgentRecord) {
   `;
 }
 
-// ── Sub-tab: Agent Status (renamed from Fleet) ────────────────────────────
+// ── Sub-tab: Agent Config ─────────────────────────────────────────────────
 function renderFleet() {
   return renderCompanyFleet({
     agents: _realAgents,
@@ -1506,7 +1506,7 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _requestUpdate = props.requestUpdate;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🏢", label: "Company" },
-    { id: "fleet", icon: "🤖", label: "Agent Status" },
+    { id: "fleet", icon: "🤖", label: "Agent Config" },
     { id: "teams", icon: "👥", label: "Teams" },
     { id: "roles", icon: "🎭", label: "Role Hub" },
     { id: "tasks", icon: "📋", label: "Tasks" },

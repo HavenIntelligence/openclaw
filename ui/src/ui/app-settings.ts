@@ -13,7 +13,12 @@ import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadCompanyAll } from "./controllers/company.ts";
-import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
+import {
+  ensureAgentConfigEntry,
+  findAgentConfigEntryIndex,
+  loadConfig,
+  loadConfigSchema,
+} from "./controllers/config.ts";
 import { loadCronJobs, loadCronRuns, loadCronStatus } from "./controllers/cron.ts";
 import { loadDebug } from "./controllers/debug.ts";
 import { loadDevices } from "./controllers/devices.ts";
@@ -276,6 +281,19 @@ export async function refreshActiveTab(host: SettingsHost) {
     host.tab === "companyTasks"
   ) {
     await loadCompanyAll(host as unknown as OpenClawApp);
+    await loadConfigSchema(host as unknown as OpenClawApp);
+    await loadConfig(host as unknown as OpenClawApp);
+    await loadCron(host);
+    const app = host as unknown as OpenClawApp;
+    const config =
+      app.configForm ??
+      (app.configSnapshot as { config?: Record<string, unknown> } | null)?.config ??
+      null;
+    for (const agent of app.companyAgents ?? []) {
+      if (agent?.id && findAgentConfigEntryIndex(config, agent.id) < 0) {
+        ensureAgentConfigEntry(app, agent.id);
+      }
+    }
   }
   if (host.tab === "logs") {
     host.logsAtBottom = true;

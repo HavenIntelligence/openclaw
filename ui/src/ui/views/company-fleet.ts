@@ -1,6 +1,19 @@
 import { html, nothing } from "lit";
 import type { ClawDockAgent, ClawDockRuntime, LogEntry } from "../company-types.ts";
 import { icons } from "../icons.ts";
+import type {
+  AgentsFilesListResult,
+  ChannelsStatusSnapshot,
+  CronJob,
+  CronStatus,
+  SkillStatusReport,
+  ToolsCatalogResult,
+} from "../types.ts";
+import type { AgentsListResult } from "../types.ts";
+import { renderAgentFiles } from "./agents-panels-status-files.ts";
+import { renderAgentChannels, renderAgentCron } from "./agents-panels-status-files.ts";
+import { renderAgentTools, renderAgentSkills } from "./agents-panels-tools-skills.ts";
+import { buildAgentContext } from "./agents-utils.ts";
 import { renderCompanyAgentLogsPanel } from "./company-agent-logs.ts";
 
 function formatTokens(n: number): string {
@@ -66,10 +79,29 @@ function statusPill(status: string) {
 
 function renderFleetRow(agent: ClawDockAgent, props: CompanyFleetProps) {
   const row = toFleetAgent(agent);
+  const isExpanded = _expandedAgentId === agent.id;
   return html`
-    <tr class="cd-fleet-row ${row.status === "crashed" ? "cd-fleet-row--crashed" : ""}">
+    <tr
+      class="cd-fleet-row ${row.status === "crashed" ? "cd-fleet-row--crashed" : ""} ${isExpanded ? "cd-fleet-row--expanded" : ""}"
+      @click=${(e: Event) => {
+        if ((e.target as HTMLElement).closest("button") == null) {
+          toggleExpand(agent.id, agent, props);
+        }
+      }}
+    >
       <td class="cd-fleet-cell cd-fleet-cell--name">
         <div class="cd-fleet-name-cell">
+          <button
+            type="button"
+            class="cd-fleet-expand-btn"
+            title=${isExpanded ? "Collapse config" : "Expand config"}
+            @click=${(e: Event) => {
+              e.stopPropagation();
+              toggleExpand(agent.id, agent, props);
+            }}
+          >
+            <span class="cd-fleet-expand-btn__chevron ${isExpanded ? "cd-fleet-expand-btn__chevron--open" : ""}">▸</span>
+          </button>
           <span class="cd-pulse cd-pulse--${row.status}"></span>
           <div>
             <span class="cd-fleet-name-cell__name">${row.name}</span>
@@ -126,7 +158,10 @@ function renderFleetRow(agent: ClawDockAgent, props: CompanyFleetProps) {
                       `
                     : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Resume" @click=${() => props.onResume?.(agent.id)}>${icons.play}</button>`
           }
-          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Edit agent" @click=${() => beginEditAgent(agent, props)}>${icons.edit}</button>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Config" @click=${(e: Event) => {
+            e.stopPropagation();
+            toggleExpand(agent.id, agent, props);
+          }}>${icons.edit}</button>
           <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs" @click=${() => {
             void openAgentLogs(agent, props);
           }}>${icons.terminal2}</button>
@@ -195,6 +230,10 @@ let _updateLoading = false;
 let _updateError: string | null = null;
 let _selectedLogAgentId: string | null = null;
 let _logsLoading = false;
+/** Which agent row is expanded to show full config (click row or Edit to toggle). */
+let _expandedAgentId: string | null = null;
+/** Active config tab in the expanded panel (local state so tab switch responds immediately). */
+let _companyConfigPanel: CompanyConfigPanel = "overview";
 
 const RUNTIMES: { value: ClawDockRuntime; label: string }[] = [
   { value: "openclaw", label: "OpenClaw" },
@@ -230,11 +269,494 @@ function beginEditAgent(agent: ClawDockAgent, props: CompanyFleetProps) {
   props._requestUpdate?.();
 }
 
-function closeEditAgent(props: CompanyFleetProps) {
+function toggleExpand(agentId: string, agent: ClawDockAgent | undefined, props: CompanyFleetProps) {
+  if (_expandedAgentId === agentId) {
+    _expandedAgentId = null;
+    props.onExpandedAgentChange?.(null);
+  } else {
+    _expandedAgentId = agentId;
+    _companyConfigPanel = "overview";
+    if (agent) {
+      beginEditAgent(agent, props);
+    }
+    props.onExpandedAgentChange?.(agentId);
+  }
+  props._requestUpdate?.();
+}
+
+function _closeEditAgent(props: CompanyFleetProps) {
   _editingAgentId = null;
+  _expandedAgentId = null;
   _updateLoading = false;
   _updateError = null;
+  props.onExpandedAgentChange?.(null);
   props._requestUpdate?.();
+}
+
+function renderExpandedConfigRow(agent: ClawDockAgent, props: CompanyFleetProps) {
+  return html`
+    <tr class="cd-fleet-row-expanded">
+      <td colspan="10" class="cd-fleet-expanded-cell">
+        ${renderExpandedConfig(agent, props)}
+      </td>
+    </tr>
+  `;
+}
+
+const CONFIG_TABS: { id: CompanyConfigPanel; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "files", label: "Files" },
+  { id: "tools", label: "Tools" },
+  { id: "skills", label: "Skills" },
+  { id: "channels", label: "Channels" },
+  { id: "cron", label: "Cron Jobs" },
+];
+
+function renderExpandedConfig(agent: ClawDockAgent, props: CompanyFleetProps) {
+  const managerOptions = (props.agents ?? []).filter((entry) => entry.id !== agent.id);
+  const agentRunning = agent.status === "active" || agent.status === "starting";
+  const isEditingThis = _editingAgentId === agent.id;
+  const panel = props.configPanel ?? _companyConfigPanel;
+  // Treat as ready when parent state matches or this row is locally expanded (avoids one-frame "Loading…" and keeps panel usable)
+  const dataReady = props.expandedDataAgentId === agent.id || _expandedAgentId === agent.id;
+  const fileCount =
+    dataReady && props.agentFiles?.list?.agentId === agent.id
+      ? (props.agentFiles.list.files?.length ?? null)
+      : null;
+  const skillCount =
+    dataReady && props.agentSkills?.agentId === agent.id
+      ? (props.agentSkills.report?.skills?.length ?? null)
+      : null;
+  const channelCount = props.channels?.snapshot
+    ? Object.keys(props.channels.snapshot.channelAccounts ?? {}).length
+    : null;
+  const cronCount = dataReady
+    ? (props.cron?.jobs ?? []).filter((j) => j.agentId === agent.id).length
+    : null;
+  const tabCounts: Record<string, number | null> = {
+    files: fileCount ?? null,
+    skills: skillCount ?? null,
+    channels: channelCount ?? null,
+    cron: cronCount ?? null,
+  };
+
+  return html`
+    <div class="cd-agent-config-panel">
+      ${
+        agentRunning
+          ? html`
+              <div class="cd-agent-config-running-banner">
+                <span class="cd-agent-config-running-banner__icon">⏳</span>
+                <span>Agent is running. Configuration cannot be modified until the agent is idle.</span>
+              </div>
+            `
+          : nothing
+      }
+      ${
+        _updateError && isEditingThis
+          ? html`
+              <div role="alert" class="cd-agent-config-error">
+                <span class="cd-agent-config-error__icon">${icons.alertTriangle}</span>
+                <span>${_updateError}</span>
+              </div>
+            `
+          : nothing
+      }
+
+      <div class="cd-agent-config-tabs">
+        ${CONFIG_TABS.map(
+          (tab) => html`
+            <button
+              type="button"
+              class="cd-agent-config-tab ${panel === tab.id ? "cd-agent-config-tab--active" : ""}"
+              @click=${() => {
+                _companyConfigPanel = tab.id;
+                props.onConfigPanelChange?.(tab.id);
+                props._requestUpdate?.();
+              }}
+            >
+              ${tab.label}${tabCounts[tab.id] != null ? html`<span class="cd-agent-config-tab-count">${tabCounts[tab.id]}</span>` : nothing}
+            </button>
+          `,
+        )}
+      </div>
+
+      ${panel === "overview" ? renderExpandedOverview(agent, props, isEditingThis, managerOptions, agentRunning) : nothing}
+      ${panel === "files" ? renderExpandedPanelFiles(agent, props, dataReady) : nothing}
+      ${panel === "tools" ? renderExpandedPanelTools(agent, props, dataReady) : nothing}
+      ${panel === "skills" ? renderExpandedPanelSkills(agent, props, dataReady) : nothing}
+      ${panel === "channels" ? renderExpandedPanelChannels(agent, props, dataReady) : nothing}
+      ${panel === "cron" ? renderExpandedPanelCron(agent, props, dataReady) : nothing}
+
+      <div class="cd-agent-config-panel__footer">
+        <button
+          type="button"
+          class="cd-btn cd-btn--sm cd-btn--ghost"
+          @click=${() => {
+            _expandedAgentId = null;
+            props.onExpandedAgentChange?.(null);
+            props._requestUpdate?.();
+          }}
+        >
+          Collapse
+        </button>
+        ${
+          panel === "overview"
+            ? html`
+                <button
+                  type="button"
+                  class="cd-btn cd-btn--sm cd-btn--primary"
+                  ?disabled=${agentRunning || _updateLoading || !(isEditingThis ? _editFormData.role : agent.role).trim() || !(isEditingThis ? _editFormData.team : agent.team).trim()}
+                  @click=${async () => {
+                    if (_updateLoading) {
+                      return;
+                    }
+                    _updateLoading = true;
+                    _updateError = null;
+                    props._requestUpdate?.();
+                    try {
+                      await props.onUpdate?.(agent.id, {
+                        role: (isEditingThis ? _editFormData.role : agent.role).trim(),
+                        team: (isEditingThis ? _editFormData.team : agent.team).trim(),
+                        runtime: isEditingThis ? _editFormData.runtime : agent.runtime,
+                        emoji: isEditingThis ? _editFormData.emoji : agent.emoji,
+                        description: (isEditingThis
+                          ? _editFormData.description
+                          : (agent.description ?? "")
+                        ).trim(),
+                        reportTo:
+                          (isEditingThis ? _editFormData.reportTo : (agent.reportTo ?? "")) || null,
+                      });
+                      _expandedAgentId = null;
+                      props.onExpandedAgentChange?.(null);
+                    } catch (err) {
+                      _updateError = err instanceof Error ? err.message : String(err);
+                    } finally {
+                      _updateLoading = false;
+                      props._requestUpdate?.();
+                    }
+                  }}
+                >
+                  ${_updateLoading ? "Saving…" : "Save Changes"}
+                </button>
+              `
+            : nothing
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderExpandedOverview(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  isEditingThis: boolean,
+  managerOptions: ClawDockAgent[],
+  agentRunning: boolean,
+) {
+  return html`
+      <section class="cd-agent-config-section">
+        <h4 class="cd-agent-config-section__title">Overview</h4>
+        <p class="cd-agent-config-section__sub">Workspace, model, and skills. Edit in main Agent page or below.</p>
+        <div class="cd-agent-config-kv-grid">
+          <div class="cd-agent-config-kv">
+            <span class="cd-agent-config-kv__label">Workspace</span>
+            <span class="cd-mono cd-agent-config-kv__val">${props.agentFiles?.list?.agentId === agent.id ? (props.agentFiles.list.workspace ?? "—") : "—"}</span>
+          </div>
+          <div class="cd-agent-config-kv">
+            <span class="cd-agent-config-kv__label">Primary Model</span>
+            <span class="cd-mono cd-agent-config-kv__val">${agent.model || "—"}</span>
+          </div>
+          <div class="cd-agent-config-kv">
+            <span class="cd-agent-config-kv__label">Skills Filter</span>
+            <span class="cd-agent-config-kv__val">${agent.skills?.length ? agent.skills.join(", ") : "all skills"}</span>
+          </div>
+          <div class="cd-agent-config-kv">
+            <span class="cd-agent-config-kv__label">Fallbacks</span>
+            <span class="cd-muted cd-agent-config-kv__val">—</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="cd-agent-config-section">
+        <h4 class="cd-agent-config-section__title">Identity & Role</h4>
+        <p class="cd-agent-config-section__sub">${agent.emoji} ${agent.name} <span class="cd-mono">(${agent.id})</span></p>
+        <div class="cd-agent-config-form">
+          <div class="cd-form-row">
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Role</label>
+              <input
+                class="cd-form-input"
+                type="text"
+                .value=${isEditingThis ? _editFormData.role : agent.role}
+                ?disabled=${agentRunning}
+                @input=${(e: Event) => {
+                  _editFormData.role = (e.target as HTMLInputElement).value;
+                  if (!_editingAgentId) {
+                    _editingAgentId = agent.id;
+                  }
+                  props._requestUpdate?.();
+                }}
+              />
+            </div>
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Team</label>
+              <input
+                class="cd-form-input"
+                type="text"
+                .value=${isEditingThis ? _editFormData.team : agent.team}
+                ?disabled=${agentRunning}
+                @input=${(e: Event) => {
+                  _editFormData.team = (e.target as HTMLInputElement).value;
+                  if (!_editingAgentId) {
+                    _editingAgentId = agent.id;
+                  }
+                  props._requestUpdate?.();
+                }}
+              />
+            </div>
+          </div>
+          <div class="cd-form-row">
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Manager</label>
+              <select
+                class="cd-form-input"
+                ?disabled=${agentRunning}
+                .value=${isEditingThis ? _editFormData.reportTo : (agent.reportTo ?? "")}
+                @change=${(e: Event) => {
+                  _editFormData.reportTo = (e.target as HTMLSelectElement).value;
+                  _editingAgentId = agent.id;
+                  props._requestUpdate?.();
+                }}
+              >
+                <option value="">None</option>
+                ${managerOptions.map(
+                  (entry) => html`
+                    <option value=${entry.id} ?selected=${(isEditingThis ? _editFormData.reportTo : (agent.reportTo ?? "")) === entry.id}>
+                      ${entry.emoji} ${entry.name}
+                    </option>
+                  `,
+                )}
+              </select>
+            </div>
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Runtime</label>
+              <select
+                class="cd-form-input"
+                ?disabled=${agentRunning}
+                .value=${isEditingThis ? _editFormData.runtime : agent.runtime}
+                @change=${(e: Event) => {
+                  _editFormData.runtime = (e.target as HTMLSelectElement).value as ClawDockRuntime;
+                  _editingAgentId = agent.id;
+                  props._requestUpdate?.();
+                }}
+              >
+                ${RUNTIMES.map(
+                  (rt) => html`
+                    <option value=${rt.value} ?selected=${(isEditingThis ? _editFormData.runtime : agent.runtime) === rt.value}>
+                      ${rt.label}
+                    </option>
+                  `,
+                )}
+              </select>
+            </div>
+          </div>
+          <div class="cd-form-group">
+            <label class="cd-form-label">Emoji</label>
+            <div class="cd-emoji-picker">
+              ${PRESET_EMOJIS.map(
+                (emoji) => html`
+                  <button
+                    type="button"
+                    class="cd-emoji-chip ${(isEditingThis ? _editFormData.emoji : agent.emoji) === emoji ? "cd-emoji-chip--active" : ""}"
+                    ?disabled=${agentRunning}
+                    @click=${() => {
+                      _editFormData.emoji = emoji;
+                      _editingAgentId = agent.id;
+                      props._requestUpdate?.();
+                    }}
+                  >${emoji}</button>
+                `,
+              )}
+            </div>
+          </div>
+          <div class="cd-form-group">
+            <label class="cd-form-label">Description</label>
+            <textarea
+              class="cd-form-input"
+              rows="3"
+              .value=${isEditingThis ? _editFormData.description : (agent.description ?? "")}
+              ?disabled=${agentRunning}
+              @input=${(e: Event) => {
+                _editFormData.description = (e.target as HTMLTextAreaElement).value;
+                _editingAgentId = agent.id;
+                props._requestUpdate?.();
+              }}
+            ></textarea>
+          </div>
+        </div>
+      </section>
+  `;
+}
+
+function renderExpandedPanelFiles(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
+  if (!dataReady || !props.onLoadFiles || !props.onSelectFile) {
+    return html`
+      <div class="cd-agent-config-section">
+        <p class="cd-muted">Loading workspace files…</p>
+      </div>
+    `;
+  }
+  const af = props.agentFiles;
+  return html`
+    <div class="cd-agent-config-panel-content">
+      ${renderAgentFiles({
+        agentId: agent.id,
+        agentFilesList: af?.list ?? null,
+        agentFilesLoading: af?.loading ?? false,
+        agentFilesError: af?.error ?? null,
+        agentFileActive: af?.active ?? null,
+        agentFileContents: af?.contents ?? {},
+        agentFileDrafts: af?.drafts ?? {},
+        agentFileSaving: af?.saving ?? false,
+        onLoadFiles: props.onLoadFiles,
+        onSelectFile: props.onSelectFile,
+        onFileDraftChange: props.onFileDraftChange ?? (() => {}),
+        onFileReset: props.onFileReset ?? (() => {}),
+        onFileSave: props.onFileSave ?? (() => {}),
+      })}
+    </div>
+  `;
+}
+
+function renderExpandedPanelTools(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
+  if (!dataReady) {
+    return html`
+      <div class="cd-agent-config-section"><p class="cd-muted">Loading tools…</p></div>
+    `;
+  }
+  const tc = props.toolsCatalog;
+  return html`
+    <div class="cd-agent-config-panel-content">
+      ${renderAgentTools({
+        agentId: agent.id,
+        configForm: props.configForm ?? null,
+        configLoading: props.configLoading ?? false,
+        configSaving: props.configSaving ?? false,
+        configDirty: props.configDirty ?? false,
+        toolsCatalogLoading: tc?.loading ?? false,
+        toolsCatalogError: tc?.error ?? null,
+        toolsCatalogResult: tc?.result ?? null,
+        onProfileChange: props.onToolsProfileChange ?? (() => {}),
+        onOverridesChange: props.onToolsOverridesChange ?? (() => {}),
+        onConfigReload: props.onConfigReload ?? (() => {}),
+        onConfigSave: props.onConfigSave ?? (() => {}),
+      })}
+    </div>
+  `;
+}
+
+function renderExpandedPanelSkills(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  dataReady: boolean,
+) {
+  if (!dataReady) {
+    return html`
+      <div class="cd-agent-config-section"><p class="cd-muted">Loading skills…</p></div>
+    `;
+  }
+  const sk = props.agentSkills;
+  return html`
+    <div class="cd-agent-config-panel-content">
+      ${renderAgentSkills({
+        agentId: agent.id,
+        report: sk?.report ?? null,
+        loading: sk?.loading ?? false,
+        error: sk?.error ?? null,
+        activeAgentId: sk?.agentId ?? null,
+        configForm: props.configForm ?? null,
+        configLoading: props.configLoading ?? false,
+        configSaving: props.configSaving ?? false,
+        configDirty: props.configDirty ?? false,
+        filter: sk?.filter ?? "",
+        onFilterChange: props.onSkillsFilterChange ?? (() => {}),
+        onRefresh: () => props.onSkillsRefresh?.(agent.id),
+        onToggle: props.onAgentSkillToggle ?? (() => {}),
+        onClear: props.onAgentSkillsClear ?? (() => {}),
+        onDisableAll: props.onAgentSkillsDisableAll ?? (() => {}),
+        onConfigReload: props.onConfigReload ?? (() => {}),
+        onConfigSave: props.onConfigSave ?? (() => {}),
+      })}
+    </div>
+  `;
+}
+
+function renderExpandedPanelChannels(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  _dataReady: boolean,
+) {
+  const ch = props.channels;
+  const agentForContext = agent as unknown as AgentsListResult["agents"][number];
+  const context = buildAgentContext(
+    agentForContext,
+    props.configForm ?? null,
+    props.agentFiles?.list ?? null,
+    null,
+    null,
+  );
+  return html`
+    <div class="cd-agent-config-panel-content">
+      ${renderAgentChannels({
+        context,
+        configForm: props.configForm ?? null,
+        snapshot: ch?.snapshot ?? null,
+        loading: ch?.loading ?? false,
+        error: ch?.error ?? null,
+        lastSuccess: ch?.lastSuccess ?? null,
+        onRefresh: props.onChannelsRefresh ?? (() => {}),
+      })}
+    </div>
+  `;
+}
+
+function renderExpandedPanelCron(
+  agent: ClawDockAgent,
+  props: CompanyFleetProps,
+  _dataReady: boolean,
+) {
+  const cr = props.cron;
+  const agentForContext = agent as unknown as AgentsListResult["agents"][number];
+  const context = buildAgentContext(
+    agentForContext,
+    props.configForm ?? null,
+    props.agentFiles?.list ?? null,
+    null,
+    null,
+  );
+  return html`
+    <div class="cd-agent-config-panel-content">
+      ${renderAgentCron({
+        context,
+        agentId: agent.id,
+        jobs: cr?.jobs ?? [],
+        status: cr?.status ?? null,
+        loading: cr?.loading ?? false,
+        error: cr?.error ?? null,
+        onRefresh: props.onCronRefresh ?? (() => {}),
+        onRunNow: props.onCronRunNow ?? (() => {}),
+      })}
+    </div>
+  `;
 }
 
 async function openAgentLogs(agent: ClawDockAgent, props: CompanyFleetProps) {
@@ -419,188 +941,6 @@ function renderCreateForm(props: CompanyFleetProps) {
   `;
 }
 
-function renderEditForm(props: CompanyFleetProps) {
-  if (!_editingAgentId) {
-    return nothing;
-  }
-  const agent = props.agents?.find((entry) => entry.id === _editingAgentId);
-  if (!agent) {
-    _editingAgentId = null;
-    return nothing;
-  }
-  const managerOptions = (props.agents ?? []).filter((entry) => entry.id !== agent.id);
-
-  return html`
-    <div class="cd-create-agent-overlay" @click=${(e: Event) => {
-      if ((e.target as HTMLElement).classList.contains("cd-create-agent-overlay")) {
-        closeEditAgent(props);
-      }
-    }}>
-      <div class="cd-create-agent-panel">
-        <div class="cd-create-agent-panel__header">
-          <h3>Edit Agent</h3>
-          <button class="cd-btn cd-btn--xs cd-btn--ghost" @click=${() => closeEditAgent(props)}>
-            ${icons.x}
-          </button>
-        </div>
-
-        <div class="cd-create-agent-panel__body">
-          ${
-            _updateError
-              ? html`
-                  <div
-                    role="alert"
-                    style="
-                      display:flex;
-                      gap:8px;
-                      align-items:flex-start;
-                      margin-bottom:16px;
-                      padding:10px 12px;
-                      border-radius:12px;
-                      border:1px solid rgba(239, 68, 68, 0.28);
-                      background:rgba(239, 68, 68, 0.08);
-                      color:var(--destructive);
-                    "
-                  >
-                    <span style="flex:none; line-height:1;">${icons.alertTriangle}</span>
-                    <span style="line-height:1.45;">${_updateError}</span>
-                  </div>
-                `
-              : nothing
-          }
-          <div class="cd-form-group">
-            <label class="cd-form-label">Agent</label>
-            <div class="cd-muted">${agent.emoji} ${agent.name} <span class="cd-mono">(${agent.id})</span></div>
-          </div>
-
-          <div class="cd-form-row">
-            <div class="cd-form-group cd-form-group--half">
-              <label class="cd-form-label">Role</label>
-              <input
-                class="cd-form-input"
-                type="text"
-                .value=${_editFormData.role}
-                @input=${(e: Event) => {
-                  _editFormData.role = (e.target as HTMLInputElement).value;
-                }}
-              />
-            </div>
-            <div class="cd-form-group cd-form-group--half">
-              <label class="cd-form-label">Team</label>
-              <input
-                class="cd-form-input"
-                type="text"
-                .value=${_editFormData.team}
-                @input=${(e: Event) => {
-                  _editFormData.team = (e.target as HTMLInputElement).value;
-                }}
-              />
-            </div>
-          </div>
-
-          <div class="cd-form-row">
-            <div class="cd-form-group cd-form-group--half">
-              <label class="cd-form-label">Manager</label>
-              <select class="cd-form-input" @change=${(e: Event) => {
-                _editFormData.reportTo = (e.target as HTMLSelectElement).value;
-              }}>
-                <option value="" ?selected=${_editFormData.reportTo === ""}>None</option>
-                ${managerOptions.map(
-                  (entry) => html`
-                    <option
-                      value=${entry.id}
-                      ?selected=${entry.id === _editFormData.reportTo}
-                    >
-                      ${entry.emoji} ${entry.name}
-                    </option>
-                  `,
-                )}
-              </select>
-            </div>
-            <div class="cd-form-group cd-form-group--half">
-              <label class="cd-form-label">Runtime</label>
-              <select class="cd-form-input" @change=${(e: Event) => {
-                _editFormData.runtime = (e.target as HTMLSelectElement).value as ClawDockRuntime;
-              }}>
-                ${RUNTIMES.map(
-                  (rt) => html`
-                    <option value=${rt.value} ?selected=${rt.value === _editFormData.runtime}>
-                      ${rt.label}
-                    </option>
-                  `,
-                )}
-              </select>
-            </div>
-          </div>
-
-          <div class="cd-form-group">
-            <label class="cd-form-label">Emoji</label>
-            <div class="cd-emoji-picker">
-              ${PRESET_EMOJIS.map(
-                (emoji) => html`
-                  <button
-                    class="cd-emoji-chip ${emoji === _editFormData.emoji ? "cd-emoji-chip--active" : ""}"
-                    @click=${() => {
-                      _editFormData.emoji = emoji;
-                      props._requestUpdate?.();
-                    }}
-                  >${emoji}</button>
-                `,
-              )}
-            </div>
-          </div>
-
-          <div class="cd-form-group">
-            <label class="cd-form-label">Description</label>
-            <textarea
-              class="cd-form-input"
-              rows="3"
-              .value=${_editFormData.description}
-              @input=${(e: Event) => {
-                _editFormData.description = (e.target as HTMLTextAreaElement).value;
-              }}
-            ></textarea>
-          </div>
-        </div>
-
-        <div class="cd-create-agent-panel__footer">
-          <button class="cd-btn cd-btn--sm cd-btn--ghost" @click=${() => closeEditAgent(props)}>Cancel</button>
-          <button
-            class="cd-btn cd-btn--sm cd-btn--primary"
-            ?disabled=${_updateLoading || !_editFormData.role.trim() || !_editFormData.team.trim()}
-            @click=${async () => {
-              if (_updateLoading || !_editingAgentId) {
-                return;
-              }
-              _updateLoading = true;
-              _updateError = null;
-              props._requestUpdate?.();
-              try {
-                await props.onUpdate?.(_editingAgentId, {
-                  role: _editFormData.role.trim(),
-                  team: _editFormData.team.trim(),
-                  runtime: _editFormData.runtime,
-                  emoji: _editFormData.emoji,
-                  description: _editFormData.description.trim(),
-                  reportTo: _editFormData.reportTo || null,
-                });
-                closeEditAgent(props);
-              } catch (err) {
-                _updateError = err instanceof Error ? err.message : String(err);
-              } finally {
-                _updateLoading = false;
-                props._requestUpdate?.();
-              }
-            }}
-          >
-            ${_updateLoading ? "Saving…" : "Save Changes"}
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 function renderEmptyState(props: CompanyFleetProps) {
   return html`
     <div class="cd-fleet-empty">
@@ -644,6 +984,8 @@ function renderEmptyState(props: CompanyFleetProps) {
   `;
 }
 
+export type CompanyConfigPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
+
 export type CompanyFleetProps = {
   agents?: ClawDockAgent[];
   logs?: Map<string, LogEntry[]>;
@@ -672,6 +1014,67 @@ export type CompanyFleetProps = {
     },
   ) => Promise<void>;
   _requestUpdate?: () => void;
+  /** When expand/collapse a row, notify parent to load panel data for this agent. */
+  onExpandedAgentChange?: (agentId: string | null) => void;
+  /** Agent id for which the panel data below was loaded. */
+  expandedDataAgentId?: string | null;
+  configPanel?: CompanyConfigPanel;
+  onConfigPanelChange?: (panel: CompanyConfigPanel) => void;
+  configForm?: Record<string, unknown> | null;
+  agentFiles?: {
+    list: AgentsFilesListResult | null;
+    loading: boolean;
+    error: string | null;
+    active: string | null;
+    contents: Record<string, string>;
+    drafts: Record<string, string>;
+    saving: boolean;
+  };
+  agentSkills?: {
+    report: SkillStatusReport | null;
+    loading: boolean;
+    error: string | null;
+    agentId: string | null;
+    filter: string;
+  };
+  toolsCatalog?: {
+    loading: boolean;
+    error: string | null;
+    result: ToolsCatalogResult | null;
+  };
+  channels?: {
+    snapshot: ChannelsStatusSnapshot | null;
+    loading: boolean;
+    error: string | null;
+    lastSuccess: number | null;
+  };
+  cron?: {
+    jobs: CronJob[];
+    status: CronStatus | null;
+    loading: boolean;
+    error: string | null;
+  };
+  configLoading?: boolean;
+  configSaving?: boolean;
+  configDirty?: boolean;
+  onLoadFiles?: (agentId: string) => void;
+  onSelectFile?: (name: string) => void;
+  onFileDraftChange?: (name: string, content: string) => void;
+  onFileReset?: (name: string) => void;
+  onFileSave?: (name: string) => void;
+  onLoadFileContent?: (agentId: string, name: string) => void;
+  onSkillsRefresh?: (agentId: string) => void;
+  onSkillsFilterChange?: (filter: string) => void;
+  onAgentSkillToggle?: (agentId: string, skillName: string, enabled: boolean) => void;
+  onAgentSkillsClear?: (agentId: string) => void;
+  onAgentSkillsDisableAll?: (agentId: string) => void;
+  onConfigReload?: () => void;
+  onConfigSave?: () => void;
+  onToolsProfileChange?: (agentId: string, profile: string | null, clearAllow: boolean) => void;
+  onToolsOverridesChange?: (agentId: string, alsoAllow: string[], deny: string[]) => void;
+  onChannelsRefresh?: () => void;
+  onCronRefresh?: () => void;
+  onCronRunNow?: (jobId: string) => void;
 };
 
 export function renderCompanyFleet(props: CompanyFleetProps) {
@@ -763,7 +1166,10 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
             </tr>
           </thead>
           <tbody>
-            ${(props.agents ?? []).map((a) => renderFleetRow(a, props))}
+            ${(props.agents ?? []).map(
+              (a) =>
+                html`${renderFleetRow(a, props)}${_expandedAgentId === a.id ? renderExpandedConfigRow(a, props) : nothing}`,
+            )}
           </tbody>
         </table>
       </div>
@@ -778,7 +1184,6 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
       </div>
 
       ${renderCreateForm(props)}
-      ${renderEditForm(props)}
       ${renderAgentLogs(props)}
     </div>
   `;

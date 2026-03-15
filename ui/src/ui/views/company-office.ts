@@ -235,7 +235,6 @@ let _logIdCounter = 0;
 
 // ── Human input state ──────────────────────────────────────────────────────
 let _humanInput = "";
-let _isPaused = false;
 let _rightTab: "log" | "output" = "log";
 let _logAgentFilter: string = "all";
 let _expandedOutputIds: Set<string> = new Set();
@@ -246,6 +245,11 @@ let _lastVisibleLogId = "";
 // ── Callbacks from props (module-level to be accessible in renderFn) ────────
 let _onSendMessage: ((content: string) => void) | undefined;
 let _onStopAgent: ((agentId: string) => void) | undefined;
+let _onPauseAll: (() => void | Promise<void>) | undefined;
+let _onResumeAll: (() => void | Promise<void>) | undefined;
+let _onStopAll: (() => void | Promise<void>) | undefined;
+let _runningCount = 0;
+let _pausedCount = 0;
 
 /** Sends a message to the company: records an optimistic log entry and sets director to thinking. */
 function _sendToCompany(msg: string) {
@@ -406,9 +410,6 @@ function _spawnMessage(fromId: string, toId: string, emoji: string, label: strin
 }
 
 function simulationStep() {
-  if (_isPaused) {
-    return;
-  }
   _tick++;
 
   // Advance flying messages
@@ -530,8 +531,15 @@ export type CompanyOfficeProps = {
   agents?: ClawDockAgent[];
   logs?: Map<string, RealLogEntry[]>;
   messages?: import("../company-types.js").AgentMessage[];
+  /** Number of agents currently active or starting (for fleet controls). */
+  runningCount?: number;
+  /** Number of agents currently paused (for fleet controls). */
+  pausedCount?: number;
   onSendMessage?: (content: string) => void;
   onStopAgent?: (agentId: string) => void;
+  onPauseAll?: () => void | Promise<void>;
+  onResumeAll?: () => void | Promise<void>;
+  onStopAll?: () => void | Promise<void>;
 };
 
 export function renderCompanyOffice(props: CompanyOfficeProps) {
@@ -540,6 +548,11 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   }
   _onSendMessage = props.onSendMessage;
   _onStopAgent = props.onStopAgent;
+  _onPauseAll = props.onPauseAll;
+  _onResumeAll = props.onResumeAll;
+  _onStopAll = props.onStopAll;
+  _runningCount = props.runningCount ?? 0;
+  _pausedCount = props.pausedCount ?? 0;
 
   // Rebuild agent list from real backend data on first seed or when the list changes.
   if (props.agents && props.agents.length > 0) {
@@ -801,7 +814,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                         <div class="cd-office-empty-state__icon">🏢</div>
                         <div class="cd-office-empty-state__title">No active agents</div>
                         <div class="cd-office-empty-state__sub">
-                          Start agents from the Agent Status page or configure them in Company Settings.
+                          Start agents from the Agent Config page or configure them in Company Settings.
                         </div>
                       </div>
                     `
@@ -988,13 +1001,39 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               const totalErrors = filteredLog.filter((e) => e.type === "error").length;
               const totalTokens = filteredLog.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
               return html`
-                <!-- Pause / Resume control -->
-                <button class="cd-stat-ctrl ${_isPaused ? "cd-stat-ctrl--paused" : ""}" @click=${() => {
-                  _isPaused = !_isPaused;
-                }}
-                  title="${_isPaused ? "Resume animation" : "Pause animation"}">
-                  ${_isPaused ? "▶" : "⏸"}
-                </button>
+                <!-- Fleet: Pause / Resume / Stop all (real task control) -->
+                ${
+                  _runningCount > 0 || _pausedCount > 0
+                    ? html`
+                      <div class="cd-fleet-ctrl">
+                        ${
+                          _runningCount > 0
+                            ? html`
+                              <button class="cd-fleet-btn cd-fleet-btn--pause" title="Pause all running agents"
+                                @click=${() => void _onPauseAll?.()}>
+                                ⏸ Pause all (${_runningCount})
+                              </button>
+                              <button class="cd-fleet-btn cd-fleet-btn--stop" title="Stop (kill) all running agents"
+                                @click=${() => void _onStopAll?.()}>
+                                ⏹ Stop all (${_runningCount})
+                              </button>
+                            `
+                            : ""
+                        }
+                        ${
+                          _pausedCount > 0
+                            ? html`
+                              <button class="cd-fleet-btn cd-fleet-btn--resume" title="Resume all paused agents"
+                                @click=${() => void _onResumeAll?.()}>
+                                ▶ Resume all (${_pausedCount})
+                              </button>
+                            `
+                            : ""
+                        }
+                      </div>
+                    `
+                    : ""
+                }
 
                 <!-- Agent donut ring -->
                 <div class="cd-stat-card cd-stat-card--agents">

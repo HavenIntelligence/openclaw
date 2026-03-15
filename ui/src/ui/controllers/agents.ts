@@ -44,7 +44,16 @@ export async function loadAgents(state: AgentsState) {
   }
 }
 
-export async function loadToolsCatalog(state: AgentsState, agentId: string) {
+export type LoadToolsCatalogOpts = {
+  /** When true, skip agentsSelectedId check (e.g. company fleet context). */
+  forCompanyFleet?: boolean;
+};
+
+export async function loadToolsCatalog(
+  state: AgentsState,
+  agentId: string,
+  opts?: LoadToolsCatalogOpts,
+) {
   const resolvedAgentId = agentId.trim();
   if (!state.client || !state.connected || !resolvedAgentId) {
     return;
@@ -56,6 +65,7 @@ export async function loadToolsCatalog(state: AgentsState, agentId: string) {
   state.toolsCatalogLoadingAgentId = resolvedAgentId;
   state.toolsCatalogError = null;
   state.toolsCatalogResult = null;
+  const skipAgentCheck = opts?.forCompanyFleet === true;
   try {
     const res = await state.client.request<ToolsCatalogResult>("tools.catalog", {
       agentId: resolvedAgentId,
@@ -64,7 +74,7 @@ export async function loadToolsCatalog(state: AgentsState, agentId: string) {
     if (state.toolsCatalogLoadingAgentId !== resolvedAgentId) {
       return;
     }
-    if (state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
+    if (!skipAgentCheck && state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
       return;
     }
     state.toolsCatalogResult = res;
@@ -72,7 +82,7 @@ export async function loadToolsCatalog(state: AgentsState, agentId: string) {
     if (state.toolsCatalogLoadingAgentId !== resolvedAgentId) {
       return;
     }
-    if (state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
+    if (!skipAgentCheck && state.agentsSelectedId && state.agentsSelectedId !== resolvedAgentId) {
       return;
     }
     state.toolsCatalogResult = null;

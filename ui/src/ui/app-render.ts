@@ -24,9 +24,12 @@ import {
   loadAgentLogs,
   startAgent,
   stopAgent,
-  restartAgent,
+  stopAllAgents,
   pauseAgent,
+  pauseAllAgents,
   resumeAgent,
+  resumeAllAgents,
+  restartAgent,
   createAgent,
   deleteAgent,
   updateAgent,
@@ -480,10 +483,12 @@ export function renderApp(state: AppViewState) {
                   navCollapsed
                     ? nothing
                     : html`
-                        <span class="sidebar-brand__logo sidebar-brand__logo--company">${icons.clawdock}</span>
+                        <span class="sidebar-brand__logo sidebar-brand__logo--company">
+                          <img src="${_basePath ? `${_basePath}/ClawDock_logo.svg` : "ClawDock_logo.svg"}" alt="ClawDock" class="sidebar-brand__logo-img" />
+                        </span>
                         <span class="sidebar-brand__copy">
                           <span class="sidebar-brand__eyebrow">CONTROL PLANE</span>
-                          <span class="sidebar-brand__title">Haven Clawdock company</span>
+                          <span class="sidebar-brand__title">ClawDock</span>
                         </span>
                       `
                 }
@@ -2042,10 +2047,221 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "companyFleet"
-            ? lazyRender(lazyCompanyFleet, (m) =>
-                m.renderCompanyFleet({
+            ? lazyRender(lazyCompanyFleet, (m) => {
+                const expandedId = state.companyExpandedAgentId;
+                const configPanel = state.companyConfigPanel;
+                return m.renderCompanyFleet({
                   agents: state.companyAgents,
                   logs: state.companyAgentLogs,
+                  onExpandedAgentChange: (agentId) => {
+                    state.companyExpandedAgentId = agentId;
+                    state.companyConfigPanel = "overview";
+                    if (agentId) {
+                      state.agentFilesList = null;
+                      state.agentFilesError = null;
+                      state.agentFileActive = null;
+                      state.agentFileContents = {};
+                      state.agentFileDrafts = {};
+                      state.agentSkillsReport = null;
+                      state.agentSkillsAgentId = null;
+                      state.agentSkillsError = null;
+                      void loadAgentFiles(state, agentId);
+                      void loadAgentSkills(state, agentId);
+                      void loadToolsCatalog(state, agentId, { forCompanyFleet: true });
+                      void loadChannels(state, false);
+                    }
+                    requestHostUpdate?.();
+                  },
+                  expandedDataAgentId: expandedId,
+                  configPanel,
+                  onConfigPanelChange: (panel) => {
+                    state.companyConfigPanel = panel;
+                    requestHostUpdate?.();
+                  },
+                  configForm: configValue,
+                  agentFiles: {
+                    list: state.agentFilesList,
+                    loading: state.agentFilesLoading,
+                    error: state.agentFilesError,
+                    active: state.agentFileActive,
+                    contents: state.agentFileContents,
+                    drafts: state.agentFileDrafts,
+                    saving: state.agentFileSaving,
+                  },
+                  agentSkills: {
+                    report: state.agentSkillsReport,
+                    loading: state.agentSkillsLoading,
+                    error: state.agentSkillsError,
+                    agentId: state.agentSkillsAgentId,
+                    filter: state.skillsFilter,
+                  },
+                  toolsCatalog: {
+                    loading: state.toolsCatalogLoading,
+                    error: state.toolsCatalogError,
+                    result: state.toolsCatalogResult,
+                  },
+                  channels: {
+                    snapshot: state.channelsSnapshot,
+                    loading: state.channelsLoading,
+                    error: state.channelsError,
+                    lastSuccess: state.channelsLastSuccess,
+                  },
+                  cron: {
+                    jobs: state.cronJobs,
+                    status: state.cronStatus,
+                    loading: state.cronLoading,
+                    error: state.cronError,
+                  },
+                  configLoading: state.configForm === null && state.configSnapshot === null,
+                  configSaving: state.configSaving ?? false,
+                  configDirty: state.configFormDirty ?? false,
+                  onLoadFiles: (aid) => {
+                    void loadAgentFiles(state, aid);
+                    requestHostUpdate?.();
+                  },
+                  onSelectFile: (name) => {
+                    state.agentFileActive = name;
+                    if (expandedId) {
+                      void loadAgentFileContent(state, expandedId, name);
+                    }
+                    requestHostUpdate?.();
+                  },
+                  onFileDraftChange: (name, content) => {
+                    state.agentFileDrafts = { ...state.agentFileDrafts, [name]: content };
+                    requestHostUpdate?.();
+                  },
+                  onFileReset: (name) => {
+                    const next = { ...state.agentFileDrafts };
+                    delete next[name];
+                    state.agentFileDrafts = next;
+                    requestHostUpdate?.();
+                  },
+                  onFileSave: async (name) => {
+                    if (!expandedId) {
+                      return;
+                    }
+                    await saveAgentFile(state, expandedId, name);
+                    requestHostUpdate?.();
+                  },
+                  onLoadFileContent: (aid, name) => {
+                    void loadAgentFileContent(state, aid, name);
+                    requestHostUpdate?.();
+                  },
+                  onSkillsRefresh: (aid) => {
+                    void loadAgentSkills(state, aid);
+                    requestHostUpdate?.();
+                  },
+                  onSkillsFilterChange: (next) => {
+                    state.skillsFilter = next;
+                    requestHostUpdate?.();
+                  },
+                  onAgentSkillToggle: (aid, skillName, enabled) => {
+                    const index = ensureAgentIndex(aid);
+                    if (index < 0) {
+                      return;
+                    }
+                    const list = (
+                      getCurrentConfigValue() as { agents?: { list?: unknown[] } } | null
+                    )?.agents?.list;
+                    const entry = Array.isArray(list)
+                      ? (list[index] as { skills?: unknown })
+                      : undefined;
+                    const normalizedSkill = skillName.trim();
+                    if (!normalizedSkill) {
+                      return;
+                    }
+                    const allSkills =
+                      state.agentSkillsReport?.skills?.map((s) => s.name).filter(Boolean) ?? [];
+                    const existing = Array.isArray(entry?.skills)
+                      ? entry.skills.map((n: unknown) => String(n).trim()).filter(Boolean)
+                      : undefined;
+                    const base = existing ?? allSkills;
+                    const next = new Set(base);
+                    if (enabled) {
+                      next.add(normalizedSkill);
+                    } else {
+                      next.delete(normalizedSkill);
+                    }
+                    updateConfigFormValue(state, ["agents", "list", index, "skills"], [...next]);
+                    requestHostUpdate?.();
+                  },
+                  onAgentSkillsClear: (aid) => {
+                    const index = findAgentIndex(aid);
+                    if (index < 0) {
+                      return;
+                    }
+                    removeConfigFormValue(state, ["agents", "list", index, "skills"]);
+                    requestHostUpdate?.();
+                  },
+                  onAgentSkillsDisableAll: (aid) => {
+                    const index = ensureAgentIndex(aid);
+                    if (index < 0) {
+                      return;
+                    }
+                    updateConfigFormValue(state, ["agents", "list", index, "skills"], []);
+                    requestHostUpdate?.();
+                  },
+                  onConfigReload: () => {
+                    void loadConfig(state);
+                    requestHostUpdate?.();
+                  },
+                  onConfigSave: () => {
+                    void saveAgentsConfig(state);
+                    requestHostUpdate?.();
+                  },
+                  onToolsProfileChange: (aid, profile, clearAllow) => {
+                    const index =
+                      profile || clearAllow ? ensureAgentIndex(aid) : findAgentIndex(aid);
+                    if (index < 0) {
+                      return;
+                    }
+                    const basePath = ["agents", "list", index, "tools"];
+                    if (profile) {
+                      updateConfigFormValue(state, [...basePath, "profile"], profile);
+                    } else {
+                      removeConfigFormValue(state, [...basePath, "profile"]);
+                    }
+                    if (clearAllow) {
+                      removeConfigFormValue(state, [...basePath, "allow"]);
+                    }
+                    requestHostUpdate?.();
+                  },
+                  onToolsOverridesChange: (aid, alsoAllow, deny) => {
+                    const index =
+                      alsoAllow.length > 0 || deny.length > 0
+                        ? ensureAgentIndex(aid)
+                        : findAgentIndex(aid);
+                    if (index < 0) {
+                      return;
+                    }
+                    const basePath = ["agents", "list", index, "tools"];
+                    if (alsoAllow.length > 0) {
+                      updateConfigFormValue(state, [...basePath, "alsoAllow"], alsoAllow);
+                    } else {
+                      removeConfigFormValue(state, [...basePath, "alsoAllow"]);
+                    }
+                    if (deny.length > 0) {
+                      updateConfigFormValue(state, [...basePath, "deny"], deny);
+                    } else {
+                      removeConfigFormValue(state, [...basePath, "deny"]);
+                    }
+                    requestHostUpdate?.();
+                  },
+                  onChannelsRefresh: () => {
+                    void loadChannels(state, false);
+                    requestHostUpdate?.();
+                  },
+                  onCronRefresh: () => {
+                    void state.loadCron?.();
+                    requestHostUpdate?.();
+                  },
+                  onCronRunNow: (jobId) => {
+                    const job = state.cronJobs.find((entry) => entry.id === jobId);
+                    if (job) {
+                      void runCronJob(state, job, "force");
+                    }
+                    requestHostUpdate?.();
+                  },
                   onStart: async (agentId) => {
                     await startAgent(state, agentId);
                     requestHostUpdate?.();
@@ -2079,16 +2295,20 @@ export function renderApp(state: AppViewState) {
                     requestHostUpdate?.();
                   },
                   _requestUpdate: () => requestHostUpdate?.(),
-                }),
-              )
+                });
+              })
             : nothing
         }
 
         ${
           state.tab === "companyOrgChart"
-            ? lazyRender(lazyCompanyOrgChart, (m) =>
-                m.renderCompanyOrgChart({
+            ? lazyRender(lazyCompanyOrgChart, (m) => {
+                const organizationRunning = state.companyAgents.some(
+                  (a) => a.status === "active" || a.status === "starting",
+                );
+                return m.renderCompanyOrgChart({
                   agents: state.companyAgents,
+                  organizationRunning,
                   onCreateAgent: async (params) => {
                     await createAgent(state, params);
                     requestHostUpdate?.();
@@ -2097,19 +2317,25 @@ export function renderApp(state: AppViewState) {
                     await deleteAgent(state, agentId);
                     requestHostUpdate?.();
                   },
-                }),
-              )
+                });
+              })
             : nothing
         }
 
         ${
           state.tab === "companyOffice"
-            ? lazyRender(lazyCompanyOffice, (m) =>
-                m.renderCompanyOffice({
+            ? lazyRender(lazyCompanyOffice, (m) => {
+                const runningCount = state.companyAgents.filter(
+                  (a) => a.status === "active" || a.status === "starting",
+                ).length;
+                const pausedCount = state.companyAgents.filter((a) => a.status === "paused").length;
+                return m.renderCompanyOffice({
                   requestUpdate: requestHostUpdate,
                   agents: state.companyAgents,
                   logs: state.companyAgentLogs,
                   messages: state.companyMessages,
+                  runningCount,
+                  pausedCount,
                   onSendMessage: async (content) => {
                     await sendMessageToCompany(state, content);
                     await Promise.all([loadCompanyMessages(state), loadCompanyChatMessages(state)]);
@@ -2119,8 +2345,20 @@ export function renderApp(state: AppViewState) {
                     await stopAgent(state, agentId);
                     requestHostUpdate?.();
                   },
-                }),
-              )
+                  onPauseAll: async () => {
+                    await pauseAllAgents(state);
+                    requestHostUpdate?.();
+                  },
+                  onResumeAll: async () => {
+                    await resumeAllAgents(state);
+                    requestHostUpdate?.();
+                  },
+                  onStopAll: async () => {
+                    await stopAllAgents(state);
+                    requestHostUpdate?.();
+                  },
+                });
+              })
             : nothing
         }
 

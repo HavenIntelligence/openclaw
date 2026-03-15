@@ -246,6 +246,8 @@ export type AppViewState = {
   companyMessages: AgentMessage[];
   companyChatMessages: AgentMessage[];
   companyChatFilterAgentIds: string[];
+  companyExpandedAgentId: string | null;
+  companyConfigPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
 } & Pick<
   CronState,
   | "cronLoading"
