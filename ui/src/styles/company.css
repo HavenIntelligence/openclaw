@@ -1441,10 +1441,10 @@
   gap: 8px;
   padding: 8px 16px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.88);
+  background: var(--bg-elevated);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   z-index: 20;
   white-space: nowrap;
 }
@@ -1467,9 +1467,9 @@
   gap: 4px;
   padding: 6px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(30, 41, 59, 0.6);
-  color: #e2e8f0;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -1477,7 +1477,7 @@
 }
 
 .cd-oc-float-btn:hover {
-  background: rgba(51, 65, 85, 0.7);
+  background: var(--bg-muted);
 }
 
 .cd-oc-float-btn--primary {
@@ -1541,15 +1541,16 @@
   top: 18px;
   right: 18px;
   width: 280px;
-  background: rgba(15, 23, 42, 0.92);
+  background: var(--bg-elevated);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid var(--border);
   border-left: 3px solid var(--accent-c, var(--accent));
   border-radius: 16px;
   padding: 16px;
   z-index: 30;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
   animation: cd-detail-float-in 0.2s ease-out;
+  color: var(--text);
 }
 
 @keyframes cd-detail-float-in {
@@ -1594,7 +1595,7 @@
 }
 
 .cd-oc-node:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.05);
 }
 
 .cd-oc-node--selected rect:first-of-type {
@@ -3933,10 +3934,10 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
   backdrop-filter: blur(16px);
-  color: #e2e8f0;
+  color: var(--text);
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
@@ -3947,13 +3948,13 @@
 }
 
 .cd-oc-zoom-btn:hover {
-  background: rgba(51, 65, 85, 0.85);
-  border-color: rgba(148, 163, 184, 0.35);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }
 
 .cd-oc-zoom-btn--fit {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--muted-foreground);
 }
 
 /* ── Layout toggle (Teams / Hierarchy) ────────────────────────────────── */
@@ -3963,8 +3964,8 @@
   gap: 2px;
   padding: 2px;
   border-radius: 8px;
-  background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
 }
 
 .cd-oc-layout-btn {

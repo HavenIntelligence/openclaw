@@ -28,6 +28,7 @@ import {
   pauseAgent,
   resumeAgent,
   createAgent,
+  deleteAgent,
   updateAgent,
   createTask,
   updateTask,
@@ -2087,7 +2088,17 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "companyOrgChart"
             ? lazyRender(lazyCompanyOrgChart, (m) =>
-                m.renderCompanyOrgChart({ agents: state.companyAgents }),
+                m.renderCompanyOrgChart({
+                  agents: state.companyAgents,
+                  onCreateAgent: async (params) => {
+                    await createAgent(state, params);
+                    requestHostUpdate?.();
+                  },
+                  onDeleteAgent: async (agentId) => {
+                    await deleteAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                }),
               )
             : nothing
         }

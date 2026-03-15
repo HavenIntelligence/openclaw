@@ -153,6 +153,7 @@ export type CreateAgentParams = {
   color?: string;
   runtime?: string;
   description?: string;
+  reportTo?: string | null;
 };
 
 export type UpdateAgentParams = {
@@ -184,6 +185,14 @@ export async function createAgent(
   } catch {
     return null;
   }
+}
+
+export async function deleteAgent(state: CompanyState, agentId: string): Promise<void> {
+  if (!state.client) {
+    return;
+  }
+  await state.client.request("company.agents.delete", { id: agentId });
+  await loadCompanyAgents(state);
 }
 
 export async function updateAgent(

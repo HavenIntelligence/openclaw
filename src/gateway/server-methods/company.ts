@@ -1,4 +1,8 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { getCompanyService } from "../../company/company-service.js";
+import { loadConfig, writeConfigFile } from "../../config/config.js";
+import { resolveConfigDir } from "../../utils.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 /** Type-safe extraction of a string param field. */
@@ -173,7 +177,7 @@ export const companyHandlers: GatewayRequestHandlers = {
       respond(false, undefined, { code: "CONFLICT", message: `agent "${id}" already exists` });
       return;
     }
-    const meta = await svc.registry.upsertMeta(id, {
+    const metaPartial: Record<string, unknown> = {
       role: strParam(params.role, "Agent"),
       team: strParam(params.team, "general"),
       emoji: strParam(params.emoji, "🤖"),
@@ -183,7 +187,44 @@ export const companyHandlers: GatewayRequestHandlers = {
         params.runtime,
         "openclaw",
       ) as import("../../company/types.js").ClawDockRuntime,
-    });
+    };
+    if (typeof params.reportTo === "string") {
+      metaPartial.reportTo = params.reportTo.trim() || undefined;
+    }
+    const meta = await svc.registry.upsertMeta(id, metaPartial);
+
+    // Add agent to openclaw.json agents.list so it's fully recognized by the CLI
+    try {
+      const cfg = loadConfig();
+      const list = Array.isArray(cfg.agents?.list) ? [...cfg.agents.list] : [];
+      if (!list.some((entry) => entry?.id === id)) {
+        const model = cfg.agents?.defaults?.model ?? { primary: "anthropic/claude-sonnet-4-5" };
+        list.push({ id, name, model });
+        const updatedCfg = { ...cfg, agents: { ...cfg.agents, list } };
+        await writeConfigFile(updatedCfg);
+      }
+    } catch {
+      // Best-effort — agent meta is already saved; config write failure is non-fatal
+    }
+
+    // Copy auth profiles from the default agent so the new agent can authenticate
+    try {
+      const configDir = resolveConfigDir();
+      const defaultAuthPath = path.join(configDir, "agents", "main", "agent", "auth-profiles.json");
+      const newAgentDir = path.join(configDir, "agents", id, "agent");
+      const newAuthPath = path.join(newAgentDir, "auth-profiles.json");
+      const defaultAuth = await fs.readFile(defaultAuthPath, "utf-8").catch(() => null);
+      if (defaultAuth) {
+        await fs.mkdir(newAgentDir, { recursive: true });
+        // Only copy if no auth file exists yet
+        await fs.access(newAuthPath).catch(async () => {
+          await fs.writeFile(newAuthPath, defaultAuth, "utf-8");
+        });
+      }
+    } catch {
+      // Best-effort — auth copy failure is non-fatal
+    }
+
     const agent = svc.registry.getAgent(id) ?? meta;
     svc.broadcast("company.agent.status", { agentId: id, status: "idle", updatedAt: Date.now() });
     respond(true, agent, undefined);
@@ -197,6 +238,20 @@ export const companyHandlers: GatewayRequestHandlers = {
     }
     const svc = getCompanyService();
     await svc.registry.deleteMeta(id);
+
+    // Remove from openclaw.json agents.list
+    try {
+      const cfg = loadConfig();
+      const list = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
+      const filtered = list.filter((entry) => entry?.id !== id);
+      if (filtered.length !== list.length) {
+        const updatedCfg = { ...cfg, agents: { ...cfg.agents, list: filtered } };
+        await writeConfigFile(updatedCfg);
+      }
+    } catch {
+      // Best-effort
+    }
+
     respond(true, { ok: true }, undefined);
   },
 

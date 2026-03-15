@@ -276,9 +276,7 @@ function buildTeamsLayout(): { nodes: LayoutNode[]; teamGroups: TeamGroup[]; edg
     curX += colW + TEAM_COL_GAP;
   }
 
-  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
-  const edges = edgesFromTree(_activeOrgTree, nodeMap);
-  return { nodes: allNodes, teamGroups, edges };
+  return { nodes: allNodes, teamGroups, edges: [] };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -314,6 +312,13 @@ let _addTargetId: string | null = null;
 let _deleteMode = false;
 let _layout: "hierarchy" | "teams" = "hierarchy";
 let _zoom = 1.0;
+let _panX = 0;
+let _panY = 0;
+let _isPanning = false;
+let _panStartX = 0;
+let _panStartY = 0;
+let _panStartPanX = 0;
+let _panStartPanY = 0;
 let _newRoleName = "";
 let _newRoleEmoji = "🤖";
 let _newRoleTitle = "";
@@ -418,39 +423,8 @@ const QUICK_ROLES: OrgNode[] = [
 ];
 
 let _idCounter = 200;
-
-function deleteNode(tree: OrgNode, id: string): boolean {
-  if (!tree.children) {
-    return false;
-  }
-  const idx = tree.children.findIndex((c) => c.id === id);
-  if (idx >= 0) {
-    tree.children.splice(idx, 1);
-    return true;
-  }
-  for (const child of tree.children) {
-    if (deleteNode(child, id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function addChildTo(tree: OrgNode, parentId: string, newNode: OrgNode): boolean {
-  if (tree.id === parentId) {
-    if (!tree.children) {
-      tree.children = [];
-    }
-    tree.children.push(newNode);
-    return true;
-  }
-  for (const child of tree.children ?? []) {
-    if (addChildTo(child, parentId, newNode)) {
-      return true;
-    }
-  }
-  return false;
-}
+let _onCreateAgent: CompanyOrgChartProps["onCreateAgent"];
+let _onDeleteAgent: CompanyOrgChartProps["onDeleteAgent"];
 
 // ── Node SVG renderer ─────────────────────────────────────────────────────────
 function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
@@ -523,7 +497,9 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
       transform="translate(${n.x}, ${n.y})"
       @click=${() => {
         if (isDeletable) {
-          deleteNode(ORG_TREE, n.id);
+          if (_onDeleteAgent) {
+            void _onDeleteAgent(n.id);
+          }
           if (_selectedId === n.id) {
             _selectedId = null;
           }
@@ -552,7 +528,7 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
       />
 
       <!-- Top accent strip -->
-      <rect x="2" y="0" width="${NODE_W - 4}" height="4" rx="2" fill="${n.color}" />
+      <rect x="2" y="0" width="${NODE_W - 4}" height="4" rx="2" fill="${n.color}" opacity="0.7" />
 
       <!-- Avatar circle background -->
       <circle cx="28" cy="42" r="17"
@@ -629,9 +605,19 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
 // ── Main render ───────────────────────────────────────────────────────────────
 export type CompanyOrgChartProps = {
   agents?: ClawDockAgent[];
+  onCreateAgent?: (params: {
+    name: string;
+    role?: string;
+    team?: string;
+    emoji?: string;
+    reportTo?: string | null;
+  }) => void | Promise<void>;
+  onDeleteAgent?: (agentId: string) => void | Promise<void>;
 };
 
 export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
+  _onCreateAgent = props.onCreateAgent;
+  _onDeleteAgent = props.onDeleteAgent;
   const hasRealAgents = props.agents && props.agents.length > 0;
   // Update active tree from real agents each render
   if (hasRealAgents) {
@@ -704,8 +690,42 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
       }
 
       <!-- Main canvas -->
-      <div class="cd-oc-canvas-wrap cd-oc-canvas-wrap--full">
-        <div class="cd-oc-canvas" style="transform-origin:top center;transform:scale(${_zoom});transition:transform 0.15s ease">
+      <div class="cd-oc-canvas-wrap cd-oc-canvas-wrap--full"
+        @mousedown=${(e: MouseEvent) => {
+          if (e.button !== 0) {
+            return;
+          }
+          const target = e.target as HTMLElement;
+          if (
+            target.closest(
+              ".cd-oc-node, .cd-oc-float-toolbar, .cd-oc-zoom-controls, .cd-oc-detail-float, .cd-oc-modal-overlay, .cd-btn",
+            )
+          ) {
+            return;
+          }
+          _isPanning = true;
+          _panStartX = e.clientX;
+          _panStartY = e.clientY;
+          _panStartPanX = _panX;
+          _panStartPanY = _panY;
+          e.preventDefault();
+        }}
+        @mousemove=${(e: MouseEvent) => {
+          if (!_isPanning) {
+            return;
+          }
+          _panX = _panStartPanX + (e.clientX - _panStartX);
+          _panY = _panStartPanY + (e.clientY - _panStartY);
+        }}
+        @mouseup=${() => {
+          _isPanning = false;
+        }}
+        @mouseleave=${() => {
+          _isPanning = false;
+        }}
+        style="cursor:${_isPanning ? "grabbing" : "grab"}"
+      >
+        <div class="cd-oc-canvas" style="transform-origin:0 0;transform:translate(${_panX}px,${_panY}px) scale(${_zoom});transition:${_isPanning ? "none" : "transform 0.15s ease"}">
           <svg class="cd-oc-svg"
             viewBox="-20 -20 ${svgW} ${svgH}"
             preserveAspectRatio="xMidYMin meet"
@@ -794,6 +814,8 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
           <button class="cd-oc-zoom-btn cd-oc-zoom-btn--fit" title="Fit / Reset zoom"
             @click=${() => {
               _zoom = 1.0;
+              _panX = 0;
+              _panY = 0;
             }}>
             ⊡
           </button>
@@ -881,8 +903,16 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
               ${QUICK_ROLES.map(
                 (preset) => html`
                 <button class="cd-oc-quick-role" @click=${() => {
-                  const newNode: OrgNode = { ...preset, id: `node-${_idCounter++}`, children: [] };
-                  addChildTo(ORG_TREE, _addTargetId!, newNode);
+                  const parentId = _addTargetId;
+                  if (parentId && _onCreateAgent) {
+                    void _onCreateAgent({
+                      name: preset.name,
+                      role: preset.role,
+                      team: preset.team,
+                      emoji: preset.emoji,
+                      reportTo: parentId,
+                    });
+                  }
                   _addTargetId = null;
                 }}>
                   ${preset.emoji} ${preset.role}
@@ -910,21 +940,15 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
                 if (!_newRoleName.trim()) {
                   return;
                 }
-                const newNode: OrgNode = {
-                  id: `node-${_idCounter++}`,
-                  name: _newRoleName.trim(),
-                  role: _newRoleTitle || _newRoleName.trim(),
-                  emoji: _newRoleEmoji || "🤖",
-                  color: "#60a5fa",
-                  status: "idle",
-                  model: "claude-sonnet-4-5",
-                  team: "general",
-                  description: "",
-                  toolCount: 0,
-                  cronCount: 0,
-                  children: [],
-                };
-                addChildTo(ORG_TREE, _addTargetId!, newNode);
+                const parentId = _addTargetId;
+                if (parentId && _onCreateAgent) {
+                  void _onCreateAgent({
+                    name: _newRoleName.trim(),
+                    role: _newRoleTitle || _newRoleName.trim(),
+                    emoji: _newRoleEmoji || "🤖",
+                    reportTo: parentId,
+                  });
+                }
                 _newRoleName = "";
                 _newRoleTitle = "";
                 _newRoleEmoji = "🤖";
@@ -1006,7 +1030,9 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
                 selected.id !== ORG_TREE.id
                   ? html`
                 <button class="cd-btn cd-btn--destructive cd-btn--sm" @click=${() => {
-                  deleteNode(ORG_TREE, selected.id);
+                  if (_onDeleteAgent) {
+                    void _onDeleteAgent(selected.id);
+                  }
                   _selectedId = null;
                 }}>🗑️ Remove</button>
               `
