@@ -285,11 +285,13 @@ export class ProcessManager {
       });
     }
 
-    child.once("exit", (code) => {
+    child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+      // User-initiated stop (SIGTERM/SIGKILL) → treat as success so status becomes idle, not crashed
+      const isUserStop = signal === "SIGTERM" || signal === "SIGKILL";
       finish({
         content: resultContent,
         tokensUsed: resultTokens,
-        exitCode: code ?? 1,
+        exitCode: isUserStop ? 0 : (code ?? 1),
       });
     });
 
@@ -314,6 +316,8 @@ export class ProcessManager {
         resolve();
       });
     });
+    // Ensure status is idle after intentional stop (in case exit handler raced)
+    this.setStatus(agentId, "idle", { pid: undefined, currentTask: undefined });
   }
 
   async restart(agentId: string, prompt?: string): Promise<void> {
