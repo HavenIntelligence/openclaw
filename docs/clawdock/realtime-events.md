@@ -24,7 +24,7 @@ Fired every time an agent's runtime status changes.
 }
 ```
 
-**Emitted by:** `ProcessManager.setStatus()` on every state transition, and manually by `company.message.send` when routing to director.
+**Emitted by:** `ProcessManager.setStatus()` on every state transition, manually by `company.message.send` when routing to director, and by `Orchestrator` during delegation.
 
 **Frontend handler:**
 
@@ -87,7 +87,7 @@ Fired for every log entry produced by a running agent (stdout line, stderr line,
 | `"message_out"` | MessageBus             | Outgoing inter-agent message                     |
 | `"message_in"`  | MessageBus             | Incoming inter-agent message                     |
 
-**Emitted by:** `ProcessManager.runTask()` (stdout/stderr line handler), `company.message.send` (dispatch log).
+**Emitted by:** `ProcessManager.runTask()` (stdout/stderr line handler), `company.message.send` (dispatch log), `Orchestrator` (delegation system logs).
 
 **Frontend handler:**
 
@@ -214,6 +214,39 @@ host.companyMessages = [...host.companyMessages.slice(-499), msg];
 ```
 
 Keeps the last 500 messages; appends the new one.
+
+---
+
+### `company.orchestration.phase`
+
+Fired by the `Orchestrator` at each phase transition during automatic delegation.
+
+**Payload:**
+
+```typescript
+{
+  orchestrationId: string; // unique ID for this orchestration run
+  agentId: string; // agent transitioning
+  phase: OrchestrationPhase;
+  depth: number; // recursion depth (0 = root orchestrator)
+  ts: number; // Unix timestamp (ms)
+}
+```
+
+**`OrchestrationPhase` values:**
+
+| Phase            | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| `"planning"`     | Agent is analyzing the task and creating delegation plan |
+| `"delegating"`   | Subtasks dispatched to subordinates                      |
+| `"executing"`    | Leaf agent or direct execution (no delegation)           |
+| `"synthesizing"` | Agent is combining subordinate results                   |
+| `"complete"`     | Agent finished its part of the orchestration             |
+| `"failed"`       | Agent encountered an error during orchestration          |
+
+**Emitted by:** `Orchestrator.execute()` at each phase transition.
+
+**Frontend usage:** The frontend can use this event to animate the Office view, showing which agents are planning, waiting for results, or synthesizing. The `depth` field helps visualize the delegation tree.
 
 ---
 

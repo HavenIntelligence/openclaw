@@ -100,6 +100,17 @@ export class AgentRegistry {
     return this.metaById.get(id) ?? null;
   }
 
+  /** Compute direct reports by scanning all agents' reportTo field. */
+  getDirectReports(agentId: string): string[] {
+    const reports: string[] = [];
+    for (const [id, meta] of this.metaById) {
+      if (meta.reportTo === agentId) {
+        reports.push(id);
+      }
+    }
+    return reports;
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────
 
   private mergeAgent(

@@ -7,6 +7,13 @@ import type { CliAgentRunner, ParsedOutput, RunOpts } from "./runners/base.js";
 import { createOpenClawLineParser } from "./runners/openclaw-runner.js";
 import type { AgentRuntimeState, AgentStatus } from "./types.js";
 
+export interface TaskResult {
+  runId: string;
+  content: string;
+  tokensUsed: number;
+  exitCode: number;
+}
+
 function generateRunId(): string {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -58,7 +65,48 @@ export class ProcessManager {
     return Array.from(this.states.values());
   }
 
+  /** Fire-and-forget: start a task and return the runId immediately. */
   async runTask(agentId: string, prompt: string, opts?: RunOpts): Promise<string> {
+    const { runId } = this.spawnTask(agentId, prompt, opts);
+    return runId;
+  }
+
+  /** Start a task and wait for it to complete, returning the output text. */
+  async runTaskAwait(
+    agentId: string,
+    prompt: string,
+    opts?: RunOpts & { timeoutMs?: number },
+  ): Promise<TaskResult> {
+    const { runId, resultPromise } = this.spawnTask(agentId, prompt, opts);
+    const timeoutMs = opts?.timeoutMs ?? 120_000;
+
+    return new Promise<TaskResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // Force-kill on timeout
+        const child = this.processes.get(agentId);
+        if (child) {
+          child.kill("SIGKILL");
+        }
+        reject(new Error(`Agent "${agentId}" timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      void resultPromise.then((r) => {
+        clearTimeout(timer);
+        resolve({ runId, ...r });
+      });
+    });
+  }
+
+  // ── Core spawn logic (shared between runTask / runTaskAwait) ──────────
+
+  private spawnTask(
+    agentId: string,
+    prompt: string,
+    opts?: RunOpts,
+  ): {
+    runId: string;
+    resultPromise: Promise<{ content: string; tokensUsed: number; exitCode: number }>;
+  } {
     const meta = this.registry.getMeta(agentId);
     const runtime = meta?.runtime ?? "openclaw";
     const runner = this.runners.get(runtime);
@@ -69,7 +117,6 @@ export class ProcessManager {
     const runId = generateRunId();
     this.setStatus(agentId, "active", { currentTask: prompt });
 
-    // Pass agent-specific CLI overrides from metadata.
     const mergedOpts: RunOpts = {
       ...opts,
       openclawAgentId: meta?.agentCli ?? opts?.openclawAgentId,
@@ -79,12 +126,13 @@ export class ProcessManager {
     const child = runner.runTask(agentId, prompt, mergedOpts);
     this.processes.set(agentId, child);
 
-    // For the openclaw runner we use a stateful per-run parser that
-    // accumulates multi-line JSON output before emitting the result.
     const lineParser: (line: string) => ParsedOutput | null =
       runtime === "openclaw" ? createOpenClawLineParser() : runner.parseOutput.bind(runner);
 
-    // Stream stdout line by line
+    // Accumulate result content for runTaskAwait callers
+    let resultContent = "";
+    let resultTokens = 0;
+
     if (child.stdout) {
       const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
       rl.on("line", (line) => {
@@ -92,6 +140,7 @@ export class ProcessManager {
         if (!parsed) {
           return;
         }
+
         if (parsed.type === "log") {
           const entry = this.logStore.append({
             agentId,
@@ -100,7 +149,6 @@ export class ProcessManager {
             content: parsed.entry.content ?? "",
             ...parsed.entry,
           });
-          // Push to in-memory log buffer too
           const state = this.getState(agentId);
           state.logBuffer.push(entry);
           if (state.logBuffer.length > 200) {
@@ -108,12 +156,14 @@ export class ProcessManager {
           }
           this.broadcast("company.agent.log", { agentId, runId, entry });
         } else if (parsed.type === "result") {
+          resultContent = parsed.content;
+          resultTokens = parsed.tokensUsed ?? 0;
+
           const state = this.getState(agentId);
-          state.tokensUsed += parsed.tokensUsed ?? 0;
+          state.tokensUsed += resultTokens;
           state.tasksCompleted += 1;
           state.currentTask = undefined;
-          // Also emit the result content as an "output" log entry so the
-          // frontend execution log shows the agent's final answer.
+
           if (parsed.content) {
             const entry = this.logStore.append({
               agentId,
@@ -132,14 +182,24 @@ export class ProcessManager {
       });
     }
 
-    // Collect stderr for errors
     if (child.stderr) {
       const rl = createInterface({ input: child.stderr, crlfDelay: Infinity });
       rl.on("line", (line) => {
-        if (!line.trim()) {
+        const trimmed = line.trim();
+        if (!trimmed) {
           return;
         }
-        const entry = this.logStore.append({ agentId, runId, type: "error", content: line });
+        // CLI warnings/info are not errors — classify as system
+        const isInfoLine =
+          trimmed.startsWith("[tools]") ||
+          trimmed.startsWith("[warn]") ||
+          trimmed.startsWith("[info]");
+        const entry = this.logStore.append({
+          agentId,
+          runId,
+          type: isInfoLine ? "system" : "error",
+          content: line,
+        });
         const state = this.getState(agentId);
         state.logBuffer.push(entry);
         if (state.logBuffer.length > 200) {
@@ -149,14 +209,19 @@ export class ProcessManager {
       });
     }
 
-    // On exit
-    child.once("exit", (code) => {
-      this.processes.delete(agentId);
-      const status: AgentStatus = code === 0 ? "idle" : "crashed";
-      this.setStatus(agentId, status, { pid: undefined, currentTask: undefined });
-    });
+    const resultPromise = new Promise<{ content: string; tokensUsed: number; exitCode: number }>(
+      (resolve) => {
+        child.once("exit", (code) => {
+          this.processes.delete(agentId);
+          const exitCode = code ?? 1;
+          const status: AgentStatus = exitCode === 0 ? "idle" : "crashed";
+          this.setStatus(agentId, status, { pid: undefined, currentTask: undefined });
+          resolve({ content: resultContent, tokensUsed: resultTokens, exitCode });
+        });
+      },
+    );
 
-    return runId;
+    return { runId, resultPromise };
   }
 
   async stop(agentId: string): Promise<void> {

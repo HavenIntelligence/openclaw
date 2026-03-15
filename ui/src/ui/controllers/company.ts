@@ -103,6 +103,35 @@ export async function loadCompanyAll(state: CompanyState): Promise<void> {
   await loadAllAgentLogs(state);
 }
 
+// ── Agent creation ────────────────────────────────────────────────────────
+
+export type CreateAgentParams = {
+  name: string;
+  id?: string;
+  role?: string;
+  team?: string;
+  emoji?: string;
+  color?: string;
+  runtime?: string;
+  description?: string;
+};
+
+export async function createAgent(
+  state: CompanyState,
+  params: CreateAgentParams,
+): Promise<ClawDockAgent | null> {
+  if (!state.client) {
+    return null;
+  }
+  try {
+    const agent = await state.client.request<ClawDockAgent>("company.agents.create", params);
+    await loadCompanyAgents(state);
+    return agent;
+  } catch {
+    return null;
+  }
+}
+
 // ── Agent actions ─────────────────────────────────────────────────────────
 
 export async function startAgent(

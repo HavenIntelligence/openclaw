@@ -177,6 +177,41 @@ export function registerClawDockCli(program: Command): void {
       console.log(`Run started: ${result.runId}`);
     });
 
+  // ── orchestrate ─────────────────────────────────────────────────────────
+  company
+    .command("orchestrate <id>")
+    .description("Run a task with automatic delegation through the org hierarchy")
+    .requiredOption("-m, --message <msg>", "Task prompt")
+    .option("--max-depth <n>", "Max delegation depth", "3")
+    .action(async (id, opts) => {
+      console.log(`Orchestrating via ${id}…\n`);
+      const result = await companyRpc<{
+        agentId: string;
+        content: string;
+        tokensUsed: number;
+        subtasks: Array<{ agentId: string; content: string; tokensUsed: number }>;
+        phase: string;
+        durationMs: number;
+      }>("company.orchestrate.run", {
+        id,
+        prompt: opts.message,
+        maxDepth: parseInt(String(opts.maxDepth), 10),
+      });
+      // Print subtask results
+      if (result.subtasks?.length) {
+        for (const sub of result.subtasks) {
+          console.log(`── ${sub.agentId} ──`);
+          console.log(sub.content);
+          console.log();
+        }
+        console.log("── Final (synthesized) ──");
+      }
+      console.log(result.content);
+      console.log(
+        `\n(${result.phase}, ${(result.durationMs / 1000).toFixed(1)}s, ${result.tokensUsed} tokens)`,
+      );
+    });
+
   // ── logs ─────────────────────────────────────────────────────────────────
   company
     .command("logs <id>")

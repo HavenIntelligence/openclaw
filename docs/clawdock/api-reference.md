@@ -362,11 +362,60 @@ Shorthand to set the `assignee` on a task.
 
 ---
 
+## Orchestration Methods
+
+### `company.orchestrate.run`
+
+Runs a task with automatic delegation through the org hierarchy. The target agent plans subtasks, delegates them to subordinates recursively, then synthesizes the results.
+
+**Params:**
+
+| Field      | Type      | Default | Description                    |
+| ---------- | --------- | ------- | ------------------------------ |
+| `id`       | `string`  | —       | Required; agent to orchestrate |
+| `prompt`   | `string`  | —       | Required; task text            |
+| `maxDepth` | `number?` | 3       | Max recursive delegation depth |
+
+**Response:** `OrchestrationResult`
+
+```typescript
+{
+  agentId: string;        // the orchestrating agent
+  content: string;        // synthesized final output
+  tokensUsed: number;     // total tokens across all agents
+  subtasks: OrchestrationResult[]; // recursive subordinate results
+  phase: "leaf" | "orchestrated";
+  durationMs: number;
+}
+```
+
+**Flow:**
+
+1. Resolves direct reports via `registry.getDirectReports(id)`.
+2. If leaf agent (no reports) or max depth reached: executes task directly via `processManager.runTaskAwait()`.
+3. **Plan phase**: Asks the agent to produce a JSON delegation plan listing subtasks for each subordinate.
+4. **Delegate phase**: Dispatches subtasks in parallel; each subordinate recursively orchestrates if it has its own reports.
+5. **Synthesize phase**: Collects all subordinate outputs and asks the agent to produce a unified response.
+
+**Broadcast events emitted:**
+
+- `company.orchestration.phase` — at each phase transition (planning, delegating, synthesizing, complete)
+- `company.agent.status` — for each agent as it becomes active/idle
+- `company.agent.log` — execution logs, delegation system logs
+- `company.agent.message` — inter-agent task/result messages via MessageBus
+
+**Errors:**
+
+- `INVALID_REQUEST` — `id` or `prompt` missing
+- `INTERNAL_ERROR` — orchestration failed (timeout, runner error, etc.)
+
+---
+
 ## Messaging Methods
 
 ### `company.message.send`
 
-Sends a message from a human to the company. Routes to the AI Director (or first available agent).
+Sends a message from a human to the company. Routes to the AI Director (or first available agent). If the director has subordinates, automatically orchestrates; otherwise runs directly.
 
 **Params:**
 
@@ -374,10 +423,11 @@ Sends a message from a human to the company. Routes to the AI Director (or first
 | --------- | -------- | ---------------------- |
 | `content` | `string` | Required; message text |
 
-**Response:** `{ ok: true, runId?: string, msgId: string }`
+**Response:** `{ ok: true, orchestrating?: boolean, runId?: string, msgId: string }`
 
 - `msgId` — ID of the recorded `AgentMessage`
-- `runId` — ID of the spawned task run (present if a director was found)
+- `orchestrating` — `true` if the director has subordinates and orchestration was launched (fire-and-forget; progress is broadcast via WS events)
+- `runId` — ID of the spawned task run (present only for leaf directors)
 
 **Flow:**
 
@@ -385,9 +435,10 @@ Sends a message from a human to the company. Routes to the AI Director (or first
 2. Finds director: agent whose `role` contains `"director"`, or `id === "ai-director"`, or the first agent.
 3. Broadcasts `company.agent.status` (director → active).
 4. Appends a `system` log entry and broadcasts `company.agent.log`.
-5. Calls `processManager.runTask(director.id, content)`.
-6. On runner error: broadcasts `company.agent.status` (idle) + error log entry, responds with `INTERNAL_ERROR`.
-7. If no agents configured: still responds `{ ok: true, msgId }`.
+5. **If director has subordinates**: launches `orchestrator.execute(director.id, content)` in the background and responds immediately with `{ ok: true, orchestrating: true }`. Progress is streamed via real-time WS events.
+6. **If director is a leaf**: calls `processManager.runTask(director.id, content)` and responds with `{ ok: true, runId }`.
+7. On runner error: broadcasts `company.agent.status` (idle) + error log entry, responds with `INTERNAL_ERROR`.
+8. If no agents configured: still responds `{ ok: true, msgId }`.
 
 **Errors:**
 

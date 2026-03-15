@@ -5,6 +5,7 @@ import { resolveConfigDir } from "../utils.js";
 import { FleetMonitor } from "./fleet-monitor.js";
 import { LogStore } from "./log-store.js";
 import { MessageBus } from "./message-bus.js";
+import { Orchestrator } from "./orchestrator.js";
 import { ProcessManager } from "./process-manager.js";
 import { ProfileStore } from "./profile-store.js";
 import { AgentRegistry } from "./registry.js";
@@ -24,6 +25,7 @@ import { TeamStore } from "./team-store.js";
 export class CompanyService {
   readonly registry: AgentRegistry;
   readonly processManager: ProcessManager;
+  readonly orchestrator: Orchestrator;
   readonly fleetMonitor: FleetMonitor;
   readonly logStore: LogStore;
   readonly taskStore: TaskStore;
@@ -51,6 +53,13 @@ export class CompanyService {
     ];
 
     this.processManager = new ProcessManager(this.registry, this.logStore, broadcast, runners);
+    this.orchestrator = new Orchestrator(
+      this.processManager,
+      this.registry,
+      this.logStore,
+      this.messageBus,
+      broadcast,
+    );
     this.fleetMonitor = new FleetMonitor(this.processManager, broadcast);
 
     // Wire message bus → broadcast

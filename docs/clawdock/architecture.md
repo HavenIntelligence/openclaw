@@ -87,7 +87,9 @@ The gateway's existing `broadcast(event, payload)` mechanism is used for all rea
 
 All company-related state is stored in the main `AppViewState` (a Lit `@state` controller). Views receive data as props; they do not own state. The `app-gateway.ts` event handler patches `AppViewState` on every incoming broadcast, triggering reactive re-renders.
 
-## Data Flow — Sending a Message
+## Data Flow — Sending a Message (with Orchestration)
+
+> For the complete inter-agent data exchange protocol (message formats, delegation plan parsing, recursive result aggregation, and a step-by-step event timeline example), see [inter-agent-data-flow.md](./inter-agent-data-flow.md).
 
 ```
 User types message in "Talk to Company" panel
@@ -102,28 +104,37 @@ sendMessageToCompany(state, content)   [controllers/company.ts]
          ▼
 companyHandlers["company.message.send"]   [server-methods/company.ts]
   1. svc.messageBus.send("human", "company", content, "task")
-  2. Find director agent (role contains "director" || id = "ai-director" || first agent)
+  2. Find director agent
   3. svc.broadcast("company.agent.status", { status: "active" })
   4. svc.logStore.append(system entry)
-  5. svc.broadcast("company.agent.log", entry)
-  6. svc.processManager.runTask(director.id, content)
-  7. respond(true, { ok, runId, msgId })
+  5. Check: does director have subordinates?
          │
-         ▼ (async, streaming)
-ProcessManager.runTask()
-  → spawns CLI child process
-  → readline on stdout → parseOutput() → LogStore.append()
-  → broadcast("company.agent.log", entry) per output line
+    ┌────┴────────────────────────────────────────────┐
+    │ YES: orchestrate                                 │ NO: direct
+    │                                                  │
+    │ svc.orchestrator.execute(director, content)      │ svc.processManager.runTask(director, content)
+    │ → respond immediately { orchestrating: true }    │ → respond { ok, runId, msgId }
+    │                                                  │
+    │ ┌─ PLAN: ask director to produce delegation ─┐   │
+    │ │  → runTaskAwait(director, planPrompt)       │   │
+    │ │  → parse JSON [{agentId, subtask}]         │   │
+    │ └────────────────────────────────────────────┘   │
+    │ ┌─ DELEGATE: parallel recursive execution ───┐   │
+    │ │  → for each subtask:                       │   │
+    │ │    orchestrator.execute(sub, subtask, d+1)  │   │
+    │ │    (sub may itself orchestrate recursively) │   │
+    │ └────────────────────────────────────────────┘   │
+    │ ┌─ SYNTHESIZE: collect results, unify ───────┐   │
+    │ │  → runTaskAwait(director, synthesizePrompt) │   │
+    │ └────────────────────────────────────────────┘   │
+    └──────────────────────────────────────────────────┘
          │
-         ▼ (back on frontend)
-app-gateway.ts handleGatewayEvent("company.agent.log")
-  → patches host.companyAgentLogs Map
-  → triggers Lit re-render
-         │
-         ▼
-loadCompanyMessages(state)   [called after sendMessageToCompany in app-render.ts]
-  → refreshes host.companyMessages from server
-  → re-renders "Talk to Company" chat log
+         ▼ (streaming throughout)
+broadcast events → app-gateway.ts → Lit re-render
+  - company.orchestration.phase (planning / delegating / synthesizing / complete)
+  - company.agent.status (active / idle per agent)
+  - company.agent.log (execution logs, delegation system logs)
+  - company.agent.message (inter-agent task/result messages)
 ```
 
 ## Data Flow — Fleet Metrics Poll
@@ -148,7 +159,8 @@ src/
     company-service.ts      ← CompanyService singleton + factory
     types.ts                ← All ClawDock TypeScript types (backend)
     registry.ts             ← AgentRegistry (config + meta merge)
-    process-manager.ts      ← Spawn/stop/pause/resume agents
+    orchestrator.ts         ← Plan-delegate-synthesize orchestration
+    process-manager.ts      ← Spawn/stop/pause/resume agents + runTaskAwait()
     fleet-monitor.ts        ← CPU/mem polling, FleetSnapshot
     log-store.ts            ← Per-agent in-memory log ring buffer
     message-bus.ts          ← Inter-agent message routing
@@ -164,7 +176,7 @@ src/
       aider-runner.ts       ← aider --message --yes
 
   cli/
-    company-cli.ts          ← `openclaw company` CLI sub-commands
+    company-cli.ts          ← `openclaw clawdock` CLI sub-commands
 
   gateway/
     server-methods/

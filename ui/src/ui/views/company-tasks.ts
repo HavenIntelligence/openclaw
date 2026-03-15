@@ -328,7 +328,7 @@ const PROJECTS = [
   "Culture",
 ];
 
-const AGENTS = [
+const _AGENTS = [
   { id: "ai-director", name: "ai-director", emoji: "👑" },
   { id: "ops-prime", name: "ops-prime", emoji: "🏢" },
   { id: "code-agent", name: "code-agent", emoji: "💻" },
@@ -508,17 +508,15 @@ export type CompanyTasksProps = {
 };
 
 export function renderCompanyTasks(props: CompanyTasksProps) {
-  // Update module-level active lists from props each render
-  if (props.tasks && props.tasks.length > 0) {
-    _activeTasks = props.tasks.map((t) => mapRealTask(t, props.agents ?? []));
-  } else {
-    _activeTasks = DEMO_TASKS;
-  }
-  if (props.agents && props.agents.length > 0) {
-    _activeAgents = props.agents.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji }));
-  } else if (_activeAgents.length === 0) {
-    _activeAgents = AGENTS;
-  }
+  // Update module-level active lists from props each render — no demo data fallback
+  _activeTasks =
+    props.tasks && props.tasks.length > 0
+      ? props.tasks.map((t) => mapRealTask(t, props.agents ?? []))
+      : [];
+  _activeAgents =
+    props.agents && props.agents.length > 0
+      ? props.agents.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji }))
+      : [];
   _onCreateTask = props.onCreateTask;
   _onUpdateTask = props.onUpdateTask;
   _onDeleteTask = props.onDeleteTask;

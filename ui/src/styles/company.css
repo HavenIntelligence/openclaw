@@ -3303,6 +3303,70 @@
   opacity: 0.85;
 }
 
+.cd-log-entry__content--md {
+  white-space: normal;
+  font-family: var(--font-sans, sans-serif);
+}
+.cd-log-entry__content--md h1,
+.cd-log-entry__content--md h2,
+.cd-log-entry__content--md h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 8px 0 4px;
+  color: var(--text-strong);
+}
+.cd-log-entry__content--md h1 { font-size: 14px; }
+.cd-log-entry__content--md p { margin: 4px 0; }
+.cd-log-entry__content--md ul,
+.cd-log-entry__content--md ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.cd-log-entry__content--md li { margin-bottom: 2px; }
+.cd-log-entry__content--md code {
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-secondary, rgba(127,127,127,.12));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.cd-log-entry__content--md pre {
+  background: var(--bg-secondary, rgba(0,0,0,.06));
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 6px 0;
+  font-size: 11px;
+}
+.cd-log-entry__content--md pre code {
+  background: none;
+  padding: 0;
+}
+.cd-log-entry__content--md strong { font-weight: 700; }
+.cd-log-entry__content--md em { font-style: italic; }
+.cd-log-entry__content--md blockquote {
+  border-left: 3px solid var(--border, #555);
+  padding-left: 10px;
+  margin: 6px 0;
+  opacity: 0.8;
+}
+.cd-log-entry__content--md table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 11px;
+  width: 100%;
+}
+.cd-log-entry__content--md th,
+.cd-log-entry__content--md td {
+  border: 1px solid var(--border, #444);
+  padding: 4px 8px;
+  text-align: left;
+}
+.cd-log-entry__content--md th {
+  background: var(--bg-secondary, rgba(127,127,127,.08));
+  font-weight: 600;
+}
+
 /* Outputs tab */
 .cd-office-outputs {
   flex: 1;
@@ -5571,6 +5635,12 @@
     0 0 0 1px rgba(96, 165, 250, 0.16),
     0 0 22px rgba(59, 130, 246, 0.2);
 }
+.cd-office-focus-pill--crashed {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  opacity: 0.7;
+}
 
 .cd-office-focus-arrow {
   color: rgba(148, 163, 184, 0.5);
@@ -5816,4 +5886,217 @@
   font-size: 10px;
   opacity: 0.6;
   margin-left: 4px;
+}
+
+/* ── Create Agent overlay + panel ────────────────────────────────────────── */
+.cd-create-agent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.cd-create-agent-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+.cd-create-agent-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.cd-create-agent-panel__header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.cd-create-agent-panel__body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cd-create-agent-panel__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Form components ─────────────────────────────────────────────────────── */
+.cd-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cd-form-row {
+  display: flex;
+  gap: 12px;
+}
+.cd-form-group--half {
+  flex: 1;
+}
+.cd-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cd-form-input {
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.cd-form-input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Runtime picker ──────────────────────────────────────────────────────── */
+.cd-runtime-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cd-runtime-chip {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cd-runtime-chip:hover {
+  border-color: var(--accent);
+}
+.cd-runtime-chip--active {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border-color: var(--accent);
+}
+
+/* ── Emoji picker ────────────────────────────────────────────────────────── */
+.cd-emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cd-emoji-chip {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cd-emoji-chip:hover {
+  border-color: var(--border);
+  transform: scale(1.1);
+}
+.cd-emoji-chip--active {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* ── Fleet empty state ───────────────────────────────────────────────────── */
+.cd-fleet-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+}
+.cd-fleet-empty__icon {
+  width: 80px;
+  height: 80px;
+  color: var(--muted-foreground);
+  opacity: 0.3;
+}
+.cd-fleet-empty__icon svg {
+  width: 100%;
+  height: 100%;
+}
+.cd-fleet-empty__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin: 8px 0 0;
+}
+.cd-fleet-empty__desc {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  max-width: 420px;
+  line-height: 1.6;
+}
+.cd-fleet-empty__actions {
+  margin-top: 8px;
+}
+.cd-fleet-empty__hints {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.cd-fleet-empty__hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.cd-fleet-empty__hint-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  flex-shrink: 0;
+}
+
+/* ── Primary button ──────────────────────────────────────────────────────── */
+.cd-btn--primary {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border-color: var(--accent);
+}
+.cd-btn--primary:hover {
+  opacity: 0.9;
+}
+.cd-btn--primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

@@ -311,3 +311,47 @@ interface CompanyProfile {
   updatedAt: number; // Unix ms
 }
 ```
+
+---
+
+## Orchestration Types
+
+### `OrchestrationPhase`
+
+```typescript
+type OrchestrationPhase =
+  | "planning"
+  | "delegating"
+  | "synthesizing"
+  | "executing"
+  | "complete"
+  | "failed";
+```
+
+### `OrchestrationResult`
+
+Returned by `Orchestrator.execute()` and the `company.orchestrate.run` RPC.
+
+```typescript
+interface OrchestrationResult {
+  agentId: string; // the agent that produced this result
+  content: string; // final output text (synthesized or direct)
+  tokensUsed: number; // total tokens across this agent + all subtasks
+  subtasks: OrchestrationResult[]; // recursive subordinate results (empty for leaf)
+  phase: "leaf" | "orchestrated"; // whether delegation occurred
+  durationMs: number; // wall-clock time for this subtree
+}
+```
+
+### `TaskResult`
+
+Returned by `ProcessManager.runTaskAwait()` — the awaitable counterpart to `runTask()`.
+
+```typescript
+interface TaskResult {
+  runId: string;
+  content: string; // final output text from the agent
+  tokensUsed: number;
+  exitCode: number; // 0 = success
+}
+```

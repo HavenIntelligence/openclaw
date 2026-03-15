@@ -25,7 +25,7 @@ type TeamEntry = {
   tasksToday: number;
 };
 
-const DEMO_TEAMS: TeamEntry[] = [
+const _DEMO_TEAMS: TeamEntry[] = [
   {
     id: "content-pipeline",
     name: "content-pipeline",
@@ -344,7 +344,7 @@ export function renderCompanyTeams(props: CompanyTeamsProps) {
   const teamList =
     props.teams && props.teams.length > 0
       ? props.teams.map((t) => toTeamEntry(t, props.agents ?? []))
-      : DEMO_TEAMS;
+      : [];
 
   return html`
     <div class="cd-page">
@@ -365,12 +365,40 @@ export function renderCompanyTeams(props: CompanyTeamsProps) {
 
       <!-- Team cards -->
       <div class="cd-teams-list">
-        ${teamList.map((team) => renderTeamCard(team, props))}
+        ${
+          teamList.length > 0
+            ? teamList.map((team) => renderTeamCard(team, props))
+            : html`
+            <div class="cd-office-empty" style="padding:48px 24px;text-align:center">
+              <div style="font-size:2rem;margin-bottom:12px">${icons.users}</div>
+              <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px">No teams configured yet</div>
+              <div style="color:var(--muted-foreground);margin-bottom:16px">
+                Teams are created when you add agents and assign them to groups.
+                Use the Fleet tab to create agents, then organize them into teams here.
+              </div>
+              ${
+                props.onCreateTeam
+                  ? html`
+                <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                  props.onCreateTeam?.({
+                    name: "engineering",
+                    agents: [],
+                    strategy: "one-for-one",
+                  });
+                }}>
+                  ${icons.plus} Create First Team
+                </button>
+              `
+                  : ""
+              }
+            </div>
+          `
+        }
       </div>
 
-      <!-- Add team button (only when real backend is connected) -->
+      <!-- Add team button -->
       ${
-        props.onCreateTeam
+        props.onCreateTeam && teamList.length > 0
           ? html`
         <div style="margin-top:16px">
           <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {

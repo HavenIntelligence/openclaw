@@ -27,6 +27,7 @@ import {
   restartAgent,
   pauseAgent,
   resumeAgent,
+  createAgent,
   createTask,
   updateTask,
   deleteTask,
@@ -2009,6 +2010,11 @@ export function renderApp(state: AppViewState) {
                     await loadAgentLogs(state, agentId);
                     requestHostUpdate?.();
                   },
+                  onCreate: async (params) => {
+                    await createAgent(state, params);
+                    requestHostUpdate?.();
+                  },
+                  _requestUpdate: () => requestHostUpdate?.(),
                 }),
               )
             : nothing

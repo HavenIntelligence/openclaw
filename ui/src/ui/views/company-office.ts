@@ -1,5 +1,7 @@
 import { html } from "lit";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
+import { toSanitizedMarkdownHtml } from "../markdown.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentStatus = "thinking" | "working" | "idle" | "crashed" | "messaging";
@@ -347,9 +349,10 @@ let _onStopAgent: ((agentId: string) => void) | undefined;
 /** Sends a message to the company: records an optimistic log entry and sets director to thinking. */
 function _sendToCompany(msg: string) {
   // Add optimistic entry to _execLog so it shows up immediately in the log panel.
-  addLog("human", "👤", "human", `[You → AI Director] ${msg}`);
-  // Mark the director agent as thinking in the animation.
-  const directorAgent = _agents.find((a) => a.id === "ai-director" || a.team === "executive");
+  addLog("human", "👤", "human", `[You → Orchestrator] ${msg}`);
+  // Mark the orchestrator/director agent as thinking in the animation.
+  const directorAgent =
+    _agents.find((a) => a.role === "Orchestrator" || a.id === "orchestrator") ?? _agents[0];
   if (directorAgent) {
     directorAgent.activity = "Reading your message…";
     directorAgent.status = "thinking";
@@ -371,6 +374,7 @@ let _agents: OfficeAgent[] = [];
 let _agentsSeededFromBackend = false;
 let _messages: FlyingMessage[] = [];
 let _canvasBubbles: CanvasBubble[] = [];
+let _activeEdges: { from: string; to: string; timer: number }[] = [];
 let _bubbleIdCounter = 0;
 let _tick = 0;
 let _msgIdCounter = 0;
@@ -451,6 +455,12 @@ function simulationStep() {
     b.timer--;
   }
   _canvasBubbles = _canvasBubbles.filter((b) => b.timer > 0);
+
+  // Tick active edges
+  for (const e of _activeEdges) {
+    e.timer--;
+  }
+  _activeEdges = _activeEdges.filter((e) => e.timer > 0);
 
   // Only spawn visual message-packet animations — no fake log entries.
   if (_tick % 200 === 0 && _agents.length > 0) {
@@ -593,7 +603,22 @@ function logTypeClass(type: LogEntry["type"]) {
   return map[type] ?? "";
 }
 
-function logTypeIcon(type: LogEntry["type"]) {
+function logTypeIcon(type: LogEntry["type"], content?: string) {
+  // Special icon for delegation-related system entries
+  if (type === "system" && content) {
+    if (content.includes("Delegated to")) {
+      return "📋";
+    }
+    if (content.includes("Planning")) {
+      return "🧠";
+    }
+    if (content.includes("Synthesizing")) {
+      return "🔄";
+    }
+    if (content.includes("→")) {
+      return "➡️";
+    }
+  }
   const map: Record<string, string> = {
     tool_call: "⚙️",
     output: "📤",
@@ -634,31 +659,48 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
     };
 
     // Seed new agents that don't exist in the animation yet.
-    let col = 0;
-    let row = 0;
-    for (const realAgent of props.agents) {
+    // Use the DESKS grid layout if we have enough positions, otherwise dynamic placement.
+    const deskKeys = Object.keys(DESKS);
+    let dynamicCol = 0;
+    let dynamicRow = 0;
+    for (let i = 0; i < props.agents.length; i++) {
+      const realAgent = props.agents[i];
       const existing = _agents.find((a) => a.id === realAgent.id);
       if (existing) {
         existing.status = statusMap[realAgent.status] ?? "idle";
         existing.name = realAgent.name || existing.name;
         existing.emoji = realAgent.emoji || existing.emoji;
+        existing.color = realAgent.color || existing.color;
+        existing.team = realAgent.team || existing.team;
+        // Update activity text based on status
+        if (realAgent.currentTask && existing.status === "working") {
+          existing.activity = realAgent.currentTask.slice(0, 40);
+        }
       } else {
-        // Assign a desk position based on layout order.
-        const deskX = col * TILE * 2 + TILE;
-        const deskY = row * TILE * 2 + TILE;
-        col++;
-        if (col > 3) {
-          col = 0;
-          row++;
+        // Assign desk position: use preset DESKS if available, otherwise grid
+        let deskX: number;
+        let deskY: number;
+        if (i < deskKeys.length) {
+          const desk = DESKS[deskKeys[i]];
+          deskX = desk.x;
+          deskY = desk.y;
+        } else {
+          deskX = 1 + dynamicCol * 3;
+          deskY = 2 + dynamicRow * 3;
+          dynamicCol++;
+          if (dynamicCol >= 4) {
+            dynamicCol = 0;
+            dynamicRow++;
+          }
         }
         _agents.push({
           id: realAgent.id,
           name: realAgent.name || realAgent.id,
           emoji: realAgent.emoji || "🤖",
-          color: "#60a5fa",
+          color: realAgent.color || "#60a5fa",
           team: realAgent.team || "general",
           status: statusMap[realAgent.status] ?? "idle",
-          activity: "",
+          activity: realAgent.currentTask?.slice(0, 40) || "",
           thoughtBubble: "",
           thoughtTimer: 0,
           messageTo: null,
@@ -675,6 +717,94 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
     // Remove agents that no longer exist in backend.
     const backendIds = new Set(props.agents.map((a) => a.id));
     _agents = _agents.filter((a) => backendIds.has(a.id));
+  }
+
+  // Ingest real-time logs into animation: recent log entries trigger thought bubbles and canvas bubbles
+  if (props.logs && props.logs.size > 0) {
+    const recentCutoff = Date.now() - 30_000; // last 30 seconds
+    for (const [agentId, entries] of props.logs) {
+      const agent = _agents.find((a) => a.id === agentId);
+      if (!agent) {
+        continue;
+      }
+      const recent = entries.filter((e) => e.ts > recentCutoff);
+      if (recent.length > 0) {
+        const latest = recent[recent.length - 1];
+        // Show latest log as thought bubble if agent doesn't already have one
+        if (agent.thoughtTimer <= 0) {
+          const text = latest.content.slice(0, 60);
+          if (text.length > 5) {
+            agent.thoughtBubble = text + (latest.content.length > 60 ? "…" : "");
+            agent.thoughtTimer = 200;
+          }
+        }
+        // Create canvas bubbles for output/system entries not already bubbled
+        for (const e of recent) {
+          const bubbleExists = _canvasBubbles.some((b) => b.id === `be-${e.id}`);
+          if (
+            !bubbleExists &&
+            (e.type === "output" || e.type === "system" || e.type === "thinking")
+          ) {
+            const shortText = e.content.length > 60 ? e.content.slice(0, 57) + "…" : e.content;
+            const color =
+              e.type === "output" ? "var(--ok)" : e.type === "system" ? "#60a5fa" : "#a78bfa";
+            _canvasBubbles.push({
+              id: `be-${e.id}`,
+              agentId: e.agentId,
+              text: shortText,
+              timer: 300,
+              color,
+            });
+            if (_canvasBubbles.length > 8) {
+              _canvasBubbles = _canvasBubbles.slice(-8);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Inter-agent messages trigger flying message animations
+  if (props.messages && props.messages.length > 0) {
+    const recentCutoff = Date.now() - 15_000;
+    for (const msg of props.messages) {
+      if (msg.ts < recentCutoff) {
+        continue;
+      }
+      const alreadyAnimated = _messages.some((m) => m.id === `am-${msg.id}`);
+      if (alreadyAnimated) {
+        continue;
+      }
+      const fromAgent = _agents.find((a) => a.id === msg.from);
+      const toAgent = _agents.find((a) => a.id === msg.to);
+      if (fromAgent && toAgent) {
+        const emojiMap: Record<string, string> = {
+          task: "📋",
+          result: "📤",
+          query: "❓",
+          notify: "💬",
+        };
+        _messages.push({
+          id: `am-${msg.id}`,
+          fromX: fromAgent.x * TILE + TILE / 2,
+          fromY: fromAgent.y * TILE + TILE / 2,
+          toX: toAgent.x * TILE + TILE / 2,
+          toY: toAgent.y * TILE + TILE / 2,
+          progress: 0,
+          emoji: emojiMap[msg.type] ?? "💬",
+          label: msg.content.slice(0, 30) + (msg.content.length > 30 ? "…" : ""),
+        });
+        // Add active edge between agents
+        if (!_activeEdges.some((e) => e.from === msg.from && e.to === msg.to)) {
+          _activeEdges.push({ from: msg.from, to: msg.to, timer: 120 });
+        }
+        // Animate sender as messaging
+        if (fromAgent.status !== "crashed") {
+          fromAgent.status = "messaging";
+          fromAgent.activity = `→ ${toAgent.name}`;
+        }
+      }
+    }
   }
 
   // Build the display log from real backend logs + any local human-input entries in _execLog.
@@ -815,24 +945,15 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             </div>
           </div>
 
-          <!-- Focus strip (critical path) -->
+          <!-- Focus strip (all active agents) -->
           <div class="cd-office-focus-strip">
-            <span class="cd-office-focus-strip__label">Critical path</span>
+            <span class="cd-office-focus-strip__label">${_agents.filter((a) => a.status === "working" || a.status === "thinking" || a.status === "messaging").length > 0 ? "Active now" : "Fleet"}</span>
             <div class="cd-office-focus-track">
-              ${[
-                "ai-director",
-                "content-director",
-                "research-alpha",
-                "writing-beta",
-                "review-gamma",
-              ].map((agentId, i, arr) => {
-                const a = _agents.find((x) => x.id === agentId);
-                if (!a) {
-                  return "";
-                }
-                const isHot = a.status === "working" || a.status === "thinking";
+              ${_agents.map((a, i, arr) => {
+                const isHot =
+                  a.status === "working" || a.status === "thinking" || a.status === "messaging";
                 return html`
-                  <span class="cd-office-focus-pill ${isHot ? "cd-office-focus-pill--hot" : ""}">
+                  <span class="cd-office-focus-pill ${isHot ? "cd-office-focus-pill--hot" : ""} ${a.status === "crashed" ? "cd-office-focus-pill--crashed" : ""}">
                     ${a.emoji} ${a.name}
                   </span>
                   ${
@@ -881,11 +1002,11 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
               )}
 
-              <!-- SVG edge network -->
+              <!-- SVG edge network (dynamic: shows edges for active message animations) -->
               <svg class="cd-office-network" style="width:${W}px;height:${H}px" viewBox="0 0 ${W} ${H}">
-                ${MESSAGE_SCRIPTS.map((script) => {
-                  const from = _agents.find((a) => a.id === script.from);
-                  const to = _agents.find((a) => a.id === script.to);
+                ${_activeEdges.map((edge) => {
+                  const from = _agents.find((a) => a.id === edge.from);
+                  const to = _agents.find((a) => a.id === edge.to);
                   if (!from || !to) {
                     return "";
                   }
@@ -895,41 +1016,54 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   const y2 = to.y * TILE + 20;
                   const cpX = (x1 + x2) / 2;
                   const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
-                  const hasActiveMsg = _messages.some(
-                    (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
-                  );
                   return html`
-                    <g class="cd-office-edge ${hasActiveMsg ? "cd-office-edge--active" : ""}">
+                    <g class="cd-office-edge cd-office-edge--active">
                       <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__hit" fill="none" stroke="transparent" stroke-width="18"/>
                       <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__line"/>
-                      ${hasActiveMsg ? html`<path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>` : ""}
+                      <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>
                     </g>
                   `;
                 })}
+                ${
+                  !_agentsSeededFromBackend
+                    ? MESSAGE_SCRIPTS.map((script) => {
+                        const from = _agents.find((a) => a.id === script.from);
+                        const to = _agents.find((a) => a.id === script.to);
+                        if (!from || !to) {
+                          return "";
+                        }
+                        const x1 = from.x * TILE + TILE / 2;
+                        const y1 = from.y * TILE + 20;
+                        const x2 = to.x * TILE + TILE / 2;
+                        const y2 = to.y * TILE + 20;
+                        const cpX = (x1 + x2) / 2;
+                        const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
+                        const hasActiveMsg = _messages.some(
+                          (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
+                        );
+                        return html`
+                          <g class="cd-office-edge ${hasActiveMsg ? "cd-office-edge--active" : ""}">
+                            <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__line"/>
+                            ${hasActiveMsg ? html`<path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>` : ""}
+                          </g>
+                        `;
+                      })
+                    : ""
+                }
               </svg>
 
-              <!-- Edge labels (clawport style) -->
-              ${MESSAGE_SCRIPTS.map((script) => {
-                const from = _agents.find((a) => a.id === script.from);
-                const to = _agents.find((a) => a.id === script.to);
-                if (!from || !to) {
-                  return "";
-                }
-                const x1 = from.x * TILE + TILE / 2;
-                const y1 = from.y * TILE + 20;
-                const x2 = to.x * TILE + TILE / 2;
-                const y2 = to.y * TILE + 20;
-                const cpX = (x1 + x2) / 2;
-                const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
-                const lx = 0.5 * 0.5 * x1 + 2 * 0.5 * 0.5 * cpX + 0.5 * 0.5 * x2;
-                const ly = 0.5 * 0.5 * y1 + 2 * 0.5 * 0.5 * cpY + 0.5 * 0.5 * y2 - 22;
-                const hasActiveMsg = _messages.some(
-                  (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
-                );
+              <!-- Edge labels for active flying messages -->
+              ${_messages.map((msg) => {
+                const t = 0.5;
+                const cpX = (msg.fromX + msg.toX) / 2;
+                const cpY = Math.min(msg.fromY, msg.toY) - 50;
+                const lx = (1 - t) * (1 - t) * msg.fromX + 2 * (1 - t) * t * cpX + t * t * msg.toX;
+                const ly =
+                  (1 - t) * (1 - t) * msg.fromY + 2 * (1 - t) * t * cpY + t * t * msg.toY - 22;
                 return html`
-                  <div class="cd-office-edge-label ${hasActiveMsg ? "cd-office-edge-label--active" : ""}"
+                  <div class="cd-office-edge-label cd-office-edge-label--active"
                     style="left:${lx}px;top:${ly}px">
-                    ${script.label}
+                    ${msg.label}
                   </div>
                 `;
               })}
@@ -1093,13 +1227,18 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                         (entry) => html`
                 <div class="cd-log-entry ${logTypeClass(entry.type)}">
                   <div class="cd-log-entry__header">
-                    <span class="cd-log-entry__icon">${logTypeIcon(entry.type)}</span>
+                    <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
                     <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agent}</span>
                     <span class="cd-log-entry__ts">${entry.ts}</span>
                     ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
                     ${entry.duration ? html`<span class="cd-log-entry__duration">${entry.duration}ms</span>` : ""}
                   </div>
-                  <div class="cd-log-entry__content">${entry.content}</div>
+                  <div class="cd-log-entry__content ${entry.type === "output" ? "cd-log-entry__content--md" : ""}">${
+                    entry.type === "output" ||
+                    (entry.type === "system" && entry.content.length > 200)
+                      ? unsafeHTML(toSanitizedMarkdownHtml(entry.content))
+                      : entry.content
+                  }</div>
                 </div>
               `,
                       )
@@ -1125,7 +1264,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     <span class="cd-output-card__ts">${entry.ts}</span>
                     ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
                   </div>
-                  <div class="cd-output-card__content">${entry.content}</div>
+                  <div class="cd-output-card__content cd-log-entry__content--md">${unsafeHTML(toSanitizedMarkdownHtml(entry.content))}</div>
                   <div class="cd-output-card__actions">
                     <button class="cd-btn cd-btn--ghost cd-btn--xs">📋 Copy</button>
                     <button class="cd-btn cd-btn--ghost cd-btn--xs">✅ Approve</button>
@@ -1152,7 +1291,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               ? html`
             <div class="cd-office-human">
               <div class="cd-human-desc">
-                Talk to your company. The AI Director will receive your message and coordinate agents to respond.
+                Talk to your company. The Agent Orchestrator will receive your message, plan, delegate to department agents, and synthesize the response.
               </div>
 
               <!-- Message history from real backend -->
@@ -1180,7 +1319,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
               <label class="cd-form-label">Message to Company</label>
               <textarea class="cd-form-textarea" rows="3"
-                placeholder="Type an instruction, question, or task for the AI Director…"
+                placeholder="Type an instruction, question, or task for the Agent Orchestrator…"
                 .value=${_humanInput}
                 @input=${(e: Event) => {
                   _humanInput = (e.target as HTMLTextAreaElement).value;

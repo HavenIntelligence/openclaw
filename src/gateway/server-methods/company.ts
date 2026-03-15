@@ -94,6 +94,35 @@ export const companyHandlers: GatewayRequestHandlers = {
     respond(true, agent ?? meta, undefined);
   },
 
+  "company.agents.create": async ({ params, respond }) => {
+    const name = strParam(params.name);
+    if (!name) {
+      respond(false, undefined, { code: "INVALID_REQUEST", message: "name required" });
+      return;
+    }
+    const id = strParam(params.id) || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const svc = getCompanyService();
+    const existing = svc.registry.getAgent(id);
+    if (existing) {
+      respond(false, undefined, { code: "CONFLICT", message: `agent "${id}" already exists` });
+      return;
+    }
+    const meta = await svc.registry.upsertMeta(id, {
+      role: strParam(params.role, "Agent"),
+      team: strParam(params.team, "general"),
+      emoji: strParam(params.emoji, "🤖"),
+      color: strParam(params.color, "#3b82f6"),
+      description: strParam(params.description, ""),
+      runtime: strParam(
+        params.runtime,
+        "openclaw",
+      ) as import("../../company/types.js").ClawDockRuntime,
+    });
+    const agent = svc.registry.getAgent(id) ?? meta;
+    svc.broadcast("company.agent.status", { agentId: id, status: "idle", updatedAt: Date.now() });
+    respond(true, agent, undefined);
+  },
+
   "company.agents.delete": async ({ params, respond }) => {
     const id = strParam(params.id);
     if (!id) {
@@ -416,11 +445,11 @@ export const companyHandlers: GatewayRequestHandlers = {
     const svc = getCompanyService();
     // Record the human message on the bus so WS clients see it
     const msg = svc.messageBus.send("human", "company", content, "task");
-    // Dispatch to AI Director (first active or first known agent)
+    // Dispatch to Agent Orchestrator (first orchestrator, then first agent)
     const agents = svc.registry.getAgents();
     const director =
-      agents.find((a) => a.role?.toLowerCase().includes("director")) ??
-      agents.find((a) => a.id === "ai-director") ??
+      agents.find((a) => a.role?.toLowerCase().includes("orchestrator")) ??
+      agents.find((a) => a.id === "orchestrator") ??
       agents[0];
     if (director) {
       // Immediately broadcast the director as active so the frontend animation reacts.
@@ -434,42 +463,112 @@ export const companyHandlers: GatewayRequestHandlers = {
         agentId: director.id,
         runId: `msg_${msg.id}`,
         type: "system",
-        content: `[Human → Director] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
+        content: `[Human → Orchestrator] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
       });
       svc.broadcast("company.agent.log", {
         agentId: director.id,
         runId: `msg_${msg.id}`,
         entry: dispatchEntry,
       });
-      try {
-        const runId = await svc.processManager.runTask(director.id, content);
-        respond(true, { ok: true, runId, msgId: msg.id }, undefined);
-      } catch (err) {
-        // If the runner failed to start, mark director idle and surface the error as a log entry.
-        svc.broadcast("company.agent.status", {
-          agentId: director.id,
-          status: "idle",
-          updatedAt: Date.now(),
+      // Check if director has subordinates — if so, orchestrate automatically
+      const directReports = svc.registry.getDirectReports(director.id);
+      if (directReports.length > 0) {
+        // Fire-and-forget orchestration (long-running; broadcasts progress via WS)
+        respond(true, { ok: true, orchestrating: true, msgId: msg.id }, undefined);
+
+        // Create a task entry for this orchestration so it shows up in the Tasks view
+        const orchTask = await svc.taskStore.create({
+          title: content.slice(0, 100) + (content.length > 100 ? "…" : ""),
+          description: content,
+          status: "in_progress",
+          priority: "high",
+          assignee: director.id,
+          project: "Orchestration",
         });
-        const errEntry = svc.logStore.append({
-          agentId: director.id,
-          runId: `msg_${msg.id}`,
-          type: "error",
-          content: `Failed to start task: ${String(err instanceof Error ? err.message : err)}`,
-        });
-        svc.broadcast("company.agent.log", {
-          agentId: director.id,
-          runId: `msg_${msg.id}`,
-          entry: errEntry,
-        });
-        respond(false, undefined, {
-          code: "INTERNAL_ERROR",
-          message: String(err instanceof Error ? err.message : err),
-        });
+        svc.broadcast("company.task.updated", { task: orchTask });
+
+        svc.orchestrator
+          .execute(director.id, content)
+          .then(async (result) => {
+            // Mark task as done upon successful completion
+            const updated = await svc.taskStore.update(orchTask.id, {
+              status: "done",
+              tokensUsed: result.tokensUsed,
+            });
+            if (updated) {
+              svc.broadcast("company.task.updated", { task: updated });
+            }
+          })
+          .catch(async (err) => {
+            const errEntry = svc.logStore.append({
+              agentId: director.id,
+              runId: `msg_${msg.id}`,
+              type: "error",
+              content: `Orchestration failed: ${String(err instanceof Error ? err.message : err)}`,
+            });
+            svc.broadcast("company.agent.log", {
+              agentId: director.id,
+              runId: `msg_${msg.id}`,
+              entry: errEntry,
+            });
+            // Mark task as failed
+            const updated = await svc.taskStore.update(orchTask.id, { status: "backlog" });
+            if (updated) {
+              svc.broadcast("company.task.updated", { task: updated });
+            }
+          });
+      } else {
+        // Leaf director — run directly
+        try {
+          const runId = await svc.processManager.runTask(director.id, content);
+          respond(true, { ok: true, runId, msgId: msg.id }, undefined);
+        } catch (err) {
+          svc.broadcast("company.agent.status", {
+            agentId: director.id,
+            status: "idle",
+            updatedAt: Date.now(),
+          });
+          const errEntry = svc.logStore.append({
+            agentId: director.id,
+            runId: `msg_${msg.id}`,
+            type: "error",
+            content: `Failed to start task: ${String(err instanceof Error ? err.message : err)}`,
+          });
+          svc.broadcast("company.agent.log", {
+            agentId: director.id,
+            runId: `msg_${msg.id}`,
+            entry: errEntry,
+          });
+          respond(false, undefined, {
+            code: "INTERNAL_ERROR",
+            message: String(err instanceof Error ? err.message : err),
+          });
+        }
       }
     } else {
       // No agents configured — still acknowledge the message
       respond(true, { ok: true, msgId: msg.id }, undefined);
+    }
+  },
+
+  // ── Orchestration ────────────────────────────────────────────────────
+  "company.orchestrate.run": async ({ params, respond }) => {
+    const id = strParam(params.id);
+    const prompt = strParam(params.prompt);
+    const maxDepth = typeof params.maxDepth === "number" ? params.maxDepth : 3;
+    if (!id || !prompt) {
+      respond(false, undefined, { code: "INVALID_REQUEST", message: "id and prompt required" });
+      return;
+    }
+    const svc = getCompanyService();
+    try {
+      const result = await svc.orchestrator.execute(id, prompt, { maxDepth });
+      respond(true, result, undefined);
+    } catch (err) {
+      respond(false, undefined, {
+        code: "INTERNAL_ERROR",
+        message: String(err instanceof Error ? err.message : err),
+      });
     }
   },
 

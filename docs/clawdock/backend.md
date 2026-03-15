@@ -12,17 +12,18 @@ The single entry point for all ClawDock operations. Wires all sub-services toget
 
 ### Properties
 
-| Property         | Type                 | Description                             |
-| ---------------- | -------------------- | --------------------------------------- |
-| `registry`       | `AgentRegistry`      | Reads agent config + persisted metadata |
-| `processManager` | `ProcessManager`     | Spawns and tracks agent processes       |
-| `fleetMonitor`   | `FleetMonitor`       | Polls CPU/mem, emits fleet snapshots    |
-| `logStore`       | `LogStore`           | In-memory ring-buffer logs per agent    |
-| `taskStore`      | `TaskStore`          | Kanban task CRUD + JSON persistence     |
-| `teamStore`      | `TeamStore`          | Team config CRUD + JSON persistence     |
-| `profileStore`   | `ProfileStore`       | Company profile JSON persistence        |
-| `messageBus`     | `MessageBus`         | Inter-agent message routing + history   |
-| `broadcast`      | `GatewayBroadcastFn` | Sends WebSocket events to all clients   |
+| Property         | Type                 | Description                                      |
+| ---------------- | -------------------- | ------------------------------------------------ |
+| `registry`       | `AgentRegistry`      | Reads agent config + persisted metadata          |
+| `processManager` | `ProcessManager`     | Spawns and tracks agent processes                |
+| `orchestrator`   | `Orchestrator`       | Automatic plan-delegate-synthesize orchestration |
+| `fleetMonitor`   | `FleetMonitor`       | Polls CPU/mem, emits fleet snapshots             |
+| `logStore`       | `LogStore`           | In-memory ring-buffer logs per agent             |
+| `taskStore`      | `TaskStore`          | Kanban task CRUD + JSON persistence              |
+| `teamStore`      | `TeamStore`          | Team config CRUD + JSON persistence              |
+| `profileStore`   | `ProfileStore`       | Company profile JSON persistence                 |
+| `messageBus`     | `MessageBus`         | Inter-agent message routing + history            |
+| `broadcast`      | `GatewayBroadcastFn` | Sends WebSocket events to all clients            |
 
 ### Static Factory
 
@@ -170,6 +171,67 @@ interface AgentRuntimeState {
 
 - `company.agent.status` — on every status change
 - `company.agent.log` — on every stdout/stderr line
+
+---
+
+## `orchestrator.ts` — Orchestrator
+
+Implements automatic plan-delegate-synthesize orchestration through the org hierarchy.
+
+**Source:** `src/company/orchestrator.ts`
+
+### Constructor
+
+```typescript
+new Orchestrator(processManager, registry, logStore, messageBus, broadcast);
+```
+
+### Methods
+
+| Method    | Signature                                                         | Description           |
+| --------- | ----------------------------------------------------------------- | --------------------- |
+| `execute` | `(agentId, prompt, opts?, depth?) → Promise<OrchestrationResult>` | Run orchestrated task |
+
+### Orchestration Flow
+
+1. **Resolve subordinates**: `registry.getDirectReports(agentId)`. If empty or max depth reached → leaf execution.
+2. **Plan phase**: Ask the agent to produce a JSON delegation plan (`[{agentId, subtask}]`). Uses `processManager.runTaskAwait()`.
+3. **Delegate phase**: Dispatch subtasks to subordinates in parallel. Each subordinate recursively orchestrates if it has its own reports.
+4. **Synthesize phase**: Collect all subordinate outputs, ask the orchestrating agent to produce a unified response.
+
+### Empty Plan Handling
+
+If the agent returns `[]` (empty plan), it runs the task directly as a leaf — the agent intelligently decides whether delegation is needed.
+
+### JSON Plan Parsing
+
+The plan parser is robust: tries direct `JSON.parse`, then extracts from markdown code fences, then regex `[...]` extraction. On parse failure, falls back to leaf execution.
+
+### Depth Guard
+
+Default max depth is 3. At max depth, agents execute directly regardless of subordinates. Prevents infinite recursion from circular `reportTo` chains.
+
+### Broadcast Events Emitted
+
+- `company.orchestration.phase` — at each phase transition (planning, delegating, executing, synthesizing, complete)
+- `company.agent.status` — via ProcessManager for each agent
+- `company.agent.log` — execution logs + delegation system logs
+- `company.agent.message` — inter-agent task/result messages via MessageBus
+
+### `ProcessManager.runTaskAwait()`
+
+The orchestrator depends on `runTaskAwait()`, a method added to ProcessManager that returns a `Promise<TaskResult>` resolving when the spawned process exits:
+
+```typescript
+interface TaskResult {
+  runId: string;
+  content: string; // final output text
+  tokensUsed: number;
+  exitCode: number;
+}
+```
+
+This is the awaitable counterpart to `runTask()` (fire-and-forget). Both share the same internal spawn logic.
 
 ---
 

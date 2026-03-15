@@ -490,6 +490,56 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     host.companyMessages = [...messages.slice(-499), msg];
     return;
   }
+
+  if (evt.event === "company.orchestration.phase") {
+    const { agentId, phase } = evt.payload as { agentId: string; phase: string; depth: number };
+    // Map orchestration phases to agent status so the animation reacts
+    const phaseToStatus: Record<string, ClawDockAgent["status"]> = {
+      planning: "active",
+      delegating: "active",
+      synthesizing: "active",
+      executing: "active",
+      complete: "idle",
+      failed: "crashed",
+    };
+    const mapped = phaseToStatus[phase];
+    if (mapped) {
+      const idx = host.companyAgents.findIndex((a) => a.id === agentId);
+      if (idx >= 0) {
+        const updated = { ...host.companyAgents[idx], status: mapped };
+        host.companyAgents = [
+          ...host.companyAgents.slice(0, idx),
+          updated,
+          ...host.companyAgents.slice(idx + 1),
+        ];
+      }
+    }
+    // Also inject a synthetic log entry so orchestration phases show in the execution log
+    const phaseLabel: Record<string, string> = {
+      planning: "Planning — analyzing task and determining delegation…",
+      delegating: "Delegating subtasks to subordinates…",
+      synthesizing: "Synthesizing subordinate results into final answer…",
+      executing: "Executing task directly…",
+      complete: "Task completed.",
+      failed: "Orchestration failed.",
+    };
+    if (phaseLabel[phase]) {
+      const logEntry: CompanyLogEntry = {
+        id: `orch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        agentId,
+        runId: `orch_phase`,
+        type: phase === "failed" ? "error" : "system",
+        content: phaseLabel[phase],
+        ts: Date.now(),
+      };
+      if (!host.companyAgentLogs.has(agentId)) {
+        host.companyAgentLogs.set(agentId, []);
+      }
+      host.companyAgentLogs.get(agentId)!.push(logEntry);
+      host.companyAgentLogs = new Map(host.companyAgentLogs);
+    }
+    return;
+  }
 }
 
 export function applySnapshot(host: GatewayHost, hello: GatewayHelloOk) {

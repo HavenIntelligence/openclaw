@@ -107,7 +107,7 @@ type AgentRecord = {
   recentMessages: { ts: string; from: string; content: string }[];
 };
 
-const AGENTS: AgentRecord[] = [
+const _AGENTS: AgentRecord[] = [
   {
     id: "ai-director",
     name: "AI Director",
@@ -391,7 +391,7 @@ function createCompany() {
 }
 
 // ── Agent detail panel ─────────────────────────────────────────────────────
-function renderAgentDetail(agent: AgentRecord) {
+function _renderAgentDetail(agent: AgentRecord) {
   return html`
     <div class="cd-agent-detail">
       <!-- Header -->
@@ -574,53 +574,63 @@ function renderAgentDetail(agent: AgentRecord) {
 
 // ── Sub-tab: Agent Status (renamed from Fleet) ────────────────────────────
 function renderFleet() {
+  // Use real agents from backend
+  const agents = _realAgents;
+  if (agents.length === 0) {
+    return html`
+      <div class="cd-fleet-view">
+        <div class="cd-office-empty" style="padding: 48px 24px; text-align: center">
+          <div style="font-size: 2rem; margin-bottom: 12px">🤖</div>
+          <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px">No agents registered</div>
+          <div style="color: var(--muted-foreground)">Use the Fleet tab to create your first agent.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const agentStatusColor = (s: string) => {
+    if (s === "active") {
+      return "var(--ok)";
+    }
+    if (s === "idle") {
+      return "#f59e0b";
+    }
+    if (s === "crashed") {
+      return "var(--destructive)";
+    }
+    return "var(--muted-foreground)";
+  };
+
   return html`
     <div class="cd-fleet-view">
       <div class="cd-fleet-header">
         <span class="cd-fleet-header__title">Agent Status</span>
         <span class="cd-fleet-header__sub"
-          >${AGENTS.length} agents · ${AGENTS.filter((a) => a.status === "running").length} running ·
-          ${AGENTS.filter((a) => a.status === "paused").length} paused ·
-          ${AGENTS.filter((a) => a.status === "crashed").length} crashed</span
+          >${agents.length} agents · ${agents.filter((a) => a.status === "active").length} active ·
+          ${agents.filter((a) => a.status === "idle").length} idle ·
+          ${agents.filter((a) => a.status === "crashed").length} crashed</span
         >
-        <button class="cd-btn cd-btn--primary cd-btn--sm">+ New Agent</button>
       </div>
       <div class="cd-fleet-table">
         <div class="cd-fleet-thead">
-          <span>Agent</span><span>Role / Team</span><span>Current Workspace</span><span>Status</span><span>Tasks</span><span>Tokens</span><span>Uptime</span><span>Last Active</span>
+          <span>Agent</span><span>Role / Team</span><span>Model</span><span>Status</span><span>Tasks Done</span>
         </div>
-        ${AGENTS.map(
+        ${agents.map(
           (a) => html`
-          <div
-            class="cd-fleet-row ${_selectedAgentId === a.id ? "cd-fleet-row--selected" : ""}"
-            @click=${() => {
-              _selectedAgentId = _selectedAgentId === a.id ? null : a.id;
-              _agentDetailTab = "trace";
-            }}
-          >
+          <div class="cd-fleet-row">
             <span class="cd-fleet-agent">
-              <span class="cd-fleet-dot" style="background:${statusColor(a.status)}"></span>
+              <span class="cd-fleet-dot" style="background:${agentStatusColor(a.status)}"></span>
               ${a.emoji} <strong>${a.name}</strong>
             </span>
             <span class="cd-muted" style="font-size:12px">${a.role}<br /><span style="font-size:10px;opacity:.6">${a.team}</span></span>
-            <span class="cd-muted cd-mono" style="font-size:11px">${a.currentWorkspace}</span>
+            <span class="cd-muted cd-mono" style="font-size:11px">${a.model}</span>
             <span
               class="cd-ad-badge"
-              style="background:${statusColor(a.status)}22;color:${statusColor(a.status)};border-color:${statusColor(a.status)}44"
+              style="background:${agentStatusColor(a.status)}22;color:${agentStatusColor(a.status)};border-color:${agentStatusColor(a.status)}44"
               >${a.status}</span
             >
-            <span>${a.totalTasksCompleted}</span>
-            <span>${(a.totalTokensUsed / 1_000_000).toFixed(1)}M</span>
-            <span>${a.uptimePct}%</span>
-            <span class="cd-muted" style="font-size:11px">${a.lastActiveAt}</span>
+            <span>${a.tasksCompleted}</span>
           </div>
-          ${
-            _selectedAgentId === a.id
-              ? html`
-                <div class="cd-fleet-row-detail">${renderAgentDetail(a)}</div>
-              `
-              : ""
-          }
         `,
         )}
       </div>
@@ -630,220 +640,116 @@ function renderFleet() {
 
 // ── Sub-tab stubs ──────────────────────────────────────────────────────────
 function renderTeams() {
-  // Team definitions with supervision strategies, members, KPIs
-  const TEAMS = [
-    {
-      id: "executive",
-      name: "Executive Suite",
-      icon: "👑",
-      color: "#ff5c5c",
-      strategy: "singleton",
-      strategyDesc: "Each agent is unique; crashes restart only that agent.",
-      lead: "ai-director",
-      leadEmoji: "👑",
-      members: [
-        {
-          id: "ai-director",
-          emoji: "👑",
-          name: "AI Director",
-          role: "CEO",
-          status: "running" as const,
-        },
-        {
-          id: "ops-prime",
-          emoji: "🧑‍💼",
-          name: "Ops Prime",
-          role: "COO",
-          status: "running" as const,
-        },
-        {
-          id: "nanoclaw-primary",
-          emoji: "🤖",
-          name: "NanoClaw",
-          role: "Executive Assistant",
-          status: "paused" as const,
-        },
-      ],
-      kpis: { tasksThisWeek: 42, avgResponseTime: "1.2s", uptime: "99.1%", tokensUsed: "8.4M" },
-      healthStatus: "healthy" as const,
-      description:
-        "Sets company strategy, oversees all departments, and handles human↔fleet communication.",
-    },
-    {
-      id: "content",
-      name: "Content Pipeline",
-      icon: "✍️",
-      color: "#fb923c",
-      strategy: "one-for-one",
-      strategyDesc: "One agent crashes → only that agent restarts. Others unaffected.",
-      lead: "content-director",
-      leadEmoji: "📢",
-      members: [
-        {
-          id: "content-director",
-          emoji: "📢",
-          name: "CMO",
-          role: "Content Director",
-          status: "running" as const,
-        },
-        {
-          id: "research-alpha",
-          emoji: "🔍",
-          name: "Research Alpha",
-          role: "Researcher",
-          status: "running" as const,
-        },
-        {
-          id: "writing-beta",
-          emoji: "✍️",
-          name: "Writing Beta",
-          role: "Writer",
-          status: "running" as const,
-        },
-        {
-          id: "review-gamma",
-          emoji: "🧐",
-          name: "Reviewer",
-          role: "Content Reviewer",
-          status: "crashed" as const,
-        },
-      ],
-      kpis: { tasksThisWeek: 28, avgResponseTime: "3.8s", uptime: "82.4%", tokensUsed: "21.6M" },
-      healthStatus: "degraded" as const,
-      description:
-        "Runs the full content production pipeline: research → draft → review → publish.",
-    },
-    {
-      id: "devops",
-      name: "DevOps",
-      icon: "⚙️",
-      color: "#22c55e",
-      strategy: "rest-for-one",
-      strategyDesc:
-        "One crashes → all downstream dependents restart. Preserves pipeline integrity.",
-      lead: "code-agent",
-      leadEmoji: "💻",
-      members: [
-        {
-          id: "code-agent",
-          emoji: "💻",
-          name: "Code Agent",
-          role: "Software Engineer",
-          status: "running" as const,
-        },
-        {
-          id: "test-runner",
-          emoji: "🧪",
-          name: "Test Runner",
-          role: "QA Engineer",
-          status: "paused" as const,
-        },
-      ],
-      kpis: { tasksThisWeek: 19, avgResponseTime: "4.1s", uptime: "99.8%", tokensUsed: "9.3M" },
-      healthStatus: "healthy" as const,
-      description: "Manages codebase, CI/CD pipeline, deployments, and automated test coverage.",
-    },
-  ];
-
   const statusC = (s: string) => {
-    if (s === "running") {
+    if (s === "active" || s === "running") {
       return "var(--ok)";
     }
     if (s === "crashed") {
       return "var(--destructive)";
     }
-    if (s === "paused") {
+    if (s === "paused" || s === "idle") {
       return "#f59e0b";
     }
     return "var(--muted-foreground)";
   };
 
-  const healthBadge = (h: "healthy" | "degraded") =>
-    h === "healthy"
-      ? html`
-          <span
-            class="cd-ad-badge"
-            style="
-              background: rgba(34, 197, 94, 0.12);
-              color: var(--ok);
-              border-color: rgba(34, 197, 94, 0.3);
-            "
-            >✅ Healthy</span
-          >
-        `
-      : html`
-          <span
-            class="cd-ad-badge"
-            style="
-              background: rgba(245, 158, 11, 0.12);
-              color: #f59e0b;
-              border-color: rgba(245, 158, 11, 0.3);
-            "
-            >⚠️ Degraded</span
-          >
-        `;
+  // Build teams dynamically from real agents grouped by team field
+  if (_realAgents.length === 0) {
+    return html`
+      <div class="cd-teams-view">
+        <div class="cd-office-empty" style="padding: 48px 24px; text-align: center">
+          <div style="font-size: 2rem; margin-bottom: 12px">👥</div>
+          <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px">
+            No agents registered yet
+          </div>
+          <div style="color: var(--muted-foreground)">
+            Create agents in the Fleet tab to see them organized into teams here.
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
-  const strategyBadge = (s: string) => {
-    const map: Record<string, string> = {
-      "one-for-one": "#60a5fa",
-      "one-for-all": "#f97316",
-      "rest-for-one": "#a78bfa",
-      singleton: "var(--muted-foreground)",
-    };
-    return html`<span class="cd-ad-badge" style="background:${map[s] ?? "var(--border)"}20;color:${map[s] ?? "var(--muted-foreground)"};border-color:${map[s] ?? "var(--border)"}40">${s}</span>`;
+  const teamMap = new Map<string, ClawDockAgent[]>();
+  for (const a of _realAgents) {
+    const t = a.team || "default";
+    if (!teamMap.has(t)) {
+      teamMap.set(t, []);
+    }
+    teamMap.get(t)!.push(a);
+  }
+
+  const teamColors: Record<string, string> = {
+    orchestration: "#6366f1",
+    engineering: "#22c55e",
+    marketing: "#f97316",
+    operations: "#60a5fa",
+    finance: "#eab308",
+    default: "#94a3b8",
   };
 
   return html`
     <div class="cd-teams-view">
       <div class="cd-teams-header">
         <span class="cd-teams-header__title">Teams</span>
-        <span class="cd-teams-header__sub">${TEAMS.length} teams · ${TEAMS.reduce((n, t) => n + t.members.length, 0)} agents total</span>
-        <button class="cd-btn cd-btn--primary cd-btn--sm">+ New Team</button>
+        <span class="cd-teams-header__sub">${teamMap.size} teams · ${_realAgents.length} agents total</span>
       </div>
       <div class="cd-teams-grid">
-        ${TEAMS.map(
-          (team) => html`
-          <div class="cd-team-card" style="border-top-color:${team.color}">
+        ${[...teamMap.entries()].map(([teamName, agents]) => {
+          const crashed = agents.filter((a) => a.status === "crashed").length;
+          const color = teamColors[teamName] ?? "#94a3b8";
+          return html`
+          <div class="cd-team-card" style="border-top-color:${color}">
             <div class="cd-team-card__header">
-              <span class="cd-team-card__icon">${team.icon}</span>
+              <span class="cd-team-card__icon">${agents[0]?.emoji ?? "👥"}</span>
               <div class="cd-team-card__meta">
-                <div class="cd-team-card__name">${team.name}</div>
+                <div class="cd-team-card__name">${teamName}</div>
                 <div class="cd-team-card__badges">
-                  ${strategyBadge(team.strategy)}
-                  ${healthBadge(team.healthStatus)}
+                  ${
+                    crashed > 0
+                      ? html`
+                          <span
+                            class="cd-ad-badge"
+                            style="
+                              background: rgba(245, 158, 11, 0.12);
+                              color: #f59e0b;
+                              border-color: rgba(245, 158, 11, 0.3);
+                            "
+                            >⚠️ Degraded</span
+                          >
+                        `
+                      : html`
+                          <span
+                            class="cd-ad-badge"
+                            style="
+                              background: rgba(34, 197, 94, 0.12);
+                              color: var(--ok);
+                              border-color: rgba(34, 197, 94, 0.3);
+                            "
+                            >✅ Healthy</span
+                          >
+                        `
+                  }
                 </div>
               </div>
             </div>
-            <div class="cd-team-card__desc">${team.description}</div>
-            <div class="cd-team-card__strategy-info">
-              <span class="cd-team-card__strategy-label">Supervision strategy</span>
-              <span class="cd-team-card__strategy-desc">${team.strategyDesc}</span>
-            </div>
-            <!-- KPIs -->
-            <div class="cd-team-kpis">
-              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.tasksThisWeek}</div><div class="cd-team-kpi__label">Tasks this week</div></div>
-              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.avgResponseTime}</div><div class="cd-team-kpi__label">Avg response</div></div>
-              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.uptime}</div><div class="cd-team-kpi__label">Uptime</div></div>
-              <div class="cd-team-kpi"><div class="cd-team-kpi__val">${team.kpis.tokensUsed}</div><div class="cd-team-kpi__label">Tokens used</div></div>
-            </div>
-            <!-- Members -->
-            <div class="cd-team-card__members-title">Members (${team.members.length})</div>
+            <div class="cd-team-card__members-title">Members (${agents.length})</div>
             <div class="cd-team-members">
-              ${team.members.map(
-                (m) => html`
+              ${agents.map(
+                (a) => html`
                 <div class="cd-team-member">
-                  <span class="cd-fleet-dot" style="background:${statusC(m.status)}"></span>
-                  <span class="cd-team-member__avatar">${m.emoji}</span>
-                  <span class="cd-team-member__name">${m.name}</span>
-                  <span class="cd-team-member__role">${m.role}</span>
-                  <span class="cd-ad-badge" style="font-size:10px;background:${statusC(m.status)}18;color:${statusC(m.status)};border-color:${statusC(m.status)}35">${m.status}</span>
+                  <span class="cd-fleet-dot" style="background:${statusC(a.status)}"></span>
+                  <span class="cd-team-member__avatar">${a.emoji}</span>
+                  <span class="cd-team-member__name">${a.name}</span>
+                  <span class="cd-team-member__role">${a.role}</span>
+                  <span class="cd-ad-badge" style="font-size:10px;background:${statusC(a.status)}18;color:${statusC(a.status)};border-color:${statusC(a.status)}35">${a.status}</span>
                 </div>
               `,
               )}
             </div>
           </div>
-        `,
-        )}
+        `;
+        })}
       </div>
     </div>
   `;

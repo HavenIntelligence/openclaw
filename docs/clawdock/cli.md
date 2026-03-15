@@ -1,6 +1,6 @@
 # ClawDock — CLI Reference
 
-The `openclaw company` command group provides terminal access to all ClawDock features.
+The `openclaw clawdock` command group provides terminal access to all ClawDock features, including automatic multi-agent orchestration.
 
 **Source file:** `src/cli/company-cli.ts`
 **Registered in:** `src/cli/program/register.subclis.ts`
@@ -12,19 +12,19 @@ All commands communicate with the local gateway via `callGatewayCli()` (same Web
 ## Usage
 
 ```
-openclaw company <command> [options]
+openclaw clawdock <command> [options]
 ```
 
 ---
 
 ## Agent Commands
 
-### `openclaw company agents list`
+### `openclaw clawdock agents list`
 
 List all agents with their current runtime status.
 
 ```
-openclaw company agents list
+openclaw clawdock agents list
 
 ID                   NAME                 ROLE               TEAM           STATUS           RUNTIME        TASKS
 --------------------------------------------------------------------------------------------------------------
@@ -45,24 +45,24 @@ ops-prime            Ops Prime            COO                executive      ○ 
 
 ---
 
-### `openclaw company agents get <id>`
+### `openclaw clawdock agents get <id>`
 
 Show detailed info for a single agent.
 
 ```
-openclaw company agents get ai-director
+openclaw clawdock agents get ai-director
 ```
 
 Output: JSON representation of the `ClawDockAgent` object.
 
 ---
 
-### `openclaw company agents start <id> [--task <prompt>]`
+### `openclaw clawdock agents start <id> [--task <prompt>]`
 
 Dispatch a task to an agent.
 
 ```
-openclaw company agents start ai-director --task "Review Q2 roadmap and summarize key risks"
+openclaw clawdock agents start ai-director --task "Review Q2 roadmap and summarize key risks"
 ```
 
 **Options:**
@@ -73,32 +73,32 @@ Output: `{ ok: true, runId: "run_..." }`
 
 ---
 
-### `openclaw company agents stop <id>`
+### `openclaw clawdock agents stop <id>`
 
 Send SIGTERM to the agent's process (SIGKILL after 5 s).
 
 ```
-openclaw company agents stop ops-prime
+openclaw clawdock agents stop ops-prime
 ```
 
 ---
 
-### `openclaw company agents restart <id>`
+### `openclaw clawdock agents restart <id>`
 
 Stop and restart the agent.
 
 ```
-openclaw company agents restart ops-prime
+openclaw clawdock agents restart ops-prime
 ```
 
 ---
 
-### `openclaw company agents logs <id> [--limit N]`
+### `openclaw clawdock agents logs <id> [--limit N]`
 
 Show recent execution logs for an agent.
 
 ```
-openclaw company agents logs ai-director --limit 50
+openclaw clawdock agents logs ai-director --limit 50
 ```
 
 **Options:**
@@ -115,14 +115,56 @@ Output format:
 
 ---
 
+## Orchestration Commands
+
+### `openclaw clawdock orchestrate <id> -m <prompt> [--max-depth N]`
+
+Run a task with automatic delegation through the org hierarchy. The target agent plans subtasks, delegates them to subordinates (recursively), then synthesizes the results.
+
+```
+openclaw clawdock orchestrate ceo -m "Create a quarterly development plan"
+```
+
+**Options:**
+
+- `-m, --message <text>` — Required; task prompt
+- `--max-depth <n>` — Max delegation depth (default: 3)
+
+**Output:**
+
+```
+Orchestrating via ceo…
+
+── researcher ──
+Market analysis shows 3 key trends...
+
+── devops ──
+Technical infrastructure plan...
+
+── Final (synthesized) ──
+Quarterly Development Plan: ...
+
+(orchestrated, 103.0s, 3229 tokens)
+```
+
+**How it works:**
+
+1. **Plan**: The agent analyzes the task and its direct reports, producing a JSON delegation plan
+2. **Delegate**: Subtasks are dispatched to subordinates in parallel (recursive — subordinates with their own reports also orchestrate)
+3. **Synthesize**: The agent collects all subordinate outputs and produces a unified response
+
+Leaf agents (no direct reports) execute tasks directly without delegation.
+
+---
+
 ## Fleet Commands
 
-### `openclaw company fleet`
+### `openclaw clawdock fleet`
 
 Show the current fleet snapshot (CPU, memory, tokens, uptime).
 
 ```
-openclaw company fleet
+openclaw clawdock fleet
 
 Fleet snapshot at 14:22:03
   Running: 2  Idle: 5  Crashed: 1  Total tasks: 47
@@ -139,24 +181,24 @@ review-gamma             ✕ crashed        0.0      0        4200
 
 ## Task Commands
 
-### `openclaw company tasks list [--status <status>] [--assignee <id>] [--project <name>]`
+### `openclaw clawdock tasks list [--status <status>] [--assignee <id>] [--project <name>]`
 
 List Kanban tasks with optional filters.
 
 ```
-openclaw company tasks list --status in_progress
+openclaw clawdock tasks list --status in_progress
 ```
 
 Output table columns: ID, TITLE, STATUS, PRIORITY, ASSIGNEE
 
 ---
 
-### `openclaw company tasks create --title <text> [options]`
+### `openclaw clawdock tasks create --title <text> [options]`
 
 Create a new task.
 
 ```
-openclaw company tasks create \
+openclaw clawdock tasks create \
   --title "Write competitive analysis" \
   --priority high \
   --assignee research-alpha \
@@ -174,34 +216,34 @@ openclaw company tasks create \
 
 ---
 
-### `openclaw company tasks assign <taskId> <agentId>`
+### `openclaw clawdock tasks assign <taskId> <agentId>`
 
 Assign a task to an agent.
 
 ```
-openclaw company tasks assign task_1710000000_abc123 code-agent
+openclaw clawdock tasks assign task_1710000000_abc123 code-agent
 ```
 
 ---
 
 ## Team Commands
 
-### `openclaw company teams list`
+### `openclaw clawdock teams list`
 
 List all teams.
 
 ```
-openclaw company teams list
+openclaw clawdock teams list
 ```
 
 ---
 
-### `openclaw company teams create --name <name> [options]`
+### `openclaw clawdock teams create --name <name> [options]`
 
 Create a new team.
 
 ```
-openclaw company teams create \
+openclaw clawdock teams create \
   --name "Content Team" \
   --agents research-alpha,writing-beta,review-gamma \
   --strategy one-for-one
@@ -219,50 +261,50 @@ openclaw company teams create \
 
 ## Message Commands
 
-### `openclaw company message send <text>`
+### `openclaw clawdock message send <text>`
 
 Send a message to the company (routes to AI Director).
 
 ```
-openclaw company message send "What is the status of Project Alpha?"
+openclaw clawdock message send "What is the status of Project Alpha?"
 ```
 
 Output: `{ ok: true, runId: "run_...", msgId: "msg_..." }`
 
-The AI Director will receive the message and run a task. Use `openclaw company agents logs ai-director` to see the response.
+The AI Director will receive the message and run a task. Use `openclaw clawdock agents logs ai-director` to see the response.
 
 ---
 
-### `openclaw company messages list [--limit N]`
+### `openclaw clawdock messages list [--limit N]`
 
 Show recent message history (human ↔ company).
 
 ```
-openclaw company messages list --limit 20
+openclaw clawdock messages list --limit 20
 ```
 
 ---
 
 ## Profile Commands
 
-### `openclaw company profile get`
+### `openclaw clawdock profile get`
 
 Show the company profile.
 
 ```
-openclaw company profile get
+openclaw clawdock profile get
 ```
 
 Output: JSON representation of `CompanyProfile`.
 
 ---
 
-### `openclaw company profile set [options]`
+### `openclaw clawdock profile set [options]`
 
 Update the company profile.
 
 ```
-openclaw company profile set \
+openclaw clawdock profile set \
   --name "Acme AI Corp" \
   --mission "Automate everything worth automating"
 ```
@@ -282,34 +324,44 @@ openclaw company profile set \
 
 ```bash
 # 1. Check current status
-openclaw company fleet
+openclaw clawdock fleet
 
-# 2. Send a task to the company
-openclaw company message send "Research the top 5 AI coding tools and write a comparison blog post"
+# 2. Send a task to the company (auto-orchestrates if director has subordinates)
+openclaw clawdock message send "Research the top 5 AI coding tools and write a comparison blog post"
 
 # 3. Watch the director's log
-openclaw company agents logs ai-director --limit 20
+openclaw clawdock agents logs ceo --limit 20
 
 # 4. Check task board
-openclaw company tasks list
+openclaw clawdock tasks list
+```
+
+### Run an orchestrated task across the org hierarchy
+
+```bash
+# CEO delegates to researcher + devops, researcher may delegate to writer
+openclaw clawdock orchestrate ceo -m "Create a quarterly development plan with market analysis and infrastructure roadmap"
+
+# Run a leaf agent directly (no delegation)
+openclaw clawdock run devops -m "What CI/CD tool is best for Node.js?"
 ```
 
 ### Recover a crashed agent
 
 ```bash
 # See which agents crashed
-openclaw company fleet
+openclaw clawdock fleet
 
 # Restart the agent
-openclaw company agents restart review-gamma
+openclaw clawdock agents restart review-gamma
 
 # Verify it recovered
-openclaw company agents get review-gamma
+openclaw clawdock agents get review-gamma
 ```
 
 ### Inspect inter-agent communication
 
 ```bash
 # See recent messages between agents
-openclaw company messages list --limit 50
+openclaw clawdock messages list --limit 50
 ```

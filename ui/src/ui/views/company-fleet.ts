@@ -1,5 +1,5 @@
-import { html } from "lit";
-import type { ClawDockAgent } from "../company-types.ts";
+import { html, nothing } from "lit";
+import type { ClawDockAgent, ClawDockRuntime } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
 function formatTokens(n: number): string {
@@ -27,99 +27,6 @@ type FleetAgent = {
   uptime: string;
   lastActivity: string;
 };
-
-const DEMO_FLEET: FleetAgent[] = [
-  {
-    id: "research-alpha",
-    name: "research-alpha",
-    team: "content-pipeline",
-    role: "Researcher",
-    model: "claude-opus-4-5",
-    status: "running",
-    tasksCompleted: 12,
-    tasksRunning: 1,
-    tokensUsed: 480_000,
-    cpuPercent: 12,
-    memoryMb: 320,
-    uptime: "4h 22m",
-    lastActivity: "30s ago",
-  },
-  {
-    id: "writing-beta",
-    name: "writing-beta",
-    team: "content-pipeline",
-    role: "Writer",
-    model: "claude-sonnet-4-5",
-    status: "running",
-    tasksCompleted: 28,
-    tasksRunning: 2,
-    tokensUsed: 920_000,
-    cpuPercent: 28,
-    memoryMb: 410,
-    uptime: "4h 22m",
-    lastActivity: "12s ago",
-  },
-  {
-    id: "review-gamma",
-    name: "review-gamma",
-    team: "content-pipeline",
-    role: "Reviewer",
-    model: "claude-haiku-4-5",
-    status: "crashed",
-    tasksCompleted: 0,
-    tasksRunning: 0,
-    tokensUsed: 0,
-    cpuPercent: 0,
-    memoryMb: 0,
-    uptime: "—",
-    lastActivity: "7m ago (crash)",
-  },
-  {
-    id: "code-agent",
-    name: "code-agent",
-    team: "devops",
-    role: "Engineer",
-    model: "claude-opus-4-5",
-    status: "running",
-    tasksCompleted: 47,
-    tasksRunning: 3,
-    tokensUsed: 1_040_000,
-    cpuPercent: 44,
-    memoryMb: 680,
-    uptime: "6h 10m",
-    lastActivity: "5s ago",
-  },
-  {
-    id: "test-runner",
-    name: "test-runner",
-    team: "devops",
-    role: "QA",
-    model: "gpt-4o",
-    status: "running",
-    tasksCompleted: 31,
-    tasksRunning: 1,
-    tokensUsed: 320_000,
-    cpuPercent: 18,
-    memoryMb: 290,
-    uptime: "6h 10m",
-    lastActivity: "1m ago",
-  },
-  {
-    id: "nanoclaw-primary",
-    name: "nanoclaw-primary",
-    team: "personal-assistant",
-    role: "Personal AI",
-    model: "claude-sonnet-4-5",
-    status: "idle",
-    tasksCompleted: 24,
-    tasksRunning: 0,
-    tokensUsed: 80_000,
-    cpuPercent: 0,
-    memoryMb: 140,
-    uptime: "8h 00m",
-    lastActivity: "22m ago",
-  },
-];
 
 function cpuBar(pct: number) {
   const color =
@@ -222,7 +129,6 @@ function renderFleetRow(agent: FleetAgent, props: CompanyFleetProps) {
   `;
 }
 
-/** Map ClawDockAgent to the internal FleetAgent shape. */
 function toFleetAgent(a: ClawDockAgent): FleetAgent {
   const statusMap: Record<string, FleetAgent["status"]> = {
     active: "running",
@@ -259,6 +165,219 @@ function toFleetAgent(a: ClawDockAgent): FleetAgent {
   };
 }
 
+// ── Create Agent form state ────────────────────────────────────────────────
+let _showCreateForm = false;
+let _createFormData = {
+  name: "",
+  role: "Agent",
+  team: "general",
+  runtime: "openclaw" as ClawDockRuntime,
+  emoji: "🤖",
+};
+let _createLoading = false;
+
+const RUNTIMES: { value: ClawDockRuntime; label: string }[] = [
+  { value: "openclaw", label: "OpenClaw" },
+  { value: "claude-code", label: "Claude Code" },
+  { value: "gemini", label: "Gemini CLI" },
+  { value: "codex", label: "Codex CLI" },
+  { value: "aider", label: "Aider" },
+];
+
+const PRESET_ROLES = [
+  "Agent",
+  "Engineer",
+  "Researcher",
+  "Writer",
+  "Reviewer",
+  "QA",
+  "Personal AI",
+  "Manager",
+];
+const PRESET_EMOJIS = ["🤖", "🧠", "✍️", "🔍", "🛠️", "🎯", "📊", "🚀", "💡", "🔧"];
+
+function renderCreateForm(props: CompanyFleetProps) {
+  if (!_showCreateForm) {
+    return nothing;
+  }
+
+  return html`
+    <div class="cd-create-agent-overlay" @click=${(e: Event) => {
+      if ((e.target as HTMLElement).classList.contains("cd-create-agent-overlay")) {
+        _showCreateForm = false;
+        props._requestUpdate?.();
+      }
+    }}>
+      <div class="cd-create-agent-panel">
+        <div class="cd-create-agent-panel__header">
+          <h3>Create New Agent</h3>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" @click=${() => {
+            _showCreateForm = false;
+            props._requestUpdate?.();
+          }}>
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="cd-create-agent-panel__body">
+          <div class="cd-form-group">
+            <label class="cd-form-label">Agent Name *</label>
+            <input
+              class="cd-form-input"
+              type="text"
+              placeholder="e.g. research-alpha"
+              .value=${_createFormData.name}
+              @input=${(e: Event) => {
+                _createFormData.name = (e.target as HTMLInputElement).value;
+              }}
+            />
+          </div>
+
+          <div class="cd-form-row">
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Role</label>
+              <select class="cd-form-input" @change=${(e: Event) => {
+                _createFormData.role = (e.target as HTMLSelectElement).value;
+              }}>
+                ${PRESET_ROLES.map((r) => html`<option value=${r} ?selected=${r === _createFormData.role}>${r}</option>`)}
+              </select>
+            </div>
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Team</label>
+              <input
+                class="cd-form-input"
+                type="text"
+                placeholder="general"
+                .value=${_createFormData.team}
+                @input=${(e: Event) => {
+                  _createFormData.team = (e.target as HTMLInputElement).value;
+                }}
+              />
+            </div>
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Runtime</label>
+            <div class="cd-runtime-picker">
+              ${RUNTIMES.map(
+                (rt) => html`
+                <button
+                  class="cd-runtime-chip ${rt.value === _createFormData.runtime ? "cd-runtime-chip--active" : ""}"
+                  @click=${() => {
+                    _createFormData.runtime = rt.value;
+                    props._requestUpdate?.();
+                  }}
+                >${rt.label}</button>
+              `,
+              )}
+            </div>
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Emoji</label>
+            <div class="cd-emoji-picker">
+              ${PRESET_EMOJIS.map(
+                (e) => html`
+                <button
+                  class="cd-emoji-chip ${e === _createFormData.emoji ? "cd-emoji-chip--active" : ""}"
+                  @click=${() => {
+                    _createFormData.emoji = e;
+                    props._requestUpdate?.();
+                  }}
+                >${e}</button>
+              `,
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div class="cd-create-agent-panel__footer">
+          <button class="cd-btn cd-btn--sm cd-btn--ghost" @click=${() => {
+            _showCreateForm = false;
+            props._requestUpdate?.();
+          }}>Cancel</button>
+          <button
+            class="cd-btn cd-btn--sm cd-btn--primary"
+            ?disabled=${!_createFormData.name.trim() || _createLoading}
+            @click=${async () => {
+              if (!_createFormData.name.trim() || _createLoading) {
+                return;
+              }
+              _createLoading = true;
+              props._requestUpdate?.();
+              try {
+                await props.onCreate?.({
+                  name: _createFormData.name.trim(),
+                  role: _createFormData.role,
+                  team: _createFormData.team,
+                  runtime: _createFormData.runtime,
+                  emoji: _createFormData.emoji,
+                });
+                _showCreateForm = false;
+                _createFormData = {
+                  name: "",
+                  role: "Agent",
+                  team: "general",
+                  runtime: "openclaw",
+                  emoji: "🤖",
+                };
+              } finally {
+                _createLoading = false;
+                props._requestUpdate?.();
+              }
+            }}
+          >
+            ${_createLoading ? "Creating…" : "Create Agent"}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEmptyState(props: CompanyFleetProps) {
+  return html`
+    <div class="cd-fleet-empty">
+      <div class="cd-fleet-empty__icon">
+        <svg viewBox="0 0 80 80" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="12" y="20" width="56" height="40" rx="4" />
+          <circle cx="30" cy="40" r="6" />
+          <circle cx="50" cy="40" r="6" />
+          <path d="M30 40v-4m20 4v-4" />
+          <path d="M24 54h32" stroke-dasharray="3 3" />
+        </svg>
+      </div>
+      <h3 class="cd-fleet-empty__title">No agents in your fleet</h3>
+      <p class="cd-fleet-empty__desc">
+        Create your first AI agent to get started. Each agent runs as an independent process
+        and can use different runtimes (OpenClaw, Claude Code, Gemini, etc.).
+      </p>
+      <div class="cd-fleet-empty__actions">
+        <button class="cd-btn cd-btn--sm cd-btn--primary" @click=${() => {
+          _showCreateForm = true;
+          props._requestUpdate?.();
+        }}>
+          ${icons.plus} Create First Agent
+        </button>
+      </div>
+      <div class="cd-fleet-empty__hints">
+        <div class="cd-fleet-empty__hint">
+          <span class="cd-fleet-empty__hint-icon">1</span>
+          <span>Create an agent with a name, role, and runtime</span>
+        </div>
+        <div class="cd-fleet-empty__hint">
+          <span class="cd-fleet-empty__hint-icon">2</span>
+          <span>Start the agent — it spawns as a managed child process</span>
+        </div>
+        <div class="cd-fleet-empty__hint">
+          <span class="cd-fleet-empty__hint-icon">3</span>
+          <span>Assign tasks, monitor resources, view logs in real time</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export type CompanyFleetProps = {
   agents?: ClawDockAgent[];
   onStart?: (agentId: string) => void;
@@ -267,11 +386,29 @@ export type CompanyFleetProps = {
   onPause?: (agentId: string) => void;
   onResume?: (agentId: string) => void;
   onLoadLogs?: (agentId: string) => void;
+  onCreate?: (params: {
+    name: string;
+    role?: string;
+    team?: string;
+    runtime?: string;
+    emoji?: string;
+  }) => Promise<void>;
+  _requestUpdate?: () => void;
 };
 
 export function renderCompanyFleet(props: CompanyFleetProps) {
-  const fleet =
-    props.agents && props.agents.length > 0 ? props.agents.map(toFleetAgent) : DEMO_FLEET;
+  const hasRealAgents = props.agents && props.agents.length > 0;
+  const fleet = hasRealAgents ? props.agents!.map(toFleetAgent) : [];
+
+  if (!hasRealAgents) {
+    return html`
+      <div class="cd-page">
+        ${renderEmptyState(props)}
+        ${renderCreateForm(props)}
+      </div>
+    `;
+  }
+
   const runningCount = fleet.filter((a) => a.status === "running").length;
   const crashedCount = fleet.filter((a) => a.status === "crashed").length;
   const idleCount = fleet.filter((a) => a.status === "idle").length;
@@ -310,11 +447,23 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
           <span class="cd-fleet-summary__stat-lbl">tokens used</span>
         </div>
         <div class="cd-fleet-summary__actions">
-          <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
-            fleet.filter((a) => a.status === "crashed").forEach((a) => props.onRestart?.(a.id));
+          <button class="cd-btn cd-btn--sm cd-btn--primary" @click=${() => {
+            _showCreateForm = true;
+            props._requestUpdate?.();
           }}>
-            ${icons.rotateCounterClockwise} Restart crashed
+            ${icons.plus} Add Agent
           </button>
+          ${
+            crashedCount > 0
+              ? html`<button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
+                  fleet
+                    .filter((a) => a.status === "crashed")
+                    .forEach((a) => props.onRestart?.(a.id));
+                }}>
+                ${icons.rotateCounterClockwise} Restart crashed
+              </button>`
+              : ""
+          }
         </div>
       </div>
 
@@ -349,6 +498,8 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
           auto-recovery, and inter-agent messaging. Like Kubernetes for containers, but for AI agents.
         </div>
       </div>
+
+      ${renderCreateForm(props)}
     </div>
   `;
 }
