@@ -1,8 +1,4 @@
-import {
-  listAgentIds,
-  resolveAgentWorkspaceDir,
-  resolveDefaultAgentId,
-} from "../../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { installSkill } from "../../agents/skills-install.js";
 import { buildWorkspaceSkillStatus } from "../../agents/skills-status.js";
 import { loadWorkspaceSkillEntries, type SkillEntry } from "../../agents/skills.js";
@@ -21,6 +17,7 @@ import {
   validateSkillsStatusParams,
   validateSkillsUpdateParams,
 } from "../protocol/index.js";
+import { allowedAgentIds } from "./agent-id-allowed.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 function collectSkillBins(entries: SkillEntry[]): string[] {
@@ -71,8 +68,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
     const agentIdRaw = typeof params?.agentId === "string" ? params.agentId.trim() : "";
     const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : resolveDefaultAgentId(cfg);
     if (agentIdRaw) {
-      const knownAgents = listAgentIds(cfg);
-      if (!knownAgents.includes(agentId)) {
+      if (!allowedAgentIds(cfg).has(agentId)) {
         respond(
           false,
           undefined,

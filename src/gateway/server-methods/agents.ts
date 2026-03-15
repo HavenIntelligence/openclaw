@@ -1,10 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-  listAgentIds,
-  resolveAgentDir,
-  resolveAgentWorkspaceDir,
-} from "../../agents/agent-scope.js";
+import { resolveAgentDir, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -46,6 +42,7 @@ import {
   validateAgentsUpdateParams,
 } from "../protocol/index.js";
 import { listAgentsForGateway } from "../session-utils.js";
+import { allowedAgentIds } from "./agent-id-allowed.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
 const BOOTSTRAP_FILE_NAMES = [
@@ -350,8 +347,7 @@ async function listAgentFiles(workspaceDir: string, options?: { hideBootstrap?: 
 
 function resolveAgentIdOrError(agentIdRaw: string, cfg: ReturnType<typeof loadConfig>) {
   const agentId = normalizeAgentId(agentIdRaw);
-  const allowed = new Set(listAgentIds(cfg));
-  if (!allowed.has(agentId)) {
+  if (!allowedAgentIds(cfg).has(agentId)) {
     return null;
   }
   return agentId;

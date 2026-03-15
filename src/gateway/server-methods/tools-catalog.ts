@@ -1,5 +1,4 @@
 import {
-  listAgentIds,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
@@ -11,12 +10,14 @@ import {
 } from "../../agents/tool-catalog.js";
 import { loadConfig } from "../../config/config.js";
 import { getPluginToolMeta, resolvePluginTools } from "../../plugins/tools.js";
+import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
   validateToolsCatalogParams,
 } from "../protocol/index.js";
+import { allowedAgentIds } from "./agent-id-allowed.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
 type ToolCatalogEntry = {
@@ -39,10 +40,12 @@ type ToolCatalogGroup = {
 
 function resolveAgentIdOrRespondError(rawAgentId: unknown, respond: RespondFn) {
   const cfg = loadConfig();
-  const knownAgents = listAgentIds(cfg);
+  const allowed = allowedAgentIds(cfg);
   const requestedAgentId = typeof rawAgentId === "string" ? rawAgentId.trim() : "";
-  const agentId = requestedAgentId || resolveDefaultAgentId(cfg);
-  if (requestedAgentId && !knownAgents.includes(agentId)) {
+  const agentId = requestedAgentId
+    ? normalizeAgentId(requestedAgentId)
+    : resolveDefaultAgentId(cfg);
+  if (requestedAgentId && !allowed.has(agentId)) {
     respond(
       false,
       undefined,
