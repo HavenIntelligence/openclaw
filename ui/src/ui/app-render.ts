@@ -101,7 +101,6 @@ import "./components/dashboard-header.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
-import { agentLogoUrl } from "./views/agents-utils.ts";
 import {
   resolveAgentConfig,
   resolveConfiguredCronModelSuggestions,
@@ -341,7 +340,7 @@ export function renderApp(state: AppViewState) {
   const chatAvatarUrl = state.chatAvatarUrl ?? assistantAvatarUrl ?? null;
   const configValue =
     state.configForm ?? (state.configSnapshot?.config as Record<string, unknown> | null);
-  const basePath = normalizeBasePath(state.basePath ?? "");
+  const _basePath = normalizeBasePath(state.basePath ?? "");
   const resolvedAgentId =
     state.agentsSelectedId ??
     state.agentsList?.defaultId ??
@@ -481,10 +480,10 @@ export function renderApp(state: AppViewState) {
                   navCollapsed
                     ? nothing
                     : html`
-                        <img class="sidebar-brand__logo" src="${agentLogoUrl(basePath)}" alt="ClawDock" />
+                        <span class="sidebar-brand__logo sidebar-brand__logo--company">${icons.clawdock}</span>
                         <span class="sidebar-brand__copy">
                           <span class="sidebar-brand__eyebrow">CONTROL PLANE</span>
-                          <span class="sidebar-brand__title">ClawDock</span>
+                          <span class="sidebar-brand__title">Haven Clawdock company</span>
                         </span>
                       `
                 }

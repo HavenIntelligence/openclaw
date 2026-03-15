@@ -142,7 +142,13 @@ export interface Task {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
-  assignee?: string; // agentId
+  assignee?: string; // agentId — who is executing the task
+  assignedBy?: string; // agentId — who created/delegated the task
+  assignedAt?: number; // timestamp when assigned
+  reviewedBy?: string; // agentId — who reviews (defaults to assignedBy)
+  reviewNote?: string; // reviewer comment on review/done
+  roundCount?: number; // how many review cycles this task has been through
+  maxRounds?: number; // max allowed review rounds (default 3)
   project?: string;
   tags?: string[];
   dueAt?: number;
@@ -166,6 +172,8 @@ export interface TeamConfig {
   strategy: SupervisionStrategy;
   color?: string;
   description?: string;
+  goal?: string; // team objective/OKR
+  leaderId?: string; // agentId of team leader
 }
 
 // ── Company Profile ───────────────────────────────────────────────────────

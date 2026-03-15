@@ -7,6 +7,7 @@ import type {
   Task as RealTask,
   TeamConfig,
 } from "../company-types.ts";
+import { icons } from "../icons.ts";
 import { renderCompanyFleet } from "./company-fleet.ts";
 import { renderCompanyTasks } from "./company-tasks.ts";
 import { renderRoleHub } from "./role-hub.ts";
@@ -178,7 +179,7 @@ const _AGENTS: AgentRecord[] = [
     totalTokensUsed: 8_420_000,
     uptimePct: 99.1,
     currentWorkspace: "Dashboard · Company Overview",
-    currentApp: "ClawDock Control",
+    currentApp: "Haven Clawdock company",
     currentUrl: "/company",
     tools: ["company-dashboard", "task-manager", "send-message"],
     skills: ["strategic-planning", "fundraising", "hiring"],
@@ -1236,7 +1237,7 @@ function renderProfile() {
             _activeCompanyId = c.id;
             _editing = false;
           }}>
-          🦀 ${c.name}
+          <span class="cd-co-switch-logo">${icons.clawdock}</span> ${c.name}
           <span class="cd-chip cd-chip--xs">${c.stage}</span>
         </button>
       `,
@@ -1277,7 +1278,7 @@ function renderProfile() {
     <!-- Profile card -->
     <div class="cd-profile-card">
       <div class="cd-profile-card__left">
-        <div class="cd-profile-card__logo">🦀</div>
+        <div class="cd-profile-card__logo">${icons.clawdock}</div>
         <div class="cd-profile-card__meta">
           ${
             _editing
@@ -1504,7 +1505,7 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _onUpdateAgent = props.onUpdateAgent;
   _requestUpdate = props.requestUpdate;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
-    { id: "profile", icon: "🦀", label: "Company" },
+    { id: "profile", icon: "🏢", label: "Company" },
     { id: "fleet", icon: "🤖", label: "Agent Status" },
     { id: "teams", icon: "👥", label: "Teams" },
     { id: "roles", icon: "🎭", label: "Role Hub" },

@@ -393,6 +393,20 @@
   box-shadow: 0 8px 18px color-mix(in srgb, black 12%, transparent);
 }
 
+.sidebar-brand__logo--company {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+  color: var(--text-strong, #0f172a);
+}
+
+.sidebar-brand__logo--company svg {
+  height: 100%;
+  width: auto;
+  display: block;
+}
+
 .sidebar-brand__copy {
   display: flex;
   flex-direction: column;

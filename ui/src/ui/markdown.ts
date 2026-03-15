@@ -193,23 +193,65 @@ function jsonToStructuredMarkdown(data: unknown): string | null {
   return null;
 }
 
+/** Try to parse JSON from raw text (whole string, ```json block, or [...] segment). */
+function parseJsonForDisplay(raw: string): object | null {
+  const t = raw.trim();
+  if (t.length < 2) {
+    return null;
+  }
+  const attempts: Array<() => object | null> = [
+    () => {
+      try {
+        return JSON.parse(t);
+      } catch {
+        return null;
+      }
+    },
+    () => {
+      const m = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (!m) {
+        return null;
+      }
+      try {
+        return JSON.parse(m[1].trim());
+      } catch {
+        return null;
+      }
+    },
+    () => {
+      const m = t.match(/\[[\s\S]*?\]/);
+      if (!m) {
+        return null;
+      }
+      try {
+        return JSON.parse(m[0]);
+      } catch {
+        return null;
+      }
+    },
+  ];
+  for (const tryParse of attempts) {
+    const data = tryParse();
+    if (data !== null) {
+      return data;
+    }
+  }
+  return null;
+}
+
 /**
  * Preprocess execution-log content: if it's JSON (e.g. delegation list), convert
  * to readable markdown before passing to toSanitizedMarkdownHtml.
  */
 export function formatExecutionLogContent(content: string): string {
   const raw = content.trim();
-  if (raw.length < 2 || (!raw.startsWith("[") && !raw.startsWith("{"))) {
+  const data = parseJsonForDisplay(raw);
+  if (data === null) {
     return content;
   }
-  try {
-    const data = JSON.parse(raw) as unknown;
-    const md = jsonToDelegationMarkdown(data) ?? jsonToStructuredMarkdown(data);
-    if (md) {
-      return md;
-    }
-  } catch {
-    // Not valid JSON, keep original
+  const md = jsonToDelegationMarkdown(data) ?? jsonToStructuredMarkdown(data);
+  if (md) {
+    return md;
   }
   return content;
 }

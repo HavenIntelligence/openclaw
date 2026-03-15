@@ -19,6 +19,9 @@ type TeamEntry = {
   id: string;
   name: string;
   description: string;
+  goal: string;
+  leaderId: string;
+  leaderName: string;
   strategy: SupervisionStrategy;
   agents: AgentEntry[];
   agentIds: string[];
@@ -63,20 +66,31 @@ const STRATEGIES: { value: SupervisionStrategy; label: string }[] = [
 type TeamFormData = {
   name: string;
   description: string;
+  goal: string;
+  leaderId: string;
   strategy: SupervisionStrategy;
   agents: string[];
 };
 
+const DEFAULT_FORM: TeamFormData = {
+  name: "",
+  description: "",
+  goal: "",
+  leaderId: "",
+  strategy: "one-for-one",
+  agents: [],
+};
+
 let _showForm = false;
 let _editingTeamId: string | null = null;
-let _formData: TeamFormData = { name: "", description: "", strategy: "one-for-one", agents: [] };
+let _formData: TeamFormData = { ...DEFAULT_FORM };
 let _formLoading = false;
 let _confirmDeleteId: string | null = null;
 
 function resetForm() {
   _showForm = false;
   _editingTeamId = null;
-  _formData = { name: "", description: "", strategy: "one-for-one", agents: [] };
+  _formData = { ...DEFAULT_FORM };
   _formLoading = false;
 }
 
@@ -90,6 +104,8 @@ function openEditForm(team: TeamEntry) {
   _formData = {
     name: team.name,
     description: team.description,
+    goal: team.goal,
+    leaderId: team.leaderId,
     strategy: team.strategy,
     agents: [...team.agentIds],
   };
@@ -164,6 +180,8 @@ function renderTeamCard(team: TeamEntry, props: CompanyTeamsProps) {
           <div>
             <span class="cd-team-card__name">${team.name}</span>
             <p class="cd-team-card__desc">${team.description}</p>
+            ${team.goal ? html`<p class="cd-team-card__goal">🎯 ${team.goal}</p>` : ""}
+            ${team.leaderName ? html`<p class="cd-team-card__leader">👤 Lead: ${team.leaderName}</p>` : ""}
           </div>
         </div>
         <div class="cd-team-card__meta">
@@ -374,6 +392,36 @@ function renderTeamForm(props: CompanyTeamsProps) {
           </div>
 
           <div class="cd-form-group">
+            <label class="cd-form-label">Team Goal / Objective</label>
+            <input
+              class="cd-form-input"
+              type="text"
+              placeholder="e.g. Ship v2.0 by end of Q1"
+              .value=${_formData.goal}
+              @input=${(e: Event) => {
+                _formData.goal = (e.target as HTMLInputElement).value;
+              }}
+            />
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Team Leader</label>
+            <select class="cd-form-input" @change=${(e: Event) => {
+              _formData.leaderId = (e.target as HTMLSelectElement).value;
+              props._requestUpdate?.();
+            }}>
+              <option value="" ?selected=${!_formData.leaderId}>None</option>
+              ${allAgents.map(
+                (a) => html`
+                <option value="${a.id}" ?selected=${a.id === _formData.leaderId}>
+                  ${a.name || a.id} (${a.role})
+                </option>
+              `,
+              )}
+            </select>
+          </div>
+
+          <div class="cd-form-group">
             <label class="cd-form-label">Supervision Strategy</label>
             <div class="cd-runtime-picker">
               ${STRATEGIES.map(
@@ -451,6 +499,8 @@ function renderTeamForm(props: CompanyTeamsProps) {
                   props.onUpdateTeam?.(_editingTeamId!, {
                     name: _formData.name.trim(),
                     description: _formData.description.trim(),
+                    goal: _formData.goal.trim() || undefined,
+                    leaderId: _formData.leaderId || undefined,
                     strategy: _formData.strategy,
                     agents: _formData.agents,
                   });
@@ -458,6 +508,8 @@ function renderTeamForm(props: CompanyTeamsProps) {
                   props.onCreateTeam?.({
                     name: _formData.name.trim(),
                     description: _formData.description.trim(),
+                    goal: _formData.goal.trim() || undefined,
+                    leaderId: _formData.leaderId || undefined,
                     strategy: _formData.strategy,
                     agents: _formData.agents,
                   });
@@ -504,10 +556,14 @@ function toTeamEntry(team: TeamConfig, allAgents: ClawDockAgent[]): TeamEntry {
     };
   });
   const hasCrashed = entries.some((a) => a.status === "crashed");
+  const leader = team.leaderId ? allAgents.find((a) => a.id === team.leaderId) : undefined;
   return {
     id: team.id,
     name: team.name,
     description: team.description ?? "",
+    goal: team.goal ?? "",
+    leaderId: team.leaderId ?? "",
+    leaderName: leader?.name ?? team.leaderId ?? "",
     strategy: team.strategy,
     agents: entries,
     agentIds: team.agents,

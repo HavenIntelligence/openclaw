@@ -12,8 +12,15 @@ type Task = {
   description: string;
   status: TaskStatus;
   priority: Priority;
-  assignee: string; // agent id
+  assignee: string; // agent id — who executes
   assigneeEmoji: string;
+  assignedBy: string; // agent id — who delegated
+  assignedByEmoji: string;
+  assignedAt?: string; // formatted timestamp
+  reviewedBy: string; // agent id — who reviews
+  reviewNote?: string;
+  roundCount: number;
+  maxRounds: number;
   project: string;
   tags: string[];
   createdAt: string;
@@ -21,6 +28,24 @@ type Task = {
   tokensUsed?: number;
   blockedBy?: string;
 };
+
+/** Fill in new required fields with sensible defaults for demo data. */
+function demoTask(
+  partial: Omit<
+    Task,
+    "assignedBy" | "assignedByEmoji" | "reviewedBy" | "roundCount" | "maxRounds"
+  > &
+    Partial<Task>,
+): Task {
+  return {
+    assignedBy: partial.assignedBy ?? "ai-director",
+    assignedByEmoji: partial.assignedByEmoji ?? "👑",
+    reviewedBy: partial.reviewedBy ?? partial.assignedBy ?? "ai-director",
+    roundCount: partial.roundCount ?? (partial.status === "done" ? 1 : 0),
+    maxRounds: partial.maxRounds ?? 3,
+    ...partial,
+  };
+}
 
 // ── Demo data ──────────────────────────────────────────────────────────────
 const DEMO_TASKS: Task[] = [
@@ -283,7 +308,7 @@ const DEMO_TASKS: Task[] = [
     createdAt: "Mar 1",
     tokensUsed: 52_300,
   },
-];
+].map((t) => demoTask(t as Task));
 
 // ── UI State ───────────────────────────────────────────────────────────────
 let _filter = "All";
@@ -304,6 +329,7 @@ let _onUpdateTask: CompanyTasksProps["onUpdateTask"];
 let _onDeleteTask: CompanyTasksProps["onDeleteTask"];
 
 let _dragging: string | null = null;
+let _detailTaskId: string | null = null; // clicked task to show detail panel
 // Active task list — set on each render from props or demo data.
 let _activeTasks: Task[] = DEMO_TASKS;
 // Active agent list for filter UI — lazily initialized from AGENTS on first render
@@ -373,6 +399,8 @@ function fmtDate(ts: number): string {
 /** Map real Task + agent list to the internal display Task shape. */
 function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
   const agent = agents.find((a) => a.id === rt.assignee);
+  const assigner = agents.find((a) => a.id === rt.assignedBy);
+  const _reviewer = agents.find((a) => a.id === (rt.reviewedBy ?? rt.assignedBy));
   return {
     id: rt.id,
     title: rt.title,
@@ -381,6 +409,13 @@ function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
     priority: rt.priority,
     assignee: rt.assignee ?? "unassigned",
     assigneeEmoji: agent?.emoji ?? "❓",
+    assignedBy: rt.assignedBy ?? "system",
+    assignedByEmoji: assigner?.emoji ?? "🔧",
+    assignedAt: rt.assignedAt ? fmtDate(rt.assignedAt) : undefined,
+    reviewedBy: rt.reviewedBy ?? rt.assignedBy ?? "system",
+    reviewNote: rt.reviewNote,
+    roundCount: rt.roundCount ?? 0,
+    maxRounds: rt.maxRounds ?? 3,
     project: rt.project ?? "Unassigned",
     tags: rt.tags ?? [],
     createdAt: fmtDate(rt.createdAt),
@@ -391,6 +426,7 @@ function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
 }
 
 function renderTask(task: Task) {
+  const roundLabel = task.roundCount > 0 ? `R${task.roundCount}/${task.maxRounds}` : "";
   return html`
     <div class="cd-kb-task"
       draggable="true"
@@ -400,13 +436,21 @@ function renderTask(task: Task) {
       @dragend=${() => {
         _dragging = null;
       }}
+      @click=${(e: Event) => {
+        // Don't open detail when clicking action buttons
+        if ((e.target as HTMLElement).closest(".cd-kb-task__actions")) {
+          return;
+        }
+        _detailTaskId = _detailTaskId === task.id ? null : task.id;
+      }}
     >
-      <!-- Priority + Project -->
+      <!-- Priority + Project + Round -->
       <div class="cd-kb-task__meta">
         <span class="cd-kb-priority" style="background:${priorityColor(task.priority)}20;color:${priorityColor(task.priority)};border-color:${priorityColor(task.priority)}40">
           ${task.priority}
         </span>
         <span class="cd-kb-project">${task.project}</span>
+        ${roundLabel ? html`<span class="cd-kb-round">${roundLabel}</span>` : ""}
         ${task.dueAt ? html`<span class="cd-kb-due">📅 ${task.dueAt}</span>` : ""}
       </div>
 
@@ -427,20 +471,52 @@ function renderTask(task: Task) {
           : ""
       }
 
-      <!-- Footer: assignee + tokens + blocker -->
-      <div class="cd-kb-task__footer">
-        <span class="cd-kb-assignee" title="${task.assignee}">
+      <!-- Assignment info: assigned by → assignee, review by -->
+      <div class="cd-kb-task__assign-row">
+        <span class="cd-kb-assign-by" title="Assigned by ${task.assignedBy}">
+          ${task.assignedByEmoji} <span class="cd-kb-assign-label">by</span>
+        </span>
+        <span class="cd-kb-assign-arrow">→</span>
+        <span class="cd-kb-assignee" title="Assigned to ${task.assignee}">
           ${task.assigneeEmoji} <span>${task.assignee}</span>
         </span>
+        ${task.assignedAt ? html`<span class="cd-kb-assign-ts">${task.assignedAt}</span>` : ""}
+      </div>
+
+      <!-- Footer: tokens + blocker + review info -->
+      <div class="cd-kb-task__footer">
         ${task.tokensUsed ? html`<span class="cd-kb-tokens">${fmtTokens(task.tokensUsed)}</span>` : ""}
         ${task.blockedBy ? html`<span class="cd-kb-blocked">⛔ ${task.blockedBy}</span>` : ""}
+        ${task.reviewNote ? html`<span class="cd-kb-review-note" title="${task.reviewNote}">💬</span>` : ""}
       </div>
 
       <!-- Status actions on hover -->
       <div class="cd-kb-task__actions">
-        <button class="cd-btn cd-btn--ghost cd-btn--xs" title="Open task">${icons.activity}</button>
+        ${
+          task.status === "review"
+            ? html`
+          <button class="cd-btn cd-btn--ghost cd-btn--xs cd-btn--ok" title="Approve → Done"
+            @click=${() => {
+              if (_onUpdateTask) {
+                _onUpdateTask(task.id, { status: "done", reviewNote: "Approved" });
+              }
+            }}>✅</button>
+          <button class="cd-btn cd-btn--ghost cd-btn--xs cd-btn--warn" title="Return → In Progress"
+            @click=${() => {
+              if (_onUpdateTask) {
+                _onUpdateTask(task.id, { status: "in_progress", roundCount: task.roundCount + 1 });
+              }
+            }}>🔄</button>
+        `
+            : ""
+        }
         <button class="cd-btn cd-btn--ghost cd-btn--xs" title="Assign">${icons.users}</button>
-        <button class="cd-btn cd-btn--ghost cd-btn--xs" title="Delete">${icons.trash}</button>
+        <button class="cd-btn cd-btn--ghost cd-btn--xs" title="Delete"
+          @click=${() => {
+            if (_onDeleteTask) {
+              _onDeleteTask(task.id);
+            }
+          }}>${icons.trash}</button>
       </div>
     </div>
   `;
@@ -679,7 +755,7 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                   return;
                 }
                 const now = Date.now();
-                const draft: Task = {
+                const draft: Task = demoTask({
                   id: `t-${now}`,
                   title: _newTask.title,
                   description: _newTask.description,
@@ -690,9 +766,9 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                     _activeAgents.find((a) => a.id === _newTask.assignee)?.emoji ?? "❓",
                   project: _newTask.project || "Unassigned",
                   tags: [],
-                  createdAt: "Now",
+                  createdAt: fmtDate(now),
                   tokensUsed: 0,
-                };
+                });
                 _activeTasks.unshift(draft);
                 const createParams = {
                   title: _newTask.title,
@@ -723,6 +799,167 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
       `
           : ""
       }
+
+      <!-- Task detail panel (slide-in) -->
+      ${(() => {
+        if (!_detailTaskId) {
+          return "";
+        }
+        const task = _activeTasks.find((t) => t.id === _detailTaskId);
+        if (!task) {
+          return "";
+        }
+        return html`
+          <div class="cd-task-detail-overlay" @click=${(e: Event) => {
+            if ((e.target as HTMLElement).classList.contains("cd-task-detail-overlay")) {
+              _detailTaskId = null;
+            }
+          }}>
+            <div class="cd-task-detail">
+              <div class="cd-task-detail__header">
+                <span class="cd-kb-priority" style="background:${priorityColor(task.priority)}20;color:${priorityColor(task.priority)};border-color:${priorityColor(task.priority)}40">
+                  ${task.priority}
+                </span>
+                <span class="cd-task-detail__title">${task.title}</span>
+                <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+                  _detailTaskId = null;
+                }}>
+                  ${icons.x}
+                </button>
+              </div>
+
+              <div class="cd-task-detail__body">
+                <!-- Status -->
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Status</span>
+                  <span class="cd-task-detail__value cd-task-detail__status--${task.status}">
+                    ${task.status.replace("_", " ")}
+                  </span>
+                </div>
+
+                <!-- Description -->
+                ${
+                  task.description
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Description</span>
+                    <p class="cd-task-detail__desc">${task.description}</p>
+                  </div>
+                `
+                    : ""
+                }
+
+                <!-- Assignment -->
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Assigned to</span>
+                  <span class="cd-task-detail__value">${task.assigneeEmoji} ${task.assignee}</span>
+                </div>
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Assigned by</span>
+                  <span class="cd-task-detail__value">${task.assignedByEmoji} ${task.assignedBy}</span>
+                </div>
+
+                <!-- Time info -->
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Created</span>
+                  <span class="cd-task-detail__value">${task.createdAt}</span>
+                </div>
+                ${
+                  task.assignedAt
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Assigned</span>
+                    <span class="cd-task-detail__value">${task.assignedAt}</span>
+                  </div>
+                `
+                    : ""
+                }
+
+                <!-- Review info -->
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Reviewer</span>
+                  <span class="cd-task-detail__value">${task.reviewedBy}</span>
+                </div>
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Round</span>
+                  <span class="cd-task-detail__value">${task.roundCount} / ${task.maxRounds}</span>
+                </div>
+                ${
+                  task.reviewNote
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Review note</span>
+                    <p class="cd-task-detail__desc">${task.reviewNote}</p>
+                  </div>
+                `
+                    : ""
+                }
+
+                <!-- Project + Tokens -->
+                <div class="cd-task-detail__field">
+                  <span class="cd-task-detail__label">Project</span>
+                  <span class="cd-task-detail__value">${task.project}</span>
+                </div>
+                ${
+                  task.tokensUsed
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Tokens used</span>
+                    <span class="cd-task-detail__value" style="color:#a78bfa">${fmtTokens(task.tokensUsed)}</span>
+                  </div>
+                `
+                    : ""
+                }
+
+                <!-- Tags -->
+                ${
+                  task.tags.length
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Tags</span>
+                    <div class="cd-kb-task__tags">
+                      ${task.tags.map((tag) => html`<span class="cd-kb-tag">${tag}</span>`)}
+                    </div>
+                  </div>
+                `
+                    : ""
+                }
+              </div>
+
+              <!-- Actions -->
+              <div class="cd-task-detail__actions">
+                ${
+                  task.status === "review"
+                    ? html`
+                  <button class="cd-btn cd-btn--sm cd-btn--primary" @click=${() => {
+                    if (_onUpdateTask) {
+                      _onUpdateTask(task.id, { status: "done", reviewNote: "Approved" });
+                    }
+                    _detailTaskId = null;
+                  }}>Approve</button>
+                  <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
+                    if (_onUpdateTask) {
+                      _onUpdateTask(task.id, {
+                        status: "in_progress",
+                        roundCount: task.roundCount + 1,
+                      });
+                    }
+                    _detailTaskId = null;
+                  }}>Return to WIP</button>
+                `
+                    : ""
+                }
+                <button class="cd-btn cd-btn--sm cd-btn--ghost" style="margin-left:auto;color:var(--destructive)" @click=${() => {
+                  if (_onDeleteTask) {
+                    _onDeleteTask(task.id);
+                  }
+                  _detailTaskId = null;
+                }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        `;
+      })()}
     </div>
   `;
 }

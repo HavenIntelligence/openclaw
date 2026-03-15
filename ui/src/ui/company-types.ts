@@ -91,6 +91,12 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   assignee?: string;
+  assignedBy?: string;
+  assignedAt?: number;
+  reviewedBy?: string;
+  reviewNote?: string;
+  roundCount?: number;
+  maxRounds?: number;
   project?: string;
   tags?: string[];
   dueAt?: number;
@@ -109,6 +115,8 @@ export interface TeamConfig {
   strategy: SupervisionStrategy;
   color?: string;
   description?: string;
+  goal?: string;
+  leaderId?: string;
 }
 
 export interface CompanyProfile {

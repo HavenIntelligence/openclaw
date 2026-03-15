@@ -1,4 +1,5 @@
 import { html, svg } from "lit";
+import { getAvatarUrlForAgent } from "../company-avatars.ts";
 import type { ClawDockAgent } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
@@ -432,7 +433,6 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
   const isAddTarget = n.id === _addTargetId;
   const isDeletable = _deleteMode && n.id !== _activeOrgTree.id;
   const statusC = statusColor(n.status);
-  const initial = n.name.charAt(0).toUpperCase();
   const modelShort = truncate(shortModel(n.model), 14);
   const reportCount = (n.children as LayoutNode[] | undefined)?.length ?? 0;
   const hasTools = (n.toolCount ?? 0) > 0;
@@ -442,6 +442,15 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
   // Build chip list
   type Chip = { text: string; color: string; bg: string };
   const chips: Chip[] = [];
+
+  // Team badge
+  if (n.team) {
+    chips.push({
+      text: n.team,
+      color: n.color,
+      bg: `${n.color}18`,
+    });
+  }
 
   chips.push({
     text: modelShort,
@@ -530,17 +539,15 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
       <!-- Top accent strip -->
       <rect x="2" y="0" width="${NODE_W - 4}" height="4" rx="2" fill="${n.color}" opacity="0.7" />
 
-      <!-- Avatar circle background -->
+      <!-- Avatar circle (image with fallback initial) -->
       <circle cx="28" cy="42" r="17"
         fill="${n.color}20"
         stroke="${n.color}"
         stroke-width="1.5"
       />
-      <!-- Avatar initial -->
-      <text x="28" y="42"
-        text-anchor="middle" dominant-baseline="central"
-        font-size="14" font-weight="700" fill="${n.color}" font-family="monospace"
-      >${initial}</text>
+      <g clip-path="url(#cd-oc-avatar-clip)">
+        <image href="${getAvatarUrlForAgent(n.id)}" x="11" y="25" width="34" height="34" preserveAspectRatio="xMidYMid slice" />
+      </g>
 
       <!-- Status dot -->
       <circle cx="39" cy="30" r="5" fill="${statusC}" />
@@ -736,6 +743,9 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
               <pattern id="cd-dot-grid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
                 <circle cx="1" cy="1" r="1" fill="rgba(148,163,184,0.10)" />
               </pattern>
+              <clipPath id="cd-oc-avatar-clip">
+                <circle cx="28" cy="42" r="17" />
+              </clipPath>
               <!-- Arrow marker -->
               <marker id="cd-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L6,3 z" fill="var(--border)" opacity="0.5" />
@@ -970,7 +980,7 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
           ? html`
         <div class="cd-oc-detail-float" style="--accent-c:${selected.color}">
           <div class="cd-oc-detail-float__header">
-            <span class="cd-oc-detail__emoji">${selected.emoji}</span>
+            <img class="cd-oc-detail__avatar" src="${getAvatarUrlForAgent(selected.id)}" alt="" width="36" height="36" />
             <div style="flex:1;min-width:0">
               <div class="cd-oc-detail__name">${selected.name}</div>
               <div class="cd-oc-detail__role" style="color:${selected.color}">${selected.role}</div>

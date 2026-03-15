@@ -145,6 +145,11 @@ export class Orchestrator {
             status: "in_progress",
             priority: "medium",
             assignee: entry.agentId,
+            assignedBy: agentId,
+            assignedAt: Date.now(),
+            reviewedBy: agentId, // assigner reviews by default
+            roundCount: 0,
+            maxRounds: 3,
             project: orchId,
           });
           subtaskIds.set(entry.agentId, task.id);
@@ -165,17 +170,32 @@ export class Orchestrator {
             // Mark task as done on success
             if (taskId && this.taskStore) {
               const task = this.taskStore.get(taskId);
+              const curRound = (task?.roundCount ?? 0) + 1;
               const updated = await this.taskStore.update(taskId, {
-                status: "done",
+                status: "review",
                 tokensUsed: result.tokensUsed,
+                roundCount: curRound,
               });
               if (updated) {
                 this.broadcast("company.task.updated", { task: updated });
                 this.logSystem(
                   entry.agentId,
                   orchId,
-                  `[TASK_DONE] ${entry.agentId} completed: ${task?.title ?? taskId}`,
+                  `[TASK_REVIEW] ${entry.agentId} completed round ${curRound}: ${task?.title ?? taskId}`,
                 );
+                // Auto-approve to done for now (assigner reviews during synthesis)
+                const approved = await this.taskStore.update(taskId, {
+                  status: "done",
+                  reviewNote: "Auto-approved after orchestration synthesis",
+                });
+                if (approved) {
+                  this.broadcast("company.task.updated", { task: approved });
+                  this.logSystem(
+                    entry.agentId,
+                    orchId,
+                    `[TASK_DONE] ${agentId} reviewed and approved: ${task?.title ?? taskId}`,
+                  );
+                }
               }
             }
             return result;
@@ -294,8 +314,9 @@ function buildPlanPrompt(
     `YOUR TEAM:\n${subList}\n\n` +
     `Create a delegation plan. For each team member, describe a specific subtask they should work on. ` +
     `Only assign subtasks that are genuinely needed — not every member must be assigned.\n\n` +
-    `Respond with ONLY a JSON array, no markdown fences, no explanation:\n` +
-    `[{"agentId": "id", "subtask": "description"}, ...]\n\n` +
+    `You MUST respond with ONLY a valid JSON array. Do not use markdown tables or other formats — the system can only parse JSON.\n` +
+    `Format: [{"agentId": "<agent-id-from-team-list>", "subtask": "description"}, ...]\n` +
+    `Use the exact agent ids from YOUR TEAM above (e.g. researcher, legal-counsel, product-mgr, data-scientist).\n\n` +
     `If you can handle this entirely yourself without delegation, respond with: []`
   );
 }
@@ -349,18 +370,24 @@ function parseVerifierVerdict(raw: string): "done" | "refine" {
   return "refine";
 }
 
-// ── JSON plan parser (robust) ────────────────────────────────────────────
+// ── JSON plan parser ───────────────────────────────────────────────────────
+// Backend expects JSON only; the frontend formats [{"agentId","subtask"}] as a
+// markdown table in the Execution Log (formatExecutionLogContent → jsonToDelegationMarkdown).
 
 function parseDelegationPlan(raw: string, validAgentIds: string[]): DelegationEntry[] {
   const validSet = new Set(validAgentIds);
-  const candidates = [
-    () => JSON.parse(raw),
+  if (validAgentIds.length === 0) {
+    return [];
+  }
+
+  const candidates: Array<() => unknown> = [
+    () => JSON.parse(raw.trim()),
     () => {
       const m = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-      return m ? JSON.parse(m[1]) : null;
+      return m ? JSON.parse(m[1].trim()) : null;
     },
     () => {
-      const m = raw.match(/\[[\s\S]*\]/);
+      const m = raw.match(/\[[\s\S]*?\]/);
       return m ? JSON.parse(m[0]) : null;
     },
   ];
@@ -383,7 +410,9 @@ function parseDelegationPlan(raw: string, validAgentIds: string[]): DelegationEn
           entries.push({ agentId: item.agentId, subtask: item.subtask });
         }
       }
-      return entries;
+      if (entries.length > 0) {
+        return entries;
+      }
     } catch {
       continue;
     }

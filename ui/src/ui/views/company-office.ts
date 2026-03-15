@@ -1,5 +1,6 @@
 import { html } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import { getAvatarUrlForAgent } from "../company-avatars.ts";
 import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
 import { formatExecutionLogContent, toSanitizedMarkdownHtml } from "../markdown.ts";
 
@@ -53,6 +54,8 @@ type LogEntry = {
   /** Numeric timestamp for stable sort (newest last). */
   tsNum?: number;
   agent: string;
+  /** Display name (e.g. "orchestrator" for id "ceo"). */
+  agentDisplayName?: string;
   agentEmoji: string;
   type: "tool_call" | "output" | "thinking" | "human" | "error" | "system";
   content: string;
@@ -145,13 +148,15 @@ function computeLayout(agents: ClawDockAgent[]): {
   const totalTeamCols = Math.max(nonDirTeams.length + (dirTeamAgents.length > 0 ? 1 : 0), 1);
   const totalW = totalTeamCols * ZONE_W;
 
+  // Offset director down by 1 row so thought bubbles have room above
+  const dirTopY = 1;
+
   if (director) {
-    // Director at top center
     const dirX = Math.floor(totalW / 2);
-    desks.set(director.id, { x: dirX, y: 0 });
+    desks.set(director.id, { x: dirX, y: dirTopY });
     zones.push({
       x: Math.max(0, dirX - 2),
-      y: 0,
+      y: dirTopY,
       w: Math.min(5, totalW),
       h: 2,
       label: directorTeam || "Executive",
@@ -160,8 +165,8 @@ function computeLayout(agents: ClawDockAgent[]): {
     });
   }
 
-  // Team columns below
-  const teamStartY = director ? 2 : 0;
+  // Team columns below director zone
+  const teamStartY = director ? dirTopY + 2 : 0;
   let colIdx = 0;
 
   // If director's team has other members, show them as a column too
@@ -208,7 +213,7 @@ function computeLayout(agents: ClawDockAgent[]): {
     zones,
     desks,
     cols: Math.max(totalW, 6),
-    rows: Math.max(maxZoneBottom + 1, 4),
+    rows: Math.max(maxZoneBottom + 2, 6),
   };
 }
 
@@ -710,8 +715,13 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
     }
   }
 
+  // Display name: show "orchestrator" for agent id "ceo" so UI is consistent.
+  const agentDisplayName = (id: string, name?: string) =>
+    id === "ceo" ? "orchestrator" : name || id;
+
   // Build the display log from real backend logs + any local human-input entries in _execLog.
-  // We do this every render so the view is always fresh and never stale.
+  // Logs are per-agent on the backend; we merge all agents' logs and sort by time so every
+  // agent's returns (orchestrator and subordinates) appear in one chronological stream.
   const typeMap: Record<string, LogEntry["type"]> = {
     message_in: "system",
     message_out: "output",
@@ -726,6 +736,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
           ts: new Date(e.ts).toTimeString().slice(0, 8),
           tsNum: e.ts,
           agent: e.agentId,
+          agentDisplayName: agentDisplayName(e.agentId, agent?.name),
           agentEmoji: agent?.emoji ?? "🤖",
           type: e.type in typeMap ? typeMap[e.type] : (e.type as LogEntry["type"]),
           content: e.content,
@@ -938,7 +949,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                             : "#ef4444"
                     }"></span>
                     <span class="cd-office-agent__avatar-shell">
-                      <span class="cd-office-agent__avatar">${agent.emoji}</span>
+                      <img class="cd-office-agent__avatar-img" src="${getAvatarUrlForAgent(agent.id)}" alt="" width="40" height="40" />
                     </span>
                     <span class="cd-office-agent__name-pill">${agent.name}</span>
                     <span class="cd-office-agent__role-text">${agent.team}</span>
@@ -1140,7 +1151,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   @click=${() => {
                     _logAgentFilter = _logAgentFilter === a.id ? "all" : a.id;
                   }}>
-                  ${a.emoji} ${a.name}
+                  ${a.emoji} ${agentDisplayName(a.id, a.name)}
                 </button>
               `,
               )}
@@ -1159,7 +1170,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 <div class="cd-log-entry ${logTypeClass(entry.type)} ${isFinalOutput ? "cd-log-entry--final" : ""}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
-                    <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agent}</span>
+                    <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agentDisplayName ?? entry.agent}</span>
                     ${
                       isFinalOutput
                         ? html`
@@ -1169,6 +1180,16 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     }
                     <span class="cd-log-entry__ts">${entry.ts}</span>
                     ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
+                    <button class="cd-log-entry__copy" title="Copy" @click=${(e: Event) => {
+                      e.stopPropagation();
+                      void navigator.clipboard?.writeText(entry.content).then(() => {
+                        const btn = e.currentTarget as HTMLButtonElement;
+                        btn.textContent = "✓";
+                        setTimeout(() => {
+                          btn.textContent = "📋";
+                        }, 1200);
+                      });
+                    }}>📋</button>
                   </div>
                   <div class="cd-log-entry__content ${entry.type === "output" ? "cd-log-entry__content--md" : ""}">${
                     entry.type === "output" ||

@@ -40,6 +40,14 @@ function selectCompanyDirector(
   return (
     agents.find((a) => a.role?.toLowerCase().includes("orchestrator")) ??
     agents.find((a) => a.id === "orchestrator") ??
+    // CEO is the top-level director when no explicit orchestrator exists
+    agents.find((a) => a.role?.toLowerCase() === "ceo") ??
+    agents.find((a) => a.id === "ceo") ??
+    // Fall back to the agent with the most direct reports (likely the leader)
+    agents.reduce<import("../../company/types.js").ClawDockAgent | undefined>((best, a) => {
+      const reps = a.directReports?.length ?? 0;
+      return reps > (best?.directReports?.length ?? 0) ? a : best;
+    }, undefined) ??
     agents[0]
   );
 }

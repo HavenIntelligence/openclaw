@@ -66,6 +66,19 @@ export class AgentRegistry {
       result.push(this.metaOnlyAgent(id, meta));
     }
 
+    // 3. Compute directReports dynamically from reportTo relationships
+    const reportsMap = new Map<string, string[]>();
+    for (const agent of result) {
+      if (agent.reportTo) {
+        const arr = reportsMap.get(agent.reportTo) ?? [];
+        arr.push(agent.id);
+        reportsMap.set(agent.reportTo, arr);
+      }
+    }
+    for (const agent of result) {
+      agent.directReports = reportsMap.get(agent.id) ?? [];
+    }
+
     return result;
   }
 
