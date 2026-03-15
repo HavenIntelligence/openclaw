@@ -452,6 +452,7 @@ export const companyHandlers: GatewayRequestHandlers = {
       agents.find((a) => a.id === "orchestrator") ??
       agents[0];
     if (director) {
+      const orchestrationRunId = `msg_${msg.id}`;
       // Immediately broadcast the director as active so the frontend animation reacts.
       svc.broadcast("company.agent.status", {
         agentId: director.id,
@@ -461,13 +462,13 @@ export const companyHandlers: GatewayRequestHandlers = {
       // Log the dispatch so the frontend execution log shows the handoff.
       const dispatchEntry = svc.logStore.append({
         agentId: director.id,
-        runId: `msg_${msg.id}`,
+        runId: orchestrationRunId,
         type: "system",
         content: `[Human → Orchestrator] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
       });
       svc.broadcast("company.agent.log", {
         agentId: director.id,
-        runId: `msg_${msg.id}`,
+        runId: orchestrationRunId,
         entry: dispatchEntry,
       });
       // Check if director has subordinates — if so, orchestrate automatically
@@ -491,6 +492,20 @@ export const companyHandlers: GatewayRequestHandlers = {
         svc.orchestrator
           .execute(director.id, content, { maxRounds })
           .then(async (result) => {
+            const finalContent = result.content.trim() || "(empty response)";
+            const resultEntry = svc.logStore.append({
+              agentId: director.id,
+              runId: orchestrationRunId,
+              type: "output",
+              content: finalContent,
+              tokensUsed: result.tokensUsed,
+            });
+            svc.broadcast("company.agent.log", {
+              agentId: director.id,
+              runId: orchestrationRunId,
+              entry: resultEntry,
+            });
+            svc.messageBus.send(director.id, "human", finalContent, "result");
             // Mark task as done upon successful completion
             const updated = await svc.taskStore.update(orchTask.id, {
               status: "done",
@@ -501,17 +516,19 @@ export const companyHandlers: GatewayRequestHandlers = {
             }
           })
           .catch(async (err) => {
+            const errorMessage = `Orchestration failed: ${String(err instanceof Error ? err.message : err)}`;
             const errEntry = svc.logStore.append({
               agentId: director.id,
-              runId: `msg_${msg.id}`,
+              runId: orchestrationRunId,
               type: "error",
-              content: `Orchestration failed: ${String(err instanceof Error ? err.message : err)}`,
+              content: errorMessage,
             });
             svc.broadcast("company.agent.log", {
               agentId: director.id,
-              runId: `msg_${msg.id}`,
+              runId: orchestrationRunId,
               entry: errEntry,
             });
+            svc.messageBus.send(director.id, "human", errorMessage, "notify");
             // Mark task as failed
             const updated = await svc.taskStore.update(orchTask.id, { status: "backlog" });
             if (updated) {

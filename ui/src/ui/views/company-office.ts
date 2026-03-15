@@ -95,6 +95,7 @@ let _isPaused = false;
 let _rightTab: "log" | "output" = "log";
 let _logAgentFilter: string = "all";
 let _expandedOutputIds: Set<string> = new Set();
+let _lastVisibleLogId = "";
 
 // ── Callbacks from props (module-level to be accessible in renderFn) ────────
 let _onSendMessage: ((content: string) => void) | undefined;
@@ -128,6 +129,59 @@ function _scrollLogToBottom() {
       el.scrollTop = el.scrollHeight;
     }
   });
+}
+
+function stripAnsi(text: string): string {
+  /* eslint-disable no-control-regex -- stripping ANSI escape sequences requires matching ESC */
+  return text.replace(/\x1b\]8;;.*?\x1b\\|\x1b\]8;;\x1b\\/g, "").replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function stripLogContent(content: string): string {
+  return stripAnsi(content).replaceAll("\r", "");
+}
+
+function normalizeLogContent(content: string): string {
+  return stripLogContent(content).trim();
+}
+
+function isNoiseLogEntry(entry: LogEntry): boolean {
+  const content = normalizeLogContent(entry.content);
+  if (!content) {
+    return true;
+  }
+  if (entry.type === "system" && content.startsWith("[Human → Orchestrator]")) {
+    return true;
+  }
+  return (
+    /^\[(?:tools|warn|info|plugins|model-selection|model-fallback\/decision)\]/.test(content) ||
+    content.startsWith("[agent/embedded] embedded run agent end:") ||
+    content.startsWith("[agent/embedded] embedded run failover decision:")
+  );
+}
+
+function dedupeDisplayLog(entries: LogEntry[]): LogEntry[] {
+  const deduped: LogEntry[] = [];
+  for (const entry of entries) {
+    const displayContent = stripLogContent(entry.content);
+    const normalized = displayContent.trim();
+    if (!normalized) {
+      continue;
+    }
+    const nextEntry = { ...entry, content: displayContent };
+    const prev = deduped.at(-1);
+    if (
+      prev &&
+      prev.agent === nextEntry.agent &&
+      prev.type === nextEntry.type &&
+      prev.content.trim() === nextEntry.content.trim() &&
+      Math.abs((nextEntry.tsNum ?? 0) - (prev.tsNum ?? 0)) <= 5_000
+    ) {
+      deduped[deduped.length - 1] = nextEntry;
+      continue;
+    }
+    deduped.push(nextEntry);
+  }
+  return deduped;
 }
 
 // ── Animation state ────────────────────────────────────────────────────────
@@ -571,22 +625,20 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   const combined = [...backendEntries, ...humanEntries].toSorted(
     (a, b) => (a.tsNum ?? 0) - (b.tsNum ?? 0),
   );
-  const displayLog = combined.slice(-80);
+  const displayLog = dedupeDisplayLog(combined).slice(-80);
 
   const W = COLS * TILE;
   const H = ROWS * TILE;
 
   // Filter out noise: [tools]/[warn]/[info], and backend duplicate of human message
-  const filteredLog = displayLog.filter((e) => {
-    if (e.type === "system" && /^\[tools\]|\[warn\]|\[info\]/.test(e.content)) {
-      return false;
-    }
-    // Backend sends "[Human → Orchestrator] …"; we already show the human entry, so hide this duplicate
-    if (e.type === "system" && e.content.startsWith("[Human → Orchestrator]")) {
-      return false;
-    }
-    return true;
-  });
+  const filteredLog = displayLog.filter((e) => !isNoiseLogEntry(e));
+  const latestVisibleLogId = filteredLog.at(-1)?.id ?? "";
+  if (latestVisibleLogId && latestVisibleLogId !== _lastVisibleLogId) {
+    _lastVisibleLogId = latestVisibleLogId;
+    _scrollLogToBottom();
+  } else if (!latestVisibleLogId) {
+    _lastVisibleLogId = "";
+  }
 
   return html`
     <div class="cd-page cd-page--office">

@@ -290,6 +290,8 @@ const _AGENTS: AgentRecord[] = [
 
 let _selectedAgentId: string | null = null;
 let _agentDetailTab: "trace" | "messages" | "privileges" = "trace";
+let _expandedFleetAgentId: string | null = null;
+let _requestUpdate: (() => void) | undefined;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function statusColor(s: AgentLifecycleState) {
@@ -327,6 +329,41 @@ function stateColor(state: string) {
     return "var(--muted-foreground)";
   }
   return "var(--text-strong)";
+}
+
+function formatSince(ts?: number): string {
+  if (!ts) {
+    return "—";
+  }
+  const secs = Math.floor((Date.now() - ts) / 1000);
+  if (secs < 60) {
+    return `${secs}s ago`;
+  }
+  if (secs < 3600) {
+    return `${Math.floor(secs / 60)}m ago`;
+  }
+  if (secs < 86400) {
+    return `${Math.floor(secs / 3600)}h ago`;
+  }
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+function formatStartedAt(ts?: number): string {
+  return ts ? new Date(ts).toLocaleString() : "—";
+}
+
+function formatCompactTokens(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(1)}K`;
+  }
+  return `${n}`;
+}
+
+function triggerOverviewUpdate() {
+  _requestUpdate?.();
 }
 
 function startEdit(co: CompanyProfile) {
@@ -601,6 +638,97 @@ function renderFleet() {
     return "var(--muted-foreground)";
   };
 
+  const renderFleetDetail = (agent: ClawDockAgent) => {
+    const manager = agent.reportTo
+      ? (agents.find((candidate) => candidate.id === agent.reportTo)?.name ?? agent.reportTo)
+      : "—";
+    const directReports =
+      agent.directReports.length > 0
+        ? agent.directReports
+            .map((id) => agents.find((candidate) => candidate.id === id)?.name ?? id)
+            .join(", ")
+        : "None";
+    return html`
+      <div class="cd-fleet-row-detail">
+        <div class="cd-agent-detail" style="padding: 14px 18px">
+          <div class="cd-agent-detail__header" style="border-left:3px solid ${agent.color}">
+            <div class="cd-agent-detail__avatar">${agent.emoji}</div>
+            <div class="cd-agent-detail__meta">
+              <div class="cd-agent-detail__name">${agent.name}</div>
+              <div class="cd-agent-detail__role">${agent.role} · ${agent.team}</div>
+              <div class="cd-agent-detail__badges">
+                <span
+                  class="cd-ad-badge"
+                  style="background:${agentStatusColor(agent.status)}22;color:${agentStatusColor(agent.status)};border-color:${agentStatusColor(agent.status)}44"
+                >
+                  ${agent.status}
+                </span>
+                <span class="cd-ad-badge cd-ad-badge--model">${agent.model}</span>
+                <span class="cd-ad-badge cd-ad-badge--model">${agent.runtime}</span>
+              </div>
+            </div>
+            <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${(e: Event) => {
+              e.stopPropagation();
+              _expandedFleetAgentId = null;
+              triggerOverviewUpdate();
+            }}>✕</button>
+          </div>
+
+          <div class="cd-agent-detail__stats">
+            <div class="cd-ad-stat">
+              <div class="cd-ad-stat__val">${agent.tasksCompleted}</div>
+              <div class="cd-ad-stat__label">Tasks done</div>
+            </div>
+            <div class="cd-ad-stat">
+              <div class="cd-ad-stat__val">${formatCompactTokens(agent.tokensUsed)}</div>
+              <div class="cd-ad-stat__label">Tokens used</div>
+            </div>
+            <div class="cd-ad-stat">
+              <div class="cd-ad-stat__val">${agent.toolCount}</div>
+              <div class="cd-ad-stat__label">Tools</div>
+            </div>
+            <div class="cd-ad-stat">
+              <div class="cd-ad-stat__val">${agent.cronCount}</div>
+              <div class="cd-ad-stat__label">Crons</div>
+            </div>
+          </div>
+
+          <div class="cd-agent-detail__workspace">
+            <span class="cd-ad-ws-label">🧭 Current task</span>
+            <span class="cd-ad-ws-val">${agent.currentTask || "Idle — no active task"}</span>
+          </div>
+
+          <div class="cd-agent-detail__workspace">
+            <span class="cd-ad-ws-label">🕒 Last active</span>
+            <span class="cd-ad-ws-val">${formatSince(agent.lastActiveAt)}</span>
+            <span class="cd-ad-ws-label">Started</span>
+            <span class="cd-ad-ws-val">${formatStartedAt(agent.startedAt)}</span>
+            <span class="cd-ad-ws-label">PID</span>
+            <span class="cd-ad-ws-val">${agent.pid ?? "—"}</span>
+          </div>
+
+          <div class="cd-agent-detail__workspace">
+            <span class="cd-ad-ws-label">👤 Reports to</span>
+            <span class="cd-ad-ws-val">${manager}</span>
+            <span class="cd-ad-ws-label">👥 Direct reports</span>
+            <span class="cd-ad-ws-val">${directReports}</span>
+          </div>
+
+          ${
+            agent.description
+              ? html`
+                  <div class="cd-agent-detail__workspace">
+                    <span class="cd-ad-ws-label">📝 Description</span>
+                    <span class="cd-ad-ws-val">${agent.description}</span>
+                  </div>
+                `
+              : ""
+          }
+        </div>
+      </div>
+    `;
+  };
+
   return html`
     <div class="cd-fleet-view">
       <div class="cd-fleet-header">
@@ -615,12 +743,30 @@ function renderFleet() {
         <div class="cd-fleet-thead">
           <span>Agent</span><span>Role / Team</span><span>Model</span><span>Status</span><span>Tasks Done</span>
         </div>
-        ${agents.map(
-          (a) => html`
-          <div class="cd-fleet-row">
+        ${agents.map((a) => {
+          const isExpanded = _expandedFleetAgentId === a.id;
+          return html`
+          <div
+            class="cd-fleet-row ${isExpanded ? "cd-fleet-row--selected" : ""}"
+            role="button"
+            tabindex="0"
+            aria-expanded=${isExpanded ? "true" : "false"}
+            @click=${() => {
+              _expandedFleetAgentId = isExpanded ? null : a.id;
+              triggerOverviewUpdate();
+            }}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                _expandedFleetAgentId = isExpanded ? null : a.id;
+                triggerOverviewUpdate();
+              }
+            }}
+          >
             <span class="cd-fleet-agent">
               <span class="cd-fleet-dot" style="background:${agentStatusColor(a.status)}"></span>
               ${a.emoji} <strong>${a.name}</strong>
+              <span class="cd-muted" style="margin-left:auto">${isExpanded ? "▾" : "▸"}</span>
             </span>
             <span class="cd-muted" style="font-size:12px">${a.role}<br /><span style="font-size:10px;opacity:.6">${a.team}</span></span>
             <span class="cd-muted cd-mono" style="font-size:11px">${a.model}</span>
@@ -631,8 +777,9 @@ function renderFleet() {
             >
             <span>${a.tasksCompleted}</span>
           </div>
-        `,
-        )}
+          ${isExpanded ? renderFleetDetail(a) : ""}
+        `;
+        })}
       </div>
     </div>
   `;
@@ -1076,6 +1223,7 @@ function renderProfile() {
 
 // ── Main render ────────────────────────────────────────────────────────────
 export type CompanyOverviewProps = {
+  requestUpdate?: () => void;
   profile?: RealProfile | null;
   agents?: ClawDockAgent[];
   tasks?: RealTask[];
@@ -1092,6 +1240,7 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _realMessages = props.messages ?? [];
   _onSaveProfile = props.onSaveProfile;
   _onSendMessage = props.onSendMessage;
+  _requestUpdate = props.requestUpdate;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🦀", label: "Company" },
     { id: "fleet", icon: "🤖", label: "Agent Status" },
@@ -1111,6 +1260,7 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
           <button class="cd-subnav__btn ${_subTab === t.id ? "cd-subnav__btn--active" : ""}"
             @click=${() => {
               _subTab = t.id;
+              triggerOverviewUpdate();
             }}>
             ${t.icon} ${t.label}
           </button>
