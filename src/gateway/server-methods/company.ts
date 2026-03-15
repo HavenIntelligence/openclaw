@@ -64,18 +64,32 @@ export const companyHandlers: GatewayRequestHandlers = {
       return;
     }
     const svc = getCompanyService();
-    const meta = await svc.registry.upsertMeta(id, {
-      role: typeof params.role === "string" ? params.role : undefined,
-      team: typeof params.team === "string" ? params.team : undefined,
-      emoji: typeof params.emoji === "string" ? params.emoji : undefined,
-      color: typeof params.color === "string" ? params.color : undefined,
-      description: typeof params.description === "string" ? params.description : undefined,
-      runtime: typeof params.runtime === "string" ? (params.runtime as never) : undefined,
-      reportTo: typeof params.reportTo === "string" ? params.reportTo : undefined,
-      directReports: Array.isArray(params.directReports)
-        ? (params.directReports as string[])
-        : undefined,
-    });
+    const metaPartial: Record<string, unknown> = {};
+    if (typeof params.role === "string") {
+      metaPartial.role = params.role;
+    }
+    if (typeof params.team === "string") {
+      metaPartial.team = params.team;
+    }
+    if (typeof params.emoji === "string") {
+      metaPartial.emoji = params.emoji;
+    }
+    if (typeof params.color === "string") {
+      metaPartial.color = params.color;
+    }
+    if (typeof params.description === "string") {
+      metaPartial.description = params.description;
+    }
+    if (typeof params.runtime === "string") {
+      metaPartial.runtime = params.runtime;
+    }
+    if (typeof params.reportTo === "string") {
+      metaPartial.reportTo = params.reportTo;
+    }
+    if (Array.isArray(params.directReports)) {
+      metaPartial.directReports = params.directReports;
+    }
+    const meta = await svc.registry.upsertMeta(id, metaPartial);
     const agent = svc.registry.getAgent(id);
     respond(true, agent ?? meta, undefined);
   },
@@ -218,14 +232,26 @@ export const companyHandlers: GatewayRequestHandlers = {
 
   "company.profile.set": async ({ params, respond }) => {
     const svc = getCompanyService();
-    const updated = await svc.profileStore.set({
-      name: typeof params.name === "string" ? params.name : undefined,
-      mission: typeof params.mission === "string" ? params.mission : undefined,
-      vision: typeof params.vision === "string" ? params.vision : undefined,
-      values: Array.isArray(params.values) ? (params.values as string[]) : undefined,
-      businessModel: typeof params.businessModel === "string" ? params.businessModel : undefined,
-      focusAreas: Array.isArray(params.focusAreas) ? (params.focusAreas as string[]) : undefined,
-    });
+    const profilePartial: Record<string, unknown> = {};
+    if (typeof params.name === "string") {
+      profilePartial.name = params.name;
+    }
+    if (typeof params.mission === "string") {
+      profilePartial.mission = params.mission;
+    }
+    if (typeof params.vision === "string") {
+      profilePartial.vision = params.vision;
+    }
+    if (Array.isArray(params.values)) {
+      profilePartial.values = params.values;
+    }
+    if (typeof params.businessModel === "string") {
+      profilePartial.businessModel = params.businessModel;
+    }
+    if (Array.isArray(params.focusAreas)) {
+      profilePartial.focusAreas = params.focusAreas;
+    }
+    const updated = await svc.profileStore.set(profilePartial);
     respond(true, updated, undefined);
   },
 
@@ -315,16 +341,32 @@ export const companyHandlers: GatewayRequestHandlers = {
       return;
     }
     const svc = getCompanyService();
-    const task = await svc.taskStore.update(id, {
-      title: typeof params.title === "string" ? params.title : undefined,
-      description: typeof params.description === "string" ? params.description : undefined,
-      status: params.status as never,
-      priority: params.priority as never,
-      assignee: typeof params.assignee === "string" ? params.assignee : undefined,
-      project: typeof params.project === "string" ? params.project : undefined,
-      tags: Array.isArray(params.tags) ? (params.tags as string[]) : undefined,
-      dueAt: typeof params.dueAt === "number" ? params.dueAt : undefined,
-    });
+    const partial: Record<string, unknown> = {};
+    if (typeof params.title === "string") {
+      partial.title = params.title;
+    }
+    if (typeof params.description === "string") {
+      partial.description = params.description;
+    }
+    if (typeof params.status === "string") {
+      partial.status = params.status;
+    }
+    if (typeof params.priority === "string") {
+      partial.priority = params.priority;
+    }
+    if (typeof params.assignee === "string") {
+      partial.assignee = params.assignee;
+    }
+    if (typeof params.project === "string") {
+      partial.project = params.project;
+    }
+    if (Array.isArray(params.tags)) {
+      partial.tags = params.tags;
+    }
+    if (typeof params.dueAt === "number") {
+      partial.dueAt = params.dueAt;
+    }
+    const task = await svc.taskStore.update(id, partial);
     if (!task) {
       respond(false, undefined, { code: "NOT_FOUND", message: `task "${id}" not found` });
       return;
@@ -381,10 +423,45 @@ export const companyHandlers: GatewayRequestHandlers = {
       agents.find((a) => a.id === "ai-director") ??
       agents[0];
     if (director) {
+      // Immediately broadcast the director as active so the frontend animation reacts.
+      svc.broadcast("company.agent.status", {
+        agentId: director.id,
+        status: "active",
+        updatedAt: Date.now(),
+      });
+      // Log the dispatch so the frontend execution log shows the handoff.
+      const dispatchEntry = svc.logStore.append({
+        agentId: director.id,
+        runId: `msg_${msg.id}`,
+        type: "system",
+        content: `[Human → Director] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
+      });
+      svc.broadcast("company.agent.log", {
+        agentId: director.id,
+        runId: `msg_${msg.id}`,
+        entry: dispatchEntry,
+      });
       try {
         const runId = await svc.processManager.runTask(director.id, content);
         respond(true, { ok: true, runId, msgId: msg.id }, undefined);
       } catch (err) {
+        // If the runner failed to start, mark director idle and surface the error as a log entry.
+        svc.broadcast("company.agent.status", {
+          agentId: director.id,
+          status: "idle",
+          updatedAt: Date.now(),
+        });
+        const errEntry = svc.logStore.append({
+          agentId: director.id,
+          runId: `msg_${msg.id}`,
+          type: "error",
+          content: `Failed to start task: ${String(err instanceof Error ? err.message : err)}`,
+        });
+        svc.broadcast("company.agent.log", {
+          agentId: director.id,
+          runId: `msg_${msg.id}`,
+          entry: errEntry,
+        });
         respond(false, undefined, {
           code: "INTERNAL_ERROR",
           message: String(err instanceof Error ? err.message : err),

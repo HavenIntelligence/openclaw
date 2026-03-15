@@ -99,6 +99,8 @@ export async function loadCompanyAll(state: CompanyState): Promise<void> {
     loadCompanyProfile(state),
     loadCompanyMessages(state),
   ]);
+  // Load logs after agents are fetched (loadCompanyAgents populates state.companyAgents).
+  await loadAllAgentLogs(state);
 }
 
 // ── Agent actions ─────────────────────────────────────────────────────────
@@ -196,7 +198,20 @@ export async function loadAgentLogs(
     id: agentId,
     limit,
   });
-  state.companyAgentLogs.set(agentId, logs);
+  // Use immutable update to trigger @state() reactivity.
+  const newMap = new Map(state.companyAgentLogs);
+  newMap.set(agentId, logs);
+  state.companyAgentLogs = newMap;
+}
+
+/** Load logs for all known agents. Called on connect and after agent list changes. */
+export async function loadAllAgentLogs(state: CompanyState, limit = 100): Promise<void> {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  for (const agent of state.companyAgents) {
+    await loadAgentLogs(state, agent.id, limit);
+  }
 }
 
 // ── Task actions ──────────────────────────────────────────────────────────

@@ -344,6 +344,26 @@ let _logAgentFilter: string = "all"; // "all" or agent id
 let _onSendMessage: ((content: string) => void) | undefined;
 let _onStopAgent: ((agentId: string) => void) | undefined;
 
+/** Sends a message to the company: records an optimistic log entry and sets director to thinking. */
+function _sendToCompany(msg: string) {
+  // Add optimistic entry to _execLog so it shows up immediately in the log panel.
+  addLog("human", "👤", "human", `[You → AI Director] ${msg}`);
+  // Mark the director agent as thinking in the animation.
+  const directorAgent = _agents.find((a) => a.id === "ai-director" || a.team === "executive");
+  if (directorAgent) {
+    directorAgent.activity = "Reading your message…";
+    directorAgent.status = "thinking";
+    directorAgent.thoughtBubble = msg.slice(0, 48) + (msg.length > 48 ? "…" : "");
+    directorAgent.thoughtTimer = 240;
+  }
+  // Fire the real backend RPC.
+  if (_onSendMessage) {
+    _onSendMessage(msg);
+  }
+  // Switch the right panel to Log tab so the user sees the entry immediately.
+  _rightTab = "log";
+}
+
 // ── Animation state ────────────────────────────────────────────────────────
 // Starts empty — populated from real agent data via props. Falls back to INITIAL_AGENTS only in
 // dev/demo mode when no backend agents are present.
@@ -432,42 +452,18 @@ function simulationStep() {
   }
   _canvasBubbles = _canvasBubbles.filter((b) => b.timer > 0);
 
-  if (_tick % 200 === 0) {
+  // Only spawn visual message-packet animations — no fake log entries.
+  if (_tick % 200 === 0 && _agents.length > 0) {
     const script = MESSAGE_SCRIPTS[_scriptIdx % MESSAGE_SCRIPTS.length];
-    spawnMessage(script.from, script.to, script.emoji, script.label);
-    addLog(
-      script.from,
-      _agents.find((a) => a.id === script.from)?.emoji ?? "🤖",
-      "tool_call",
-      `→ ${script.to}: ${script.label}`,
-      Math.floor(Math.random() * 3000 + 500),
-    );
-    _scriptIdx++;
-    const sender = _agents.find((a) => a.id === script.from);
-    if (sender && sender.status !== "crashed") {
-      sender.status = "messaging";
-      sender.activity = `Sending: ${script.label}`;
-    }
-  }
-
-  if (_tick % 320 === 0) {
-    const activeAgents = _agents.filter((a) => a.status !== "crashed");
-    if (activeAgents.length > 0) {
-      const a = activeAgents[Math.floor(Math.random() * activeAgents.length)];
-      const outputs = [
-        "Completed analysis. 14 key insights identified.",
-        "Generated 1,200 word draft. Ready for review.",
-        "All tests passing. Coverage at 91%.",
-        "Dependency vulnerability patched and deployed.",
-        "Market research compiled: 8 competitors analyzed.",
-      ];
-      addLog(
-        a.id,
-        a.emoji,
-        "output",
-        outputs[Math.floor(Math.random() * outputs.length)],
-        Math.floor(Math.random() * 8000 + 1000),
-      );
+    const fromAgent = _agents.find((a) => a.id === script.from);
+    const toAgent = _agents.find((a) => a.id === script.to);
+    if (fromAgent && toAgent) {
+      spawnMessage(script.from, script.to, script.emoji, script.label);
+      _scriptIdx++;
+      if (fromAgent.status !== "crashed") {
+        fromAgent.status = "messaging";
+        fromAgent.activity = `→ ${script.to}`;
+      }
     }
   }
 
@@ -681,42 +677,36 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
     _agents = _agents.filter((a) => backendIds.has(a.id));
   }
 
-  // Merge real log entries into the execution log (most recent at top, deduplicated by id).
+  // Build the display log from real backend logs + any local human-input entries in _execLog.
+  // We do this every render so the view is always fresh and never stale.
+  const typeMap: Record<string, LogEntry["type"]> = {
+    message_in: "system",
+    message_out: "output",
+  };
+  const backendEntries: LogEntry[] = [];
   if (props.logs && props.logs.size > 0) {
-    const existingIds = new Set(_execLog.map((e) => e.id));
-    const newEntries: LogEntry[] = [];
     for (const entries of props.logs.values()) {
       for (const e of entries) {
-        if (!existingIds.has(e.id)) {
-          const agent = props.agents?.find((a) => a.id === e.agentId);
-          // Map real log entry types to the office view's narrower type set.
-          const typeMap: Record<string, LogEntry["type"]> = {
-            message_in: "system",
-            message_out: "output",
-          };
-          const entryType: LogEntry["type"] =
-            e.type in typeMap ? typeMap[e.type] : (e.type as LogEntry["type"]);
-          newEntries.push({
-            id: e.id,
-            ts: new Date(e.ts).toTimeString().slice(0, 8),
-            agent: e.agentId,
-            agentEmoji: agent?.emoji ?? "🤖",
-            type: entryType,
-            content: e.content,
-            tokens: e.tokensUsed,
-            duration: e.durationMs,
-          });
-        }
+        const agent = props.agents?.find((a) => a.id === e.agentId);
+        backendEntries.push({
+          id: e.id,
+          ts: new Date(e.ts).toTimeString().slice(0, 8),
+          agent: e.agentId,
+          agentEmoji: agent?.emoji ?? "🤖",
+          type: e.type in typeMap ? typeMap[e.type] : (e.type as LogEntry["type"]),
+          content: e.content,
+          tokens: e.tokensUsed,
+          duration: e.durationMs,
+        });
       }
     }
-    if (newEntries.length > 0) {
-      // Prepend new entries, sorted by ts desc; keep at most 50 entries total.
-      _execLog = [...newEntries.toSorted((a, b) => b.id.localeCompare(a.id)), ..._execLog].slice(
-        0,
-        50,
-      );
-    }
+    backendEntries.sort((a, b) => a.id.localeCompare(b.id));
   }
+  // _execLog holds only optimistic/human-action entries (not duplicated by backend).
+  const backendIds = new Set(backendEntries.map((e) => e.id));
+  const humanEntries = _execLog.filter((e) => !backendIds.has(e.id));
+  // Combined display list (backend real logs + optimistic human entries), newest last.
+  const displayLog = [...backendEntries, ...humanEntries].slice(-80);
 
   const W = COLS * TILE;
   const H = ROWS * TILE;
@@ -1026,10 +1016,10 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             <div class="cd-office-summary-card">
               <span class="cd-office-summary-card__label">Now</span>
               <span class="cd-office-summary-card__title">
-                ${_execLog.length > 0 ? _execLog[_execLog.length - 1].content.slice(0, 60) : "Waiting for agent activity…"}
+                ${displayLog.length > 0 ? displayLog[displayLog.length - 1].content.slice(0, 60) : "Waiting for agent activity…"}
               </span>
               <span class="cd-office-summary-card__detail">
-                ${_execLog.length > 0 ? `${_execLog[_execLog.length - 1].agentEmoji} ${_execLog[_execLog.length - 1].agent} · ${_execLog[_execLog.length - 1].ts}` : "No agents active yet"}
+                ${displayLog.length > 0 ? `${displayLog[displayLog.length - 1].agentEmoji} ${displayLog[displayLog.length - 1].agent} · ${displayLog[displayLog.length - 1].ts}` : "No agents active yet"}
               </span>
             </div>
             <div class="cd-office-summary-card">
@@ -1092,11 +1082,11 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             </div>
             <div class="cd-office-log">
               ${
-                _execLog.length === 0
+                displayLog.length === 0
                   ? html`
                       <div class="cd-office-empty">No logs yet — start an agent to see activity here.</div>
                     `
-                  : [..._execLog]
+                  : [...displayLog]
                       .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
                       .toReversed()
                       .map(
@@ -1124,7 +1114,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             _rightTab === "output"
               ? html`
             <div class="cd-office-outputs">
-              ${_execLog
+              ${displayLog
                 .filter((e) => e.type === "output")
                 .toReversed()
                 .map(
@@ -1145,7 +1135,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
                 )}
               ${
-                _execLog.filter((e) => e.type === "output").length === 0
+                displayLog.filter((e) => e.type === "output").length === 0
                   ? html`
                       <div class="cd-office-empty">No outputs yet — agents are working…</div>
                     `
@@ -1201,36 +1191,24 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     if (!msg) {
                       return;
                     }
-                    const directorAgent = _agents.find(
-                      (a) => a.id === "ai-director" || a.team === "executive",
-                    );
-                    if (directorAgent) {
-                      directorAgent.activity = "Processing your message";
-                      directorAgent.status = "thinking";
-                    }
-                    if (_onSendMessage) {
-                      _onSendMessage(msg);
-                    }
+                    _sendToCompany(msg);
                     _humanInput = "";
+                    (e.target as HTMLTextAreaElement).value = "";
                   }
                 }}></textarea>
               <div class="cd-human-actions">
-                <button class="cd-btn cd-btn--primary" @click=${() => {
-                  const msg = _humanInput.trim();
+                <button class="cd-btn cd-btn--primary" @click=${(e: Event) => {
+                  const textarea = (e.target as HTMLElement).closest(".cd-human-actions")
+                    ?.previousElementSibling as HTMLTextAreaElement | null;
+                  const msg = textarea?.value.trim() ?? _humanInput.trim();
                   if (!msg) {
                     return;
                   }
-                  const directorAgent = _agents.find(
-                    (a) => a.id === "ai-director" || a.team === "executive",
-                  );
-                  if (directorAgent) {
-                    directorAgent.activity = "Processing your message";
-                    directorAgent.status = "thinking";
-                  }
-                  if (_onSendMessage) {
-                    _onSendMessage(msg);
-                  }
+                  _sendToCompany(msg);
                   _humanInput = "";
+                  if (textarea) {
+                    textarea.value = "";
+                  }
                 }}>📨 Send <span class="cd-btn__hint">⌘↵</span></button>
                 <button class="cd-btn cd-btn--outline" @click=${() => {
                   _isPaused = true;
