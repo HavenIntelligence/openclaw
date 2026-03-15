@@ -1,4 +1,5 @@
 import { html } from "lit";
+import type { ClawDockAgent, TeamConfig } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
 type SupervisionStrategy = "one-for-one" | "one-for-all" | "rest-for-one" | "singleton";
@@ -196,7 +197,7 @@ function renderTeamAgent(agent: AgentEntry) {
   `;
 }
 
-function renderTeamCard(team: TeamEntry) {
+function renderTeamCard(team: TeamEntry, props?: CompanyTeamsProps) {
   const info = STRATEGY_INFO[team.strategy];
   const crashedCount = team.agents.filter((a) => a.status === "crashed").length;
   const runningCount = team.agents.filter((a) => a.status === "running").length;
@@ -223,6 +224,16 @@ function renderTeamCard(team: TeamEntry) {
               : html`
                   <span class="cd-badge cd-badge--ok">healthy</span>
                 `
+          }
+          ${
+            props?.onDeleteTeam
+              ? html`
+            <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Delete team"
+              @click=${() => props.onDeleteTeam?.(team.id)}>
+              ${icons.trash}
+            </button>
+          `
+              : ""
           }
         </div>
       </div>
@@ -283,9 +294,58 @@ function renderTeamCard(team: TeamEntry) {
   `;
 }
 
-export type CompanyTeamsProps = Record<string, never>;
+/** Convert real TeamConfig + ClawDockAgent data to internal TeamEntry format. */
+function toTeamEntry(team: TeamConfig, allAgents: ClawDockAgent[]): TeamEntry {
+  const memberAgents = allAgents.filter((a) => team.agents.includes(a.id));
+  const entries: AgentEntry[] = memberAgents.map((a) => {
+    const statusMap: Record<string, AgentEntry["status"]> = {
+      active: "running",
+      idle: "idle",
+      crashed: "crashed",
+      starting: "starting",
+      stopping: "stopped",
+      paused: "stopped",
+    };
+    const uptimeSecs = a.startedAt ? Math.floor((Date.now() - a.startedAt) / 1000) : 0;
+    const uptimeH = Math.floor(uptimeSecs / 3600);
+    const uptimeM = Math.floor((uptimeSecs % 3600) / 60);
+    return {
+      id: a.id,
+      name: a.name,
+      role: a.role,
+      model: a.model,
+      status: statusMap[a.status] ?? "idle",
+      tasksCompleted: a.tasksCompleted,
+      tasksRunning: a.status === "active" ? 1 : 0,
+      uptime: a.startedAt ? `${uptimeH}h ${uptimeM}m` : "—",
+    };
+  });
+  const hasCrashed = entries.some((a) => a.status === "crashed");
+  return {
+    id: team.id,
+    name: team.name,
+    description: team.description ?? "",
+    strategy: team.strategy,
+    agents: entries,
+    status: hasCrashed ? "degraded" : "healthy",
+    tasksToday: entries.reduce((s, a) => s + a.tasksCompleted, 0),
+  };
+}
 
-export function renderCompanyTeams(_props: CompanyTeamsProps) {
+export type CompanyTeamsProps = {
+  teams?: TeamConfig[];
+  agents?: ClawDockAgent[];
+  onCreateTeam?: (params: Omit<TeamConfig, "id">) => void;
+  onUpdateTeam?: (id: string, partial: Partial<Omit<TeamConfig, "id">>) => void;
+  onDeleteTeam?: (id: string) => void;
+};
+
+export function renderCompanyTeams(props: CompanyTeamsProps) {
+  const teamList =
+    props.teams && props.teams.length > 0
+      ? props.teams.map((t) => toTeamEntry(t, props.agents ?? []))
+      : DEMO_TEAMS;
+
   return html`
     <div class="cd-page">
       <!-- Strategy legend -->
@@ -305,8 +365,27 @@ export function renderCompanyTeams(_props: CompanyTeamsProps) {
 
       <!-- Team cards -->
       <div class="cd-teams-list">
-        ${DEMO_TEAMS.map(renderTeamCard)}
+        ${teamList.map((team) => renderTeamCard(team, props))}
       </div>
+
+      <!-- Add team button (only when real backend is connected) -->
+      ${
+        props.onCreateTeam
+          ? html`
+        <div style="margin-top:16px">
+          <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
+            props.onCreateTeam?.({
+              name: "New Team",
+              agents: [],
+              strategy: "one-for-one",
+            });
+          }}>
+            ${icons.plus} Add Team
+          </button>
+        </div>
+      `
+          : ""
+      }
     </div>
   `;
 }

@@ -345,6 +345,16 @@ export class OpenClawApp extends LitElement {
   // Non-reactive (don’t trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
 
+  // ── ClawDock company state ──────────────────────────────────────────────
+  @state() companyAgents: import("./company-types.js").ClawDockAgent[] = [];
+  @state() companyAgentsLoading = false;
+  @state() companyFleetSnapshot: import("./company-types.js").FleetSnapshot | null = null;
+  @state() companyTasks: import("./company-types.js").Task[] = [];
+  @state() companyTeams: import("./company-types.js").TeamConfig[] = [];
+  @state() companyProfile: import("./company-types.js").CompanyProfile | null = null;
+  @state() companyAgentLogs: Map<string, import("./company-types.js").LogEntry[]> = new Map();
+  @state() companyMessages: import("./company-types.js").AgentMessage[] = [];
+
   @state() cronLoading = false;
   @state() cronJobsLoadingMore = false;
   @state() cronJobs: CronJob[] = [];

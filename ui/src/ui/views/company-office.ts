@@ -1,4 +1,5 @@
 import { html } from "lit";
+import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentStatus = "thinking" | "working" | "idle" | "crashed" | "messaging";
@@ -433,6 +434,10 @@ let _newProjectName = "";
 let _rightTab: "log" | "output" | "human" = "log";
 let _logAgentFilter: string = "all"; // "all" or agent id
 
+// ── Callbacks from props (module-level to be accessible in renderFn) ────────
+let _onSendMessage: ((content: string) => void) | undefined;
+let _onStopAgent: ((agentId: string) => void) | undefined;
+
 // ── Animation state ────────────────────────────────────────────────────────
 let _agents: OfficeAgent[] = INITIAL_AGENTS.map((a) => ({ ...a }));
 let _messages: FlyingMessage[] = [];
@@ -578,7 +583,7 @@ function simulationStep() {
 
     if (_tick % 600 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 600) {
       // 15% chance to go to meeting room, otherwise stay at desk
-      const goMeet = Math.random() < 0.15 && agent.status !== "crashed";
+      const goMeet = Math.random() < 0.15;
       if (goMeet) {
         agent.targetX = 5 + Math.floor(Math.random() * 3);
         agent.targetY = 4;
@@ -586,10 +591,8 @@ function simulationStep() {
       } else {
         agent.targetX = agent.deskX;
         agent.targetY = agent.deskY;
-        if (agent.status !== "crashed") {
-          agent.status = "working";
-          agent.activity = "Back at desk";
-        }
+        agent.status = "working";
+        agent.activity = "Back at desk";
       }
     }
 
@@ -700,11 +703,73 @@ function logTypeIcon(type: LogEntry["type"]) {
 // ── Main render ────────────────────────────────────────────────────────────
 export type CompanyOfficeProps = {
   requestUpdate?: () => void;
+  agents?: ClawDockAgent[];
+  logs?: Map<string, RealLogEntry[]>;
+  onSendMessage?: (content: string) => void;
+  onStopAgent?: (agentId: string) => void;
 };
 
 export function renderCompanyOffice(props: CompanyOfficeProps) {
   if (props.requestUpdate) {
     startSimulation(props.requestUpdate);
+  }
+  _onSendMessage = props.onSendMessage;
+  _onStopAgent = props.onStopAgent;
+
+  // Sync real agent statuses into the simulation when provided.
+  if (props.agents && props.agents.length > 0) {
+    const statusMap: Record<string, OfficeAgent["status"]> = {
+      active: "working",
+      idle: "idle",
+      crashed: "crashed",
+      starting: "thinking",
+      stopping: "idle",
+      paused: "idle",
+    };
+    for (const realAgent of props.agents) {
+      const existing = _agents.find((a) => a.id === realAgent.id);
+      if (existing) {
+        // Only override status — preserve animation position.
+        existing.status = statusMap[realAgent.status] ?? "idle";
+      }
+    }
+  }
+
+  // Merge real log entries into the execution log (most recent at top, deduplicated by id).
+  if (props.logs && props.logs.size > 0) {
+    const existingIds = new Set(_execLog.map((e) => e.id));
+    const newEntries: LogEntry[] = [];
+    for (const entries of props.logs.values()) {
+      for (const e of entries) {
+        if (!existingIds.has(e.id)) {
+          const agent = props.agents?.find((a) => a.id === e.agentId);
+          // Map real log entry types to the office view's narrower type set.
+          const typeMap: Record<string, LogEntry["type"]> = {
+            message_in: "system",
+            message_out: "output",
+          };
+          const entryType: LogEntry["type"] =
+            e.type in typeMap ? typeMap[e.type] : (e.type as LogEntry["type"]);
+          newEntries.push({
+            id: e.id,
+            ts: new Date(e.ts).toTimeString().slice(0, 8),
+            agent: e.agentId,
+            agentEmoji: agent?.emoji ?? "🤖",
+            type: entryType,
+            content: e.content,
+            tokens: e.tokensUsed,
+            duration: e.durationMs,
+          });
+        }
+      }
+    }
+    if (newEntries.length > 0) {
+      // Prepend new entries, sorted by ts desc; keep at most 50 entries total.
+      _execLog = [...newEntries.toSorted((a, b) => b.id.localeCompare(a.id)), ..._execLog].slice(
+        0,
+        50,
+      );
+    }
   }
 
   const W = COLS * TILE;
@@ -1145,11 +1210,16 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   if (!_humanInput.trim()) {
                     return;
                   }
-                  addLog("human", "👤", "human", `[Founder] ${_humanInput}`);
+                  const msg = _humanInput.trim();
+                  addLog("human", "👤", "human", `[Founder] ${msg}`);
                   const founderAgent = _agents.find((a) => a.id === "ai-director");
                   if (founderAgent) {
                     founderAgent.activity = "Processing founder input";
                     founderAgent.status = "thinking";
+                  }
+                  // Send to real backend if connected
+                  if (_onSendMessage) {
+                    _onSendMessage(msg);
                   }
                   _humanInput = "";
                 }}>📨 Send</button>

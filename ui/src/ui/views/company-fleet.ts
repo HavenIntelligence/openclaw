@@ -1,4 +1,5 @@
 import { html } from "lit";
+import type { ClawDockAgent } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
 function formatTokens(n: number): string {
@@ -155,7 +156,7 @@ function statusPill(status: string) {
   return html`<span class="cd-pill ${cls[status] ?? ""}">${status}</span>`;
 }
 
-function renderFleetRow(agent: FleetAgent) {
+function renderFleetRow(agent: FleetAgent, props: CompanyFleetProps) {
   return html`
     <tr class="cd-fleet-row ${agent.status === "crashed" ? "cd-fleet-row--crashed" : ""}">
       <td class="cd-fleet-cell cd-fleet-cell--name">
@@ -201,25 +202,81 @@ function renderFleetRow(agent: FleetAgent) {
       <td class="cd-fleet-cell cd-fleet-cell--actions">
         ${
           agent.status === "crashed"
-            ? html`<button class="cd-btn cd-btn--xs cd-btn--danger" title="Restart">${icons.rotateCounterClockwise}</button>`
+            ? html`<button class="cd-btn cd-btn--xs cd-btn--danger" title="Restart" @click=${() => props.onRestart?.(agent.id)}>${icons.rotateCounterClockwise}</button>`
             : agent.status === "running"
-              ? html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Pause">${icons.pause}</button>`
-              : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Start">${icons.play}</button>`
+              ? html`
+                  <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Pause" @click=${() => props.onPause?.(agent.id)}>${icons.pause}</button>
+                  <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Stop" @click=${() => props.onStop?.(agent.id)}>${icons.stop}</button>
+                `
+              : agent.status === "stopped"
+                ? html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Start" @click=${() => props.onStart?.(agent.id)}>${icons.play}</button>`
+                : agent.status === "starting"
+                  ? html`
+                      <span class="cd-muted">starting…</span>
+                    `
+                  : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Resume" @click=${() => props.onResume?.(agent.id)}>${icons.play}</button>`
         }
-        <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs">${icons.terminal2}</button>
+        <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs" @click=${() => props.onLoadLogs?.(agent.id)}>${icons.terminal2}</button>
       </td>
     </tr>
   `;
 }
 
-export type CompanyFleetProps = Record<string, never>;
+/** Map ClawDockAgent to the internal FleetAgent shape. */
+function toFleetAgent(a: ClawDockAgent): FleetAgent {
+  const statusMap: Record<string, FleetAgent["status"]> = {
+    active: "running",
+    idle: "idle",
+    crashed: "crashed",
+    starting: "starting",
+    stopping: "stopped",
+    paused: "stopped",
+  };
+  const uptimeSecs = a.startedAt ? Math.floor((Date.now() - a.startedAt) / 1000) : 0;
+  const uptimeH = Math.floor(uptimeSecs / 3600);
+  const uptimeM = Math.floor((uptimeSecs % 3600) / 60);
+  const uptime = a.startedAt ? `${uptimeH}h ${uptimeM}m` : "—";
+  const lastActivity = a.lastActiveAt
+    ? (() => {
+        const secs = Math.floor((Date.now() - a.lastActiveAt) / 1000);
+        return secs < 60 ? `${secs}s ago` : `${Math.floor(secs / 60)}m ago`;
+      })()
+    : "—";
+  return {
+    id: a.id,
+    name: a.name,
+    team: a.team,
+    role: a.role,
+    model: a.model,
+    status: statusMap[a.status] ?? "idle",
+    tasksCompleted: a.tasksCompleted,
+    tasksRunning: a.status === "active" ? 1 : 0,
+    tokensUsed: a.tokensUsed,
+    cpuPercent: a.cpuPercent ?? 0,
+    memoryMb: a.memoryMb ?? 0,
+    uptime,
+    lastActivity,
+  };
+}
 
-export function renderCompanyFleet(_props: CompanyFleetProps) {
-  const runningCount = DEMO_FLEET.filter((a) => a.status === "running").length;
-  const crashedCount = DEMO_FLEET.filter((a) => a.status === "crashed").length;
-  const idleCount = DEMO_FLEET.filter((a) => a.status === "idle").length;
-  const totalTokens = DEMO_FLEET.reduce((sum, a) => sum + a.tokensUsed, 0);
-  const totalTasks = DEMO_FLEET.reduce((sum, a) => sum + a.tasksCompleted, 0);
+export type CompanyFleetProps = {
+  agents?: ClawDockAgent[];
+  onStart?: (agentId: string) => void;
+  onStop?: (agentId: string) => void;
+  onRestart?: (agentId: string) => void;
+  onPause?: (agentId: string) => void;
+  onResume?: (agentId: string) => void;
+  onLoadLogs?: (agentId: string) => void;
+};
+
+export function renderCompanyFleet(props: CompanyFleetProps) {
+  const fleet =
+    props.agents && props.agents.length > 0 ? props.agents.map(toFleetAgent) : DEMO_FLEET;
+  const runningCount = fleet.filter((a) => a.status === "running").length;
+  const crashedCount = fleet.filter((a) => a.status === "crashed").length;
+  const idleCount = fleet.filter((a) => a.status === "idle").length;
+  const totalTokens = fleet.reduce((sum, a) => sum + a.tokensUsed, 0);
+  const totalTasks = fleet.reduce((sum, a) => sum + a.tasksCompleted, 0);
 
   return html`
     <div class="cd-page">
@@ -253,7 +310,9 @@ export function renderCompanyFleet(_props: CompanyFleetProps) {
           <span class="cd-fleet-summary__stat-lbl">tokens used</span>
         </div>
         <div class="cd-fleet-summary__actions">
-          <button class="cd-btn cd-btn--sm cd-btn--outline">
+          <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
+            fleet.filter((a) => a.status === "crashed").forEach((a) => props.onRestart?.(a.id));
+          }}>
             ${icons.rotateCounterClockwise} Restart crashed
           </button>
         </div>
@@ -277,7 +336,7 @@ export function renderCompanyFleet(_props: CompanyFleetProps) {
             </tr>
           </thead>
           <tbody>
-            ${DEMO_FLEET.map(renderFleetRow)}
+            ${fleet.map((a) => renderFleetRow(a, props))}
           </tbody>
         </table>
       </div>

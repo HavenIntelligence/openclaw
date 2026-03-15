@@ -21,6 +21,23 @@ import { loadAgents, loadToolsCatalog, saveAgentsConfig } from "./controllers/ag
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
+  loadAgentLogs,
+  startAgent,
+  stopAgent,
+  restartAgent,
+  pauseAgent,
+  resumeAgent,
+  createTask,
+  updateTask,
+  deleteTask,
+  assignTask,
+  createTeam,
+  updateTeam,
+  deleteTeam,
+  saveCompanyProfile,
+  sendMessageToCompany,
+} from "./controllers/company.ts";
+import {
   applyConfig,
   ensureAgentConfigEntry,
   findAgentConfigEntryIndex,
@@ -1918,32 +1935,102 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "companyOverview"
-            ? lazyRender(lazyCompanyOverview, (m) => m.renderCompanyOverview({}))
+            ? lazyRender(lazyCompanyOverview, (m) =>
+                m.renderCompanyOverview({
+                  profile: state.companyProfile,
+                  agents: state.companyAgents,
+                  tasks: state.companyTasks,
+                  onSaveProfile: async (partial) => {
+                    await saveCompanyProfile(state, partial);
+                    requestHostUpdate?.();
+                  },
+                }),
+              )
             : nothing
         }
 
         ${
           state.tab === "companyTeams"
-            ? lazyRender(lazyCompanyTeams, (m) => m.renderCompanyTeams({}))
+            ? lazyRender(lazyCompanyTeams, (m) =>
+                m.renderCompanyTeams({
+                  teams: state.companyTeams,
+                  agents: state.companyAgents,
+                  onCreateTeam: async (params) => {
+                    await createTeam(state, params);
+                    requestHostUpdate?.();
+                  },
+                  onUpdateTeam: async (id, partial) => {
+                    await updateTeam(state, id, partial);
+                    requestHostUpdate?.();
+                  },
+                  onDeleteTeam: async (id) => {
+                    await deleteTeam(state, id);
+                    state.companyTeams = state.companyTeams.filter((t) => t.id !== id);
+                    requestHostUpdate?.();
+                  },
+                }),
+              )
             : nothing
         }
 
         ${
           state.tab === "companyFleet"
-            ? lazyRender(lazyCompanyFleet, (m) => m.renderCompanyFleet({}))
+            ? lazyRender(lazyCompanyFleet, (m) =>
+                m.renderCompanyFleet({
+                  agents: state.companyAgents,
+                  onStart: async (agentId) => {
+                    await startAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onStop: async (agentId) => {
+                    await stopAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onRestart: async (agentId) => {
+                    await restartAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onPause: async (agentId) => {
+                    await pauseAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onResume: async (agentId) => {
+                    await resumeAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onLoadLogs: async (agentId) => {
+                    await loadAgentLogs(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                }),
+              )
             : nothing
         }
 
         ${
           state.tab === "companyOrgChart"
-            ? lazyRender(lazyCompanyOrgChart, (m) => m.renderCompanyOrgChart({}))
+            ? lazyRender(lazyCompanyOrgChart, (m) =>
+                m.renderCompanyOrgChart({ agents: state.companyAgents }),
+              )
             : nothing
         }
 
         ${
           state.tab === "companyOffice"
             ? lazyRender(lazyCompanyOffice, (m) =>
-                m.renderCompanyOffice({ requestUpdate: requestHostUpdate }),
+                m.renderCompanyOffice({
+                  requestUpdate: requestHostUpdate,
+                  agents: state.companyAgents,
+                  logs: state.companyAgentLogs,
+                  onSendMessage: async (content) => {
+                    await sendMessageToCompany(state, content);
+                    requestHostUpdate?.();
+                  },
+                  onStopAgent: async (agentId) => {
+                    await stopAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                }),
               )
             : nothing
         }
@@ -1951,7 +2038,11 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "companyMonitor"
             ? lazyRender(lazyCompanyMonitor, (m) =>
-                m.renderCompanyMonitor({ requestRender: requestHostUpdate }),
+                m.renderCompanyMonitor({
+                  requestRender: requestHostUpdate,
+                  agents: state.companyAgents,
+                  logs: state.companyAgentLogs,
+                }),
               )
             : nothing
         }
@@ -1960,7 +2051,52 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "companyTasks"
-            ? lazyRender(lazyCompanyTasks, (m) => m.renderCompanyTasks({}))
+            ? lazyRender(lazyCompanyTasks, (m) =>
+                m.renderCompanyTasks({
+                  tasks: state.companyTasks,
+                  agents: state.companyAgents,
+                  onCreateTask: async (params) => {
+                    const task = await createTask(state, params);
+                    if (task) {
+                      state.companyTasks = [...state.companyTasks, task];
+                    }
+                    requestHostUpdate?.();
+                  },
+                  onUpdateTask: async (id, partial) => {
+                    const task = await updateTask(state, id, partial);
+                    if (task) {
+                      const idx = state.companyTasks.findIndex((t) => t.id === id);
+                      if (idx >= 0) {
+                        state.companyTasks = [
+                          ...state.companyTasks.slice(0, idx),
+                          task,
+                          ...state.companyTasks.slice(idx + 1),
+                        ];
+                      }
+                    }
+                    requestHostUpdate?.();
+                  },
+                  onDeleteTask: async (id) => {
+                    await deleteTask(state, id);
+                    state.companyTasks = state.companyTasks.filter((t) => t.id !== id);
+                    requestHostUpdate?.();
+                  },
+                  onAssignTask: async (taskId, agentId) => {
+                    const task = await assignTask(state, taskId, agentId);
+                    if (task) {
+                      const idx = state.companyTasks.findIndex((t) => t.id === taskId);
+                      if (idx >= 0) {
+                        state.companyTasks = [
+                          ...state.companyTasks.slice(0, idx),
+                          task,
+                          ...state.companyTasks.slice(idx + 1),
+                        ];
+                      }
+                    }
+                    requestHostUpdate?.();
+                  },
+                }),
+              )
             : nothing
         }
       </main>

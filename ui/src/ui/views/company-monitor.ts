@@ -1,4 +1,5 @@
 import { html } from "lit";
+import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type AgentLifecycle = "persistent" | "ephemeral" | "contract";
@@ -290,6 +291,10 @@ const ANNOTATIONS: Annotation[] = [
   },
 ];
 
+// ── Active data (overridden from real backend when available) ────────────────
+let _activeAgents: TimelineAgent[] = AGENTS;
+let _activeEvents: LifecycleEvent[] = EVENTS;
+
 // ── State ────────────────────────────────────────────────────────────────────
 let _currentTime = 0;
 let _isPlaying = true;
@@ -329,7 +334,7 @@ function stopPlayback() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getAgentY(agentId: string): number {
-  const index = AGENTS.findIndex((a) => a.id === agentId);
+  const index = _activeAgents.findIndex((a) => a.id === agentId);
   return PADDING_TOP + index * LANE_HEIGHT + LANE_HEIGHT / 2;
 }
 
@@ -338,9 +343,9 @@ function getX(timestamp: number): number {
 }
 
 function agentStatus(agentId: string, time: number): string {
-  const agentEvents = EVENTS.filter((e) => e.agentId === agentId && e.timestamp <= time).toSorted(
-    (a, b) => b.timestamp - a.timestamp,
-  );
+  const agentEvents = _activeEvents
+    .filter((e) => e.agentId === agentId && e.timestamp <= time)
+    .toSorted((a, b) => b.timestamp - a.timestamp);
   const last = agentEvents[0];
   if (!last) {
     return "inactive";
@@ -578,17 +583,73 @@ function syncScroll(e: Event): void {
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
-export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
+export function renderCompanyMonitor(deps: {
+  requestRender?: () => void;
+  agents?: ClawDockAgent[];
+  logs?: Map<string, RealLogEntry[]>;
+}) {
   const rr = deps.requestRender ?? (() => {});
+
+  // Map real agents to TimelineAgent format when available
+  if (deps.agents && deps.agents.length > 0) {
+    _activeAgents = deps.agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      emoji: a.emoji,
+      role: a.role,
+      lifecycle: "persistent" as AgentLifecycle,
+      color: a.color,
+      workspace: a.currentTask ? `Working: ${a.currentTask.slice(0, 40)}` : undefined,
+    }));
+  } else {
+    _activeAgents = AGENTS;
+  }
+
+  // Derive lifecycle events from real log entries when available
+  if (deps.logs && deps.logs.size > 0) {
+    const now = Date.now();
+    const baseTs = now - MAX_TIME * 1000; // treat MAX_TIME as seconds window
+    const realEvents: LifecycleEvent[] = [];
+    let evtIdx = 0;
+    for (const [agentId, entries] of deps.logs) {
+      for (const e of entries) {
+        const kind: EventKind | null =
+          e.type === "system"
+            ? "start"
+            : e.type === "error"
+              ? "error"
+              : e.type === "output"
+                ? "start"
+                : null;
+        if (!kind) {
+          continue;
+        }
+        realEvents.push({
+          id: `real-${evtIdx++}`,
+          agentId,
+          timestamp: Math.max(0, Math.min(MAX_TIME, (e.ts - baseTs) / 1000)),
+          type: kind,
+          details: e.content.slice(0, 80),
+        });
+      }
+    }
+    if (realEvents.length > 0) {
+      _activeEvents = realEvents;
+    } else {
+      _activeEvents = EVENTS;
+    }
+  } else {
+    _activeEvents = EVENTS;
+  }
 
   if (_isPlaying && !_playInterval) {
     startPlayback(rr);
   }
 
-  const windows = deriveActivityWindows(AGENTS, EVENTS, _currentTime);
-  const edges = deriveLineageEdges(EVENTS.filter((e) => e.timestamp <= _currentTime));
+  const windows = deriveActivityWindows(_activeAgents, _activeEvents, _currentTime);
+  const edges = deriveLineageEdges(_activeEvents.filter((e) => e.timestamp <= _currentTime));
   const tlWidth = MAX_TIME * _timeScale + TIMELINE_PAD * 2 + 20;
-  const tlHeight = PADDING_TOP + AGENTS.length * LANE_HEIGHT + 24;
+  const tlHeight = PADDING_TOP + _activeAgents.length * LANE_HEIGHT + 24;
 
   const highlightSet = new Set<string>();
   const focusId = _hoveredAgentId || _selectedAgentId;
@@ -609,9 +670,15 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
     ? connectedWindowIds(_selectedActivityId, windows, edges)
     : new Set<string>();
 
-  const runningCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "running").length;
-  const errorCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "error").length;
-  const pausedCount = AGENTS.filter((a) => agentStatus(a.id, _currentTime) === "paused").length;
+  const runningCount = _activeAgents.filter(
+    (a) => agentStatus(a.id, _currentTime) === "running",
+  ).length;
+  const errorCount = _activeAgents.filter(
+    (a) => agentStatus(a.id, _currentTime) === "error",
+  ).length;
+  const pausedCount = _activeAgents.filter(
+    (a) => agentStatus(a.id, _currentTime) === "paused",
+  ).length;
 
   return html`
     <div class="cd-monitor-page">
@@ -744,7 +811,7 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
           <div class="cd-monitor-left-corner"></div>
           <div class="cd-monitor-left-scroll">
             <div style="padding-top:${PADDING_TOP}px;min-height:${tlHeight}px">
-              ${AGENTS.map((agent) => {
+              ${_activeAgents.map((agent) => {
                 const status = agentStatus(agent.id, _currentTime);
                 const isSelected = _selectedAgentId === agent.id;
                 const isHovered = _hoveredAgentId === agent.id && !isSelected;
@@ -932,7 +999,7 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
 
               <!-- Activity windows -->
               ${windows.map((w) => {
-                const agent = AGENTS.find((a) => a.id === w.agentId);
+                const agent = _activeAgents.find((a) => a.id === w.agentId);
                 if (!agent) {
                   return "";
                 }
@@ -988,7 +1055,8 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
               })}
 
               <!-- Event markers -->
-              ${EVENTS.filter((e) => e.timestamp <= _currentTime)
+              ${_activeEvents
+                .filter((e) => e.timestamp <= _currentTime)
                 .filter((e) =>
                   ["pause", "error", "archive", "backtrack", "split", "handoff", "merge"].includes(
                     e.type,
@@ -1052,7 +1120,7 @@ export function renderCompanyMonitor(deps: { requestRender?: () => void }) {
                                     class="cd-monitor-tooltip__target"
                                   >
                                     →
-                                    ${AGENTS.find((a) => a.id === ev.targetId)?.name ?? ev.targetId}
+                                    ${_activeAgents.find((a) => a.id === ev.targetId)?.name ?? ev.targetId}
                                   </div>`
                                   : ""
                               }

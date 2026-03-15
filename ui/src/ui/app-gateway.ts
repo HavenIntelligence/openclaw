@@ -14,6 +14,14 @@ import {
 import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
 import { shouldReloadHistoryForFinalEvent } from "./chat-event-reload.ts";
+import type {
+  AgentMessage,
+  ClawDockAgent,
+  FleetSnapshot,
+  LogEntry as CompanyLogEntry,
+  Task,
+  TeamConfig,
+} from "./company-types.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
@@ -96,6 +104,12 @@ type GatewayHost = {
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
   updateAvailable: UpdateAvailable | null;
+  companyAgents: ClawDockAgent[];
+  companyFleetSnapshot: FleetSnapshot | null;
+  companyTasks: Task[];
+  companyTeams: TeamConfig[];
+  companyAgentLogs: Map<string, CompanyLogEntry[]>;
+  companyMessages: AgentMessage[];
 };
 
 type SessionDefaultsSnapshot = {
@@ -400,6 +414,78 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   if (evt.event === GATEWAY_EVENT_UPDATE_AVAILABLE) {
     const payload = evt.payload as GatewayUpdateAvailableEventPayload | undefined;
     host.updateAvailable = payload?.updateAvailable ?? null;
+  }
+
+  if (evt.event === "company.agent.status") {
+    const { agentId, status } = evt.payload as { agentId: string; status: string };
+    // Replace the agent object to trigger @state() reactive update
+    const idx = host.companyAgents.findIndex((a) => a.id === agentId);
+    if (idx >= 0) {
+      const updated = { ...host.companyAgents[idx], status: status as ClawDockAgent["status"] };
+      host.companyAgents = [
+        ...host.companyAgents.slice(0, idx),
+        updated,
+        ...host.companyAgents.slice(idx + 1),
+      ];
+    }
+    return;
+  }
+
+  if (evt.event === "company.agent.log") {
+    const { agentId, entry } = evt.payload as { agentId: string; entry: CompanyLogEntry };
+    if (!host.companyAgentLogs.has(agentId)) {
+      host.companyAgentLogs.set(agentId, []);
+    }
+    const buf = host.companyAgentLogs.get(agentId)!;
+    buf.push(entry);
+    if (buf.length > 200) {
+      buf.shift();
+    }
+    // companyAgentLogs is a Map (not @state), create a new Map reference to trigger reactivity
+    host.companyAgentLogs = new Map(host.companyAgentLogs);
+    return;
+  }
+
+  if (evt.event === "company.fleet.metrics") {
+    host.companyFleetSnapshot = evt.payload as FleetSnapshot;
+    return;
+  }
+
+  if (evt.event === "company.task.updated") {
+    const { task } = evt.payload as { task: Task };
+    const idx = host.companyTasks.findIndex((t) => t.id === task.id);
+    if (idx >= 0) {
+      host.companyTasks = [
+        ...host.companyTasks.slice(0, idx),
+        task,
+        ...host.companyTasks.slice(idx + 1),
+      ];
+    } else {
+      host.companyTasks = [...host.companyTasks, task];
+    }
+    return;
+  }
+
+  if (evt.event === "company.team.updated") {
+    const { team } = evt.payload as { team: TeamConfig };
+    const idx = host.companyTeams.findIndex((t) => t.id === team.id);
+    if (idx >= 0) {
+      host.companyTeams = [
+        ...host.companyTeams.slice(0, idx),
+        team,
+        ...host.companyTeams.slice(idx + 1),
+      ];
+    } else {
+      host.companyTeams = [...host.companyTeams, team];
+    }
+    return;
+  }
+
+  if (evt.event === "company.agent.message") {
+    const { msg } = evt.payload as { msg: AgentMessage };
+    const messages = host.companyMessages ?? [];
+    host.companyMessages = [...messages.slice(-499), msg];
+    return;
   }
 }
 

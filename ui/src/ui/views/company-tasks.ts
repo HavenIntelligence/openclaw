@@ -1,4 +1,5 @@
 import { html } from "lit";
+import type { ClawDockAgent, Task as RealTask } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -296,7 +297,17 @@ let _newTask = {
   project: "",
   status: "backlog" as TaskStatus,
 };
+
+// ── Callbacks from props (module-level) ────────────────────────────────────
+let _onCreateTask: CompanyTasksProps["onCreateTask"];
+let _onUpdateTask: CompanyTasksProps["onUpdateTask"];
+let _onDeleteTask: CompanyTasksProps["onDeleteTask"];
+
 let _dragging: string | null = null;
+// Active task list — set on each render from props or demo data.
+let _activeTasks: Task[] = DEMO_TASKS;
+// Active agent list for filter UI — lazily initialized from AGENTS on first render
+let _activeAgents: { id: string; name: string; emoji: string }[] = [];
 
 const COLUMNS: { id: TaskStatus; label: string; color: string; headerClass: string }[] = [
   { id: "backlog", label: "Backlog", color: "#94a3b8", headerClass: "cd-kb-col--backlog" },
@@ -353,6 +364,30 @@ function filterTasks(tasks: Task[]): Task[] {
     filtered = filtered.filter((t) => t.assignee === _filterAgent);
   }
   return filtered;
+}
+
+function fmtDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** Map real Task + agent list to the internal display Task shape. */
+function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
+  const agent = agents.find((a) => a.id === rt.assignee);
+  return {
+    id: rt.id,
+    title: rt.title,
+    description: rt.description ?? "",
+    status: rt.status,
+    priority: rt.priority,
+    assignee: rt.assignee ?? "unassigned",
+    assigneeEmoji: agent?.emoji ?? "❓",
+    project: rt.project ?? "Unassigned",
+    tags: rt.tags ?? [],
+    createdAt: fmtDate(rt.createdAt),
+    dueAt: rt.dueAt ? fmtDate(rt.dueAt) : undefined,
+    tokensUsed: rt.tokensUsed,
+    blockedBy: rt.blockedBy?.[0],
+  };
 }
 
 function renderTask(task: Task) {
@@ -412,7 +447,7 @@ function renderTask(task: Task) {
 }
 
 function renderColumn(col: (typeof COLUMNS)[0]) {
-  const tasks = filterTasks(DEMO_TASKS.filter((t) => t.status === col.id));
+  const tasks = filterTasks(_activeTasks.filter((t) => t.status === col.id));
   const totalTokens = tasks.reduce((s, t) => s + (t.tokensUsed ?? 0), 0);
 
   return html`
@@ -423,9 +458,10 @@ function renderColumn(col: (typeof COLUMNS)[0]) {
       @drop=${(e: DragEvent) => {
         e.preventDefault();
         if (_dragging) {
-          const task = DEMO_TASKS.find((t) => t.id === _dragging);
-          if (task) {
+          const task = _activeTasks.find((t) => t.id === _dragging);
+          if (task && task.status !== col.id) {
             task.status = col.id;
+            _onUpdateTask?.(_dragging, { status: col.id as RealTask["status"] });
           }
           _dragging = null;
         }
@@ -460,10 +496,34 @@ function renderColumn(col: (typeof COLUMNS)[0]) {
   `;
 }
 
-export type CompanyTasksProps = Record<string, never>;
+export type CompanyTasksProps = {
+  tasks?: RealTask[];
+  agents?: ClawDockAgent[];
+  onCreateTask?: (params: Omit<RealTask, "id" | "createdAt" | "updatedAt">) => void;
+  onUpdateTask?: (id: string, partial: Partial<RealTask>) => void;
+  onDeleteTask?: (id: string) => void;
+  onAssignTask?: (taskId: string, agentId: string) => void;
+  /** @deprecated use onCreateTask */
+  onCreate?: (params: Omit<RealTask, "id" | "createdAt" | "updatedAt">) => Promise<void>;
+};
 
-export function renderCompanyTasks(_props: CompanyTasksProps) {
-  const total = filterTasks(DEMO_TASKS);
+export function renderCompanyTasks(props: CompanyTasksProps) {
+  // Update module-level active lists from props each render
+  if (props.tasks && props.tasks.length > 0) {
+    _activeTasks = props.tasks.map((t) => mapRealTask(t, props.agents ?? []));
+  } else {
+    _activeTasks = DEMO_TASKS;
+  }
+  if (props.agents && props.agents.length > 0) {
+    _activeAgents = props.agents.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji }));
+  } else if (_activeAgents.length === 0) {
+    _activeAgents = AGENTS;
+  }
+  _onCreateTask = props.onCreateTask;
+  _onUpdateTask = props.onUpdateTask;
+  _onDeleteTask = props.onDeleteTask;
+
+  const total = filterTasks(_activeTasks);
   const done = total.filter((t) => t.status === "done").length;
   const inFlight = total.filter((t) => t.status === "in_progress").length;
   const criticals = total.filter((t) => t.priority === "critical").length;
@@ -515,7 +575,7 @@ export function renderCompanyTasks(_props: CompanyTasksProps) {
           @click=${() => {
             _filterAgent = "All";
           }}>All</button>
-        ${AGENTS.map(
+        ${_activeAgents.map(
           (a) => html`
             <button class="cd-log-af-btn ${_filterAgent === a.id ? "cd-log-af-btn--active" : ""}"
               @click=${() => {
@@ -584,7 +644,7 @@ export function renderCompanyTasks(_props: CompanyTasksProps) {
                       _newTask.assignee = (e.target as HTMLSelectElement).value;
                     }}>
                     <option value="">Select agent…</option>
-                    ${AGENTS.map((a) => html`<option value="${a.id}">${a.emoji} ${a.name}</option>`)}
+                    ${_activeAgents.map((a) => html`<option value="${a.id}">${a.emoji} ${a.name}</option>`)}
                   </select>
                 </div>
                 <div>
@@ -620,19 +680,35 @@ export function renderCompanyTasks(_props: CompanyTasksProps) {
                 if (!_newTask.title.trim()) {
                   return;
                 }
-                DEMO_TASKS.unshift({
-                  id: `t-${Date.now()}`,
+                const now = Date.now();
+                const draft: Task = {
+                  id: `t-${now}`,
                   title: _newTask.title,
                   description: _newTask.description,
                   status: _newTask.status,
                   priority: _newTask.priority,
                   assignee: _newTask.assignee || "unassigned",
-                  assigneeEmoji: AGENTS.find((a) => a.id === _newTask.assignee)?.emoji ?? "❓",
+                  assigneeEmoji:
+                    _activeAgents.find((a) => a.id === _newTask.assignee)?.emoji ?? "❓",
                   project: _newTask.project || "Unassigned",
                   tags: [],
                   createdAt: "Now",
                   tokensUsed: 0,
-                });
+                };
+                _activeTasks.unshift(draft);
+                const createParams = {
+                  title: _newTask.title,
+                  description: _newTask.description || undefined,
+                  status: _newTask.status,
+                  priority: _newTask.priority,
+                  assignee: _newTask.assignee || undefined,
+                  project: _newTask.project || undefined,
+                };
+                if (_onCreateTask) {
+                  _onCreateTask(createParams);
+                } else if (props.onCreate) {
+                  void props.onCreate(createParams);
+                }
                 _newTask = {
                   title: "",
                   description: "",

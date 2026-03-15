@@ -1,4 +1,9 @@
 import { html } from "lit";
+import type {
+  ClawDockAgent,
+  CompanyProfile as RealProfile,
+  Task as RealTask,
+} from "../company-types.ts";
 import { renderCompanyTasks } from "./company-tasks.ts";
 import { renderRoleHub } from "./role-hub.ts";
 
@@ -56,6 +61,13 @@ let _showNewCompanyForm = false;
 let _newCompanyName = "";
 let _newCompanyIndustry = "";
 let _newCompanyStage = "Pre-seed";
+
+// ── Real backend data (set from props each render) ──────────────────────────
+let _realProfile: RealProfile | null = null;
+let _realAgents: ClawDockAgent[] = [];
+let _realTasks: RealTask[] = [];
+// ── Callbacks (set from props each render) ──────────────────────────────────
+let _onSaveProfile: ((partial: Partial<RealProfile>) => void) | undefined;
 
 // ── Agent data (lifecycle + trace) ────────────────────────────────────────
 type AgentLifecycleState = "created" | "running" | "paused" | "crashed" | "archived";
@@ -329,6 +341,17 @@ function saveEdit() {
   const idx = _companies.findIndex((c) => c.id === _editDraft!.id);
   if (idx >= 0) {
     _companies[idx] = { ..._editDraft };
+  }
+  // Persist to backend if callback is available
+  if (_onSaveProfile) {
+    _onSaveProfile({
+      name: _editDraft.name,
+      mission: _editDraft.mission,
+      vision: _editDraft.vision,
+      businessModel: _editDraft.businessModel,
+      focusAreas: _editDraft.currentFocus,
+      values: _editDraft.values?.map((v) => v.label),
+    });
   }
   _editing = false;
   _editDraft = null;
@@ -826,7 +849,10 @@ function renderRoles() {
   return renderRoleHub({});
 }
 function renderTasks() {
-  return renderCompanyTasks({});
+  return renderCompanyTasks({
+    tasks: _realTasks.length ? _realTasks : undefined,
+    agents: _realAgents.length ? _realAgents : undefined,
+  });
 }
 function renderChats() {
   const CHAT_LOG = [
@@ -928,7 +954,22 @@ function renderChats() {
 
 // ── Company profile sub-tab ────────────────────────────────────────────────
 function renderProfile() {
-  const co = _companies.find((c) => c.id === _activeCompanyId) ?? _companies[0];
+  // Merge real profile into the active company object when available
+  const baseCompany = _companies.find((c) => c.id === _activeCompanyId) ?? _companies[0];
+  const co: CompanyProfile = _realProfile
+    ? {
+        ...baseCompany,
+        name: _realProfile.name || baseCompany.name,
+        mission: _realProfile.mission ?? baseCompany.mission,
+        vision: _realProfile.vision ?? baseCompany.vision,
+        businessModel: _realProfile.businessModel ?? baseCompany.businessModel,
+        currentFocus: _realProfile.focusAreas ?? baseCompany.currentFocus,
+        values:
+          _realProfile.values && _realProfile.values.length
+            ? _realProfile.values.map((v) => ({ emoji: "•", label: v, desc: "" }))
+            : baseCompany.values,
+      }
+    : baseCompany;
   const draft = _editDraft ?? co;
 
   return html`
@@ -1117,9 +1158,19 @@ function renderProfile() {
 }
 
 // ── Main render ────────────────────────────────────────────────────────────
-export type CompanyOverviewProps = Record<string, never>;
+export type CompanyOverviewProps = {
+  profile?: RealProfile | null;
+  agents?: ClawDockAgent[];
+  tasks?: RealTask[];
+  onSaveProfile?: (partial: Partial<RealProfile>) => void;
+};
 
-export function renderCompanyOverview(_props: CompanyOverviewProps) {
+export function renderCompanyOverview(props: CompanyOverviewProps) {
+  // Update real data module vars from props each render
+  _realProfile = props.profile ?? null;
+  _realAgents = props.agents ?? [];
+  _realTasks = props.tasks ?? [];
+  _onSaveProfile = props.onSaveProfile;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🦀", label: "Company" },
     { id: "fleet", icon: "🤖", label: "Agent Status" },
