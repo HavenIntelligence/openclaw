@@ -1302,14 +1302,48 @@
    Org Chart View
    ======================================================== */
 .cd-page--orgchart {
-  padding: 16px 20px;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
 }
 
 .cd-oc-fullwidth {
   position: relative;
   padding: 0;
   max-width: none;
-  height: 100%;
+  flex: 1;
+  min-height: 600px;
+}
+
+.cd-oc-demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  background: rgba(251, 146, 60, 0.08);
+  border-bottom: 1px solid rgba(251, 146, 60, 0.2);
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+
+.cd-oc-demo-banner__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.cd-oc-canvas-wrap--full {
+  flex: none;
+  width: 100%;
+  min-height: 560px;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(59, 130, 246, 0.06), transparent 60%), var(--card);
 }
 
 .cd-oc-layout {

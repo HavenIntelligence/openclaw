@@ -1,23 +1,26 @@
 import { html, svg } from "lit";
+import type { ClawDockAgent } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
-// ── Company org structure (demo data) ──────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 type OrgNode = {
   id: string;
   name: string;
   role: string;
   emoji: string;
-  color: string; // border accent color
+  color: string;
   status: "active" | "idle" | "crashed";
   model: string;
   team: string;
+  description?: string;
+  toolCount?: number;
+  cronCount?: number;
   children?: OrgNode[];
-  // computed layout
   x?: number;
   y?: number;
-  width?: number;
 };
 
+// ── Demo data ─────────────────────────────────────────────────────────────────
 const ORG_TREE: OrgNode = {
   id: "ceo",
   name: "ai-director",
@@ -27,6 +30,9 @@ const ORG_TREE: OrgNode = {
   status: "active",
   model: "claude-opus-4-5",
   team: "executive",
+  description: "Top-level orchestrator for all AI ops.",
+  toolCount: 4,
+  cronCount: 0,
   children: [
     {
       id: "coo",
@@ -37,6 +43,9 @@ const ORG_TREE: OrgNode = {
       status: "active",
       model: "claude-opus-4-5",
       team: "executive",
+      description: "Manages day-to-day operations.",
+      toolCount: 3,
+      cronCount: 1,
       children: [
         {
           id: "hr",
@@ -47,6 +56,9 @@ const ORG_TREE: OrgNode = {
           status: "active",
           model: "claude-sonnet-4-5",
           team: "operations",
+          description: "Handles recruitment and HR tasks.",
+          toolCount: 2,
+          cronCount: 2,
           children: [
             {
               id: "onboarding",
@@ -57,6 +69,9 @@ const ORG_TREE: OrgNode = {
               status: "idle",
               model: "claude-haiku-4-5",
               team: "operations",
+              description: "Guides new agent onboarding.",
+              toolCount: 2,
+              cronCount: 1,
             },
           ],
         },
@@ -69,6 +84,9 @@ const ORG_TREE: OrgNode = {
           status: "active",
           model: "gpt-4o",
           team: "devops",
+          description: "Infrastructure and deployment management.",
+          toolCount: 3,
+          cronCount: 2,
           children: [
             {
               id: "code-agent",
@@ -79,6 +97,9 @@ const ORG_TREE: OrgNode = {
               status: "active",
               model: "claude-opus-4-5",
               team: "devops",
+              description: "Writes and reviews code.",
+              toolCount: 4,
+              cronCount: 0,
             },
             {
               id: "test-runner",
@@ -89,6 +110,9 @@ const ORG_TREE: OrgNode = {
               status: "active",
               model: "gpt-4o",
               team: "devops",
+              description: "Runs automated test suites.",
+              toolCount: 2,
+              cronCount: 3,
             },
           ],
         },
@@ -103,6 +127,9 @@ const ORG_TREE: OrgNode = {
       status: "active",
       model: "claude-sonnet-4-5",
       team: "content",
+      description: "Oversees all content and marketing.",
+      toolCount: 3,
+      cronCount: 1,
       children: [
         {
           id: "research-alpha",
@@ -113,6 +140,9 @@ const ORG_TREE: OrgNode = {
           status: "active",
           model: "claude-opus-4-5",
           team: "content",
+          description: "Deep research and analysis.",
+          toolCount: 2,
+          cronCount: 1,
         },
         {
           id: "writing-beta",
@@ -123,6 +153,9 @@ const ORG_TREE: OrgNode = {
           status: "active",
           model: "claude-sonnet-4-5",
           team: "content",
+          description: "Content creation and copywriting.",
+          toolCount: 2,
+          cronCount: 0,
         },
         {
           id: "review-gamma",
@@ -133,6 +166,9 @@ const ORG_TREE: OrgNode = {
           status: "crashed",
           model: "claude-haiku-4-5",
           team: "content",
+          description: "Quality review and editing.",
+          toolCount: 2,
+          cronCount: 1,
         },
       ],
     },
@@ -145,16 +181,20 @@ const ORG_TREE: OrgNode = {
       status: "idle",
       model: "claude-sonnet-4-5",
       team: "executive",
+      description: "Personal assistant to the AI Director.",
+      toolCount: 3,
+      cronCount: 0,
     },
   ],
 };
 
-// ── Layout engine ──────────────────────────────────────────────────────────
-const NODE_W = 160;
-const NODE_H = 80;
-const H_GAP = 32;
-const V_GAP = 64;
+// ── Layout constants ──────────────────────────────────────────────────────────
+const NODE_W = 220;
+const NODE_H = 118;
+const H_GAP = 44;
+const V_GAP = 86;
 
+// ── Layout engine ─────────────────────────────────────────────────────────────
 type LayoutNode = OrgNode & { x: number; y: number; subtreeW: number };
 
 function layoutTree(node: OrgNode, depth = 0): LayoutNode {
@@ -163,7 +203,6 @@ function layoutTree(node: OrgNode, depth = 0): LayoutNode {
     children.length === 0
       ? NODE_W
       : children.reduce((s, c) => s + c.subtreeW, 0) + (children.length - 1) * H_GAP;
-  // x will be set in a second pass; y = depth * (NODE_H + V_GAP)
   return { ...node, x: 0, y: depth * (NODE_H + V_GAP), subtreeW, children } as LayoutNode;
 }
 
@@ -178,7 +217,6 @@ function placeTree(node: LayoutNode, left: number): void {
     placeTree(child, cur);
     cur += child.subtreeW + H_GAP;
   }
-  // center this node over its children
   const firstChild = children[0];
   const lastChild = children[children.length - 1];
   node.x = (firstChild.x + lastChild.x + NODE_W) / 2 - NODE_W / 2;
@@ -192,29 +230,145 @@ function collectNodes(node: LayoutNode, out: LayoutNode[] = []): LayoutNode[] {
   return out;
 }
 
-function collectEdges(
-  node: LayoutNode,
-  out: { x1: number; y1: number; x2: number; y2: number }[] = [],
-) {
-  for (const child of (node.children ?? []) as LayoutNode[]) {
-    out.push({
-      x1: node.x + NODE_W / 2,
-      y1: node.y + NODE_H,
-      x2: child.x + NODE_W / 2,
-      y2: child.y,
-    });
-    collectEdges(child, out);
+type EdgeDef = { x1: number; y1: number; x2: number; y2: number; parentColor: string };
+
+function edgesFromTree(
+  node: OrgNode,
+  nodeMap: Map<string, LayoutNode>,
+  out: EdgeDef[] = [],
+): EdgeDef[] {
+  const parent = nodeMap.get(node.id);
+  if (!parent) {
+    return out;
+  }
+  for (const child of node.children ?? []) {
+    const childNode = nodeMap.get(child.id);
+    if (childNode) {
+      out.push({
+        x1: parent.x + NODE_W / 2,
+        y1: parent.y + NODE_H,
+        x2: childNode.x + NODE_W / 2,
+        y2: childNode.y,
+        parentColor: parent.color,
+      });
+    }
+    edgesFromTree(child, nodeMap, out);
   }
   return out;
 }
 
-function buildLayout() {
-  const root = layoutTree(ORG_TREE);
-  placeTree(root, 0);
-  return root;
+/** Convert ClawDockAgent[] into an OrgNode tree using reportTo / directReports. */
+function agentsToOrgTree(agents: ClawDockAgent[]): OrgNode {
+  if (!agents.length) {
+    return ORG_TREE;
+  }
+  const agentMap = new Map(agents.map((a) => [a.id, a]));
+  const childIds = new Set(agents.flatMap((a) => a.directReports ?? []));
+  const roots = agents.filter((a) => !childIds.has(a.id));
+
+  function toOrgNode(agent: ClawDockAgent): OrgNode {
+    const kids = (agent.directReports ?? [])
+      .map((id) => agentMap.get(id))
+      .filter(Boolean)
+      .map((a) => toOrgNode(a!));
+    return {
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      emoji: agent.emoji,
+      color: agent.color,
+      status:
+        agent.status === "active" ? "active" : agent.status === "crashed" ? "crashed" : "idle",
+      model: agent.model,
+      team: agent.team,
+      description: agent.description,
+      toolCount: agent.toolCount,
+      cronCount: agent.cronCount,
+      children: kids.length ? kids : undefined,
+    };
+  }
+
+  if (roots.length === 1) {
+    return toOrgNode(roots[0]);
+  }
+  // Multiple roots: create a virtual organization root
+  return {
+    id: "__org__",
+    name: "organization",
+    role: "Company",
+    emoji: "🏢",
+    color: "#94a3b8",
+    status: "active",
+    model: "",
+    team: "root",
+    children: roots.map(toOrgNode),
+  };
 }
 
-// ── Status helpers ─────────────────────────────────────────────────────────
+// Active org tree — updated from real agent data when available.
+let _activeOrgTree: OrgNode = ORG_TREE;
+
+function buildHierarchyLayout(): { nodes: LayoutNode[]; edges: EdgeDef[] } {
+  const root = layoutTree(_activeOrgTree);
+  placeTree(root, 0);
+  const nodes = collectNodes(root);
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const edges = edgesFromTree(_activeOrgTree, nodeMap);
+  return { nodes, edges };
+}
+
+// ── Teams layout ──────────────────────────────────────────────────────────────
+type TeamGroup = {
+  team: string;
+  color: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+function buildTeamsLayout(): { nodes: LayoutNode[]; teamGroups: TeamGroup[]; edges: EdgeDef[] } {
+  const hierarchyRoot = layoutTree(_activeOrgTree);
+  placeTree(hierarchyRoot, 0);
+  const allNodes = collectNodes(hierarchyRoot);
+
+  // Group nodes by team, preserving insertion order
+  const teamMap = new Map<string, { nodes: LayoutNode[]; color: string }>();
+  for (const n of allNodes) {
+    if (!teamMap.has(n.team)) {
+      teamMap.set(n.team, { nodes: [], color: n.color });
+    }
+    teamMap.get(n.team)!.nodes.push(n);
+  }
+
+  const TEAM_PAD_H = 24;
+  const TEAM_PAD_V_TOP = 40;
+  const TEAM_PAD_V_BOT = 20;
+  const NODE_INNER_GAP = 18;
+  const TEAM_COL_GAP = 40;
+
+  let curX = 20;
+  const teamGroups: TeamGroup[] = [];
+
+  for (const [team, { nodes: teamNodes, color }] of teamMap) {
+    const colW = NODE_W + TEAM_PAD_H * 2;
+    let nodeY = TEAM_PAD_V_TOP;
+    for (const n of teamNodes) {
+      n.x = curX + TEAM_PAD_H;
+      n.y = 20 + nodeY;
+      nodeY += NODE_H + NODE_INNER_GAP;
+    }
+    const colH = nodeY - NODE_INNER_GAP + TEAM_PAD_V_BOT;
+    teamGroups.push({ team, color, x: curX, y: 20, w: colW, h: colH });
+    curX += colW + TEAM_COL_GAP;
+  }
+
+  const nodeMap = new Map(allNodes.map((n) => [n.id, n]));
+  const edges = edgesFromTree(_activeOrgTree, nodeMap);
+  return { nodes: allNodes, teamGroups, edges };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function statusColor(status: string) {
   if (status === "active") {
     return "var(--ok)";
@@ -225,15 +379,32 @@ function statusColor(status: string) {
   return "#f59e0b";
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function shortModel(model: string): string {
+  return model
+    .replace("claude-opus-", "opus-")
+    .replace("claude-sonnet-", "sonnet-")
+    .replace("claude-haiku-", "haiku-");
+}
+
+// Approximate chip width: char * 6.2 + padding
+function chipW(text: string): number {
+  return text.length * 6.2 + 16;
+}
+
+// ── Module state ─────────────────────────────────────────────────────────────
 let _selectedId: string | null = null;
-let _addTargetId: string | null = null; // which node to add a child to
+let _addTargetId: string | null = null;
 let _deleteMode = false;
+let _layout: "hierarchy" | "teams" = "hierarchy";
+let _zoom = 1.0;
 let _newRoleName = "";
 let _newRoleEmoji = "🤖";
 let _newRoleTitle = "";
 
-// Quick-add role presets (sampled from Role Hub)
 const QUICK_ROLES: OrgNode[] = [
   {
     id: "",
@@ -244,6 +415,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-opus-4-5",
     team: "data",
+    description: "Data analysis and ML experiments.",
+    toolCount: 3,
   },
   {
     id: "",
@@ -254,6 +427,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-sonnet-4-5",
     team: "marketing",
+    description: "Growth hacking and campaigns.",
+    toolCount: 2,
   },
   {
     id: "",
@@ -264,6 +439,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-opus-4-5",
     team: "legal",
+    description: "Legal review and compliance.",
+    toolCount: 2,
   },
   {
     id: "",
@@ -274,6 +451,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "gpt-4o",
     team: "product",
+    description: "Roadmap planning and prioritization.",
+    toolCount: 3,
   },
   {
     id: "",
@@ -284,6 +463,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-opus-4-5",
     team: "engineering",
+    description: "Security audits and hardening.",
+    toolCount: 4,
   },
   {
     id: "",
@@ -294,6 +475,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-sonnet-4-5",
     team: "customer",
+    description: "Customer onboarding and retention.",
+    toolCount: 2,
   },
   {
     id: "",
@@ -304,6 +487,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "gpt-4o",
     team: "design",
+    description: "Interface design and prototyping.",
+    toolCount: 2,
   },
   {
     id: "",
@@ -314,6 +499,8 @@ const QUICK_ROLES: OrgNode[] = [
     status: "idle",
     model: "claude-haiku-4-5",
     team: "devops",
+    description: "CI/CD pipelines and infra.",
+    toolCount: 3,
   },
 ];
 
@@ -352,124 +539,405 @@ function addChildTo(tree: OrgNode, parentId: string, newNode: OrgNode): boolean 
   return false;
 }
 
-export type CompanyOrgChartProps = Record<string, never>;
+// ── Node SVG renderer ─────────────────────────────────────────────────────────
+function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
+  const isSelected = n.id === _selectedId;
+  const isAddTarget = n.id === _addTargetId;
+  const isDeletable = _deleteMode && n.id !== _activeOrgTree.id;
+  const statusC = statusColor(n.status);
+  const initial = n.name.charAt(0).toUpperCase();
+  const modelShort = truncate(shortModel(n.model), 14);
+  const reportCount = (n.children as LayoutNode[] | undefined)?.length ?? 0;
+  const hasTools = (n.toolCount ?? 0) > 0;
+  const hasCrons = (n.cronCount ?? 0) > 0;
+  const desc = n.description ? truncate(n.description, 30) : "";
 
-export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
-  const root = buildLayout();
-  const nodes = collectNodes(root);
-  const edges = collectEdges(root);
+  // Build chip list
+  type Chip = { text: string; color: string; bg: string };
+  const chips: Chip[] = [];
+
+  chips.push({
+    text: modelShort,
+    color: "var(--accent-2-muted)",
+    bg: "var(--bg-muted)",
+  });
+
+  if (reportCount > 0) {
+    chips.push({
+      text: `${reportCount} report${reportCount !== 1 ? "s" : ""}`,
+      color: "var(--muted-foreground)",
+      bg: "var(--bg-muted)",
+    });
+  }
+  if (hasTools) {
+    chips.push({
+      text: `${n.toolCount} tools`,
+      color: "var(--accent)",
+      bg: "rgba(96,165,250,0.13)",
+    });
+  }
+  if (hasCrons) {
+    chips.push({
+      text: `${n.cronCount} cron${n.cronCount !== 1 ? "s" : ""}`,
+      color: "#4ade80",
+      bg: "rgba(74,222,128,0.13)",
+    });
+  }
+
+  // Layout chips from left
+  const CHIP_Y = NODE_H - 28;
+  const CHIP_H = 16;
+  let chipX = 12;
+  const chipRects = chips.map((chip) => {
+    const w = chipW(chip.text);
+    const x = chipX;
+    chipX += w + 6;
+    return { ...chip, x, w };
+  });
+
+  const borderColor = isAddTarget
+    ? "#22c55e"
+    : isSelected
+      ? n.color
+      : isDeletable
+        ? "#ef4444"
+        : "var(--border)";
+  const borderWidth = isSelected || isAddTarget || isDeletable ? 2 : 1;
+
+  return svg`
+    <g
+      class="cd-oc-node ${isSelected ? "cd-oc-node--selected" : ""} ${n.status === "crashed" ? "cd-oc-node--crashed" : ""} ${isDeletable ? "cd-oc-node--deletable" : ""}"
+      transform="translate(${n.x}, ${n.y})"
+      @click=${() => {
+        if (isDeletable) {
+          deleteNode(ORG_TREE, n.id);
+          if (_selectedId === n.id) {
+            _selectedId = null;
+          }
+        } else {
+          _selectedId = isSelected ? null : n.id;
+          _addTargetId = null;
+        }
+      }}
+      style="cursor:${isDeletable ? "not-allowed" : "pointer"}"
+    >
+      <!-- Selection glow halo -->
+      ${
+        isSelected
+          ? svg`
+        <rect x="-4" y="-4" width="${NODE_W + 8}" height="${NODE_H + 8}" rx="16"
+          fill="none" stroke="${n.color}" stroke-width="2.5" opacity="0.35" />
+      `
+          : ""
+      }
+
+      <!-- Card background -->
+      <rect x="0" y="0" width="${NODE_W}" height="${NODE_H}" rx="12"
+        fill="var(--card)"
+        stroke="${borderColor}"
+        stroke-width="${borderWidth}"
+      />
+
+      <!-- Top accent strip -->
+      <rect x="2" y="0" width="${NODE_W - 4}" height="4" rx="2" fill="${n.color}" />
+
+      <!-- Avatar circle background -->
+      <circle cx="28" cy="42" r="17"
+        fill="${n.color}20"
+        stroke="${n.color}"
+        stroke-width="1.5"
+      />
+      <!-- Avatar initial -->
+      <text x="28" y="42"
+        text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="700" fill="${n.color}" font-family="monospace"
+      >${initial}</text>
+
+      <!-- Status dot -->
+      <circle cx="39" cy="30" r="5" fill="${statusC}" />
+      ${
+        n.status === "active"
+          ? svg`
+        <circle cx="39" cy="30" r="5" fill="${statusC}" opacity="0.4">
+          <animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/>
+        </circle>
+      `
+          : ""
+      }
+
+      <!-- Name -->
+      <text x="52" y="34"
+        fill="var(--text-strong)" font-size="12.5" font-weight="700" font-family="monospace"
+      >${truncate(n.name, 17)}</text>
+
+      <!-- Role (colored) -->
+      <text x="52" y="49"
+        fill="${n.color}" font-size="10.5" opacity="0.9"
+      >${n.role}</text>
+
+      <!-- Description -->
+      ${
+        desc
+          ? svg`<text x="12" y="67" fill="var(--muted-foreground)" font-size="9.5">${desc}</text>`
+          : ""
+      }
+
+      <!-- Divider -->
+      <line x1="12" y1="${NODE_H - 36}" x2="${NODE_W - 12}" y2="${NODE_H - 36}"
+        stroke="var(--border)" stroke-width="0.5" opacity="0.6" />
+
+      <!-- Chip row -->
+      ${chipRects.map(
+        (chip) => svg`
+        <rect x="${chip.x}" y="${CHIP_Y}" width="${chip.w}" height="${CHIP_H}" rx="${CHIP_H / 2}"
+          fill="${chip.bg}" />
+        <text
+          x="${chip.x + chip.w / 2}" y="${CHIP_Y + CHIP_H / 2}"
+          text-anchor="middle" dominant-baseline="central"
+          font-size="9.5" fill="${chip.color}" font-family="monospace"
+        >${chip.text}</text>
+      `,
+      )}
+
+      <!-- Delete X overlay -->
+      ${
+        isDeletable
+          ? svg`
+        <rect x="${NODE_W - 30}" y="8" width="20" height="20" rx="4" fill="rgba(239,68,68,0.18)" />
+        <text x="${NODE_W - 20}" y="20" fill="#ef4444" font-size="14" text-anchor="middle" dominant-baseline="middle">×</text>
+      `
+          : ""
+      }
+    </g>
+  `;
+}
+
+// ── Main render ───────────────────────────────────────────────────────────────
+export type CompanyOrgChartProps = {
+  agents?: ClawDockAgent[];
+};
+
+export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
+  const hasRealAgents = props.agents && props.agents.length > 0;
+  // Update active tree from real agents each render
+  if (hasRealAgents) {
+    _activeOrgTree = agentsToOrgTree(props.agents!);
+  } else {
+    _activeOrgTree = ORG_TREE;
+  }
+  let nodes: LayoutNode[];
+  let edges: EdgeDef[];
+  let teamGroups: TeamGroup[] = [];
+
+  if (_layout === "teams") {
+    const result = buildTeamsLayout();
+    nodes = result.nodes;
+    edges = result.edges;
+    teamGroups = result.teamGroups;
+  } else {
+    const result = buildHierarchyLayout();
+    nodes = result.nodes;
+    edges = result.edges;
+  }
 
   const allX = nodes.map((n) => n.x);
   const allY = nodes.map((n) => n.y);
-  const svgW = Math.max(...allX) + NODE_W + 40;
-  const svgH = Math.max(...allY) + NODE_H + 40;
+  const rawW = Math.max(...allX) + NODE_W + 60;
+  const rawH = Math.max(...allY) + NODE_H + 80;
+
+  const svgW =
+    _layout === "teams" && teamGroups.length
+      ? Math.max(...teamGroups.map((tg) => tg.x + tg.w)) + 40
+      : rawW;
+  const svgH =
+    _layout === "teams" && teamGroups.length
+      ? Math.max(...teamGroups.map((tg) => tg.y + tg.h)) + 40
+      : rawH;
 
   const selected = nodes.find((n) => n.id === _selectedId) ?? null;
+
+  // Build set of node IDs connected to selected (for edge highlight)
+  const connectedIds = new Set<string>();
+  if (_selectedId) {
+    connectedIds.add(_selectedId);
+    for (const n of nodes) {
+      const kids = (n.children as LayoutNode[] | undefined) ?? [];
+      if (n.id === _selectedId) {
+        kids.forEach((c) => connectedIds.add(c.id));
+      }
+      if (kids.some((c) => c.id === _selectedId)) {
+        connectedIds.add(n.id);
+      }
+    }
+  }
 
   return html`
     <div class="cd-page cd-page--orgchart cd-oc-fullwidth">
 
-      <!-- Full-width SVG topology graph -->
+      <!-- Demo banner when no real agents are configured -->
+      ${
+        !hasRealAgents
+          ? html`
+              <div class="cd-oc-demo-banner">
+                <span class="cd-oc-demo-banner__icon">🔭</span>
+                <span>
+                  <strong>Demo preview</strong> — no agents configured yet. Add agents in your config to see your
+                  real org chart here.
+                </span>
+              </div>
+            `
+          : ""
+      }
+
+      <!-- Main canvas -->
       <div class="cd-oc-canvas-wrap cd-oc-canvas-wrap--full">
-        <div class="cd-oc-canvas">
-          <svg class="cd-oc-svg" viewBox="-20 -20 ${svgW} ${svgH}" preserveAspectRatio="xMidYMin meet" style="width:100%;height:auto;min-height:100%">
-            <!-- Edge lines -->
-            <g class="cd-oc-edges">
-              ${edges.map(
-                (e) => svg`
-                <path class="cd-oc-edge"
-                  d="M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1 + e.y2) / 2}, ${e.x2} ${(e.y1 + e.y2) / 2}, ${e.x2} ${e.y2}"
-                  fill="none"
+        <div class="cd-oc-canvas" style="transform-origin:top center;transform:scale(${_zoom});transition:transform 0.15s ease">
+          <svg class="cd-oc-svg"
+            viewBox="-20 -20 ${svgW} ${svgH}"
+            preserveAspectRatio="xMidYMin meet"
+            style="width:100%;height:auto;min-height:100%">
+
+            <!-- Dot grid background -->
+            <defs>
+              <pattern id="cd-dot-grid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="1" r="1" fill="rgba(148,163,184,0.10)" />
+              </pattern>
+              <!-- Arrow marker -->
+              <marker id="cd-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L6,3 z" fill="var(--border)" opacity="0.5" />
+              </marker>
+              <marker id="cd-arrow-sel" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L6,3 z" fill="var(--accent)" opacity="0.8" />
+              </marker>
+            </defs>
+            <rect x="-20" y="-20" width="${svgW}" height="${svgH}" fill="url(#cd-dot-grid)" />
+
+            <!-- Team group containers (teams view only) -->
+            ${teamGroups.map(
+              (tg) => svg`
+              <g>
+                <!-- Group fill -->
+                <rect x="${tg.x}" y="${tg.y}" width="${tg.w}" height="${tg.h}" rx="14"
+                  fill="${tg.color}07"
+                  stroke="${tg.color}28"
+                  stroke-width="1"
                 />
-              `,
-              )}
+                <!-- Header strip -->
+                <rect x="${tg.x}" y="${tg.y}" width="${tg.w}" height="30" rx="10"
+                  fill="${tg.color}18"
+                />
+                <!-- Team label -->
+                <text
+                  x="${tg.x + tg.w / 2}" y="${tg.y + 17}"
+                  text-anchor="middle" dominant-baseline="central"
+                  font-size="9.5" font-weight="700" fill="${tg.color}" font-family="monospace"
+                  letter-spacing="1.5"
+                >${tg.team.toUpperCase()}</text>
+              </g>
+            `,
+            )}
+
+            <!-- Edges -->
+            <g class="cd-oc-edges">
+              ${edges.map((e) => {
+                const mid = (e.y1 + e.y2) / 2;
+                const isHighlighted =
+                  _selectedId &&
+                  connectedIds.has(_selectedId) &&
+                  (Math.abs(
+                    e.x1 - (nodes.find((n) => n.id === _selectedId)?.x ?? -9999) - NODE_W / 2,
+                  ) < 2 ||
+                    Math.abs(
+                      e.x2 - (nodes.find((n) => n.id === _selectedId)?.x ?? -9999) - NODE_W / 2,
+                    ) < 2);
+                return svg`
+                  <path
+                    class="cd-oc-edge"
+                    d="M ${e.x1} ${e.y1} C ${e.x1} ${mid}, ${e.x2} ${mid}, ${e.x2} ${e.y2}"
+                    fill="none"
+                    stroke="${isHighlighted ? e.parentColor : "var(--border)"}"
+                    stroke-width="${isHighlighted ? 2 : 1.5}"
+                    opacity="${isHighlighted ? 0.85 : 0.45}"
+                    marker-end="${isHighlighted ? "url(#cd-arrow-sel)" : "url(#cd-arrow)"}"
+                  />
+                `;
+              })}
             </g>
 
-            <!-- Node cards -->
-            ${nodes.map((n) => {
-              const isSelected = n.id === _selectedId;
-              const isAddTarget = n.id === _addTargetId;
-              const statusC = statusColor(n.status);
-              return svg`
-                <g
-                  class="cd-oc-node ${isSelected ? "cd-oc-node--selected" : ""} ${n.status === "crashed" ? "cd-oc-node--crashed" : ""} ${_deleteMode && n.id !== ORG_TREE.id ? "cd-oc-node--deletable" : ""}"
-                  transform="translate(${n.x}, ${n.y})"
-                  @click=${() => {
-                    if (_deleteMode && n.id !== ORG_TREE.id) {
-                      deleteNode(ORG_TREE, n.id);
-                      if (_selectedId === n.id) {
-                        _selectedId = null;
-                      }
-                    } else {
-                      _selectedId = isSelected ? null : n.id;
-                      _addTargetId = null;
-                    }
-                  }}
-                  style="cursor:${_deleteMode && n.id !== ORG_TREE.id ? "not-allowed" : "pointer"}"
-                >
-                  <!-- Card bg -->
-                  <rect x="0" y="0" width="${NODE_W}" height="${NODE_H}" rx="10"
-                    fill="var(--card)"
-                    stroke="${isAddTarget ? "#22c55e" : isSelected ? n.color : _deleteMode && n.id !== ORG_TREE.id ? "#ef4444" : "var(--border)"}"
-                    stroke-width="${isSelected || isAddTarget || (_deleteMode && n.id !== ORG_TREE.id) ? 2.5 : 1}"
-                  />
-                  <!-- Left accent bar -->
-                  <rect x="0" y="0" width="4" height="${NODE_H}" rx="2" fill="${n.color}" />
-                  <!-- Status dot -->
-                  <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" />
-                  ${
-                    n.status === "active"
-                      ? svg`
-                    <circle cx="${NODE_W - 14}" cy="14" r="5" fill="${statusC}" opacity="0.4">
-                      <animate attributeName="r" values="5;9;5" dur="2s" repeatCount="indefinite"/>
-                      <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/>
-                    </circle>
-                  `
-                      : ""
-                  }
-                  <!-- Delete X overlay in delete mode -->
-                  ${
-                    _deleteMode && n.id !== ORG_TREE.id
-                      ? svg`
-                    <rect x="${NODE_W - 26}" y="4" width="20" height="20" rx="4" fill="rgba(239,68,68,0.15)" />
-                    <text x="${NODE_W - 16}" y="17" fill="#ef4444" font-size="14" text-anchor="middle" dominant-baseline="middle">×</text>
-                  `
-                      : ""
-                  }
-                  <!-- Emoji -->
-                  <text x="20" y="32" font-size="20" dominant-baseline="middle">${n.emoji}</text>
-                  <!-- Name -->
-                  <text x="48" y="26" fill="var(--text-strong)" font-size="11.5" font-weight="700" font-family="monospace">${n.name}</text>
-                  <!-- Role -->
-                  <text x="48" y="42" fill="var(--muted-foreground)" font-size="10">${n.role}</text>
-                  <!-- Model chip -->
-                  <rect x="8" y="${NODE_H - 22}" width="${NODE_W - 16}" height="16" rx="4" fill="var(--bg-muted)" />
-                  <text x="${NODE_W / 2}" y="${NODE_H - 11}" fill="var(--accent-2-muted)" font-size="9.5" text-anchor="middle" font-family="monospace">${n.model}</text>
-                </g>
-              `;
-            })}
+            <!-- Nodes -->
+            ${nodes.map((n) => renderNodeSvg(n, nodes))}
           </svg>
+        </div>
+
+        <!-- Zoom controls (bottom-left) -->
+        <div class="cd-oc-zoom-controls">
+          <button class="cd-oc-zoom-btn" title="Zoom in"
+            @click=${() => {
+              _zoom = Math.min(_zoom + 0.15, 2.5);
+            }}>
+            +
+          </button>
+          <button class="cd-oc-zoom-btn cd-oc-zoom-btn--fit" title="Fit / Reset zoom"
+            @click=${() => {
+              _zoom = 1.0;
+            }}>
+            ⊡
+          </button>
+          <button class="cd-oc-zoom-btn" title="Zoom out"
+            @click=${() => {
+              _zoom = Math.max(_zoom - 0.15, 0.3);
+            }}>
+            −
+          </button>
         </div>
 
         <!-- Floating toolbar (bottom-center) -->
         <div class="cd-oc-float-toolbar">
-          <span class="cd-oc-float-toolbar__count">${nodes.length} roles · ${nodes.filter((n) => n.status === "active").length} active</span>
+          <span class="cd-oc-float-toolbar__count">
+            ${nodes.length} agents · ${nodes.filter((n) => n.status === "active").length} active
+          </span>
           <div class="cd-oc-float-toolbar__sep"></div>
-          <button class="cd-oc-float-btn ${_deleteMode ? "cd-oc-float-btn--danger" : ""}"
+
+          <button
+            class="cd-oc-float-btn ${_deleteMode ? "cd-oc-float-btn--danger" : ""}"
             @click=${() => {
               _deleteMode = !_deleteMode;
               _addTargetId = null;
             }}>
             ${_deleteMode ? "✅ Done" : "🗑️ Remove"}
           </button>
-          <button class="cd-oc-float-btn cd-oc-float-btn--primary"
+          <button
+            class="cd-oc-float-btn cd-oc-float-btn--primary"
             @click=${() => {
               _addTargetId = _selectedId ?? nodes[nodes.length - 1]?.id ?? null;
               _deleteMode = false;
             }}>
             + Add Role
           </button>
+
           <div class="cd-oc-float-toolbar__sep"></div>
+
+          <!-- Layout toggle (Teams / Hierarchy) -->
+          <div class="cd-oc-layout-toggle">
+            <button
+              class="cd-oc-layout-btn ${_layout === "teams" ? "cd-oc-layout-btn--active" : ""}"
+              @click=${() => {
+                _layout = "teams";
+              }}>
+              Teams
+            </button>
+            <button
+              class="cd-oc-layout-btn ${_layout === "hierarchy" ? "cd-oc-layout-btn--active" : ""}"
+              @click=${() => {
+                _layout = "hierarchy";
+              }}>
+              Hierarchy
+            </button>
+          </div>
+
+          <div class="cd-oc-float-toolbar__sep"></div>
+
           <div class="cd-oc-legend-inline">
             <span class="cd-oc-legend__dot cd-oc-legend__dot--active"></span>Active
             <span class="cd-oc-legend__dot cd-oc-legend__dot--idle"></span>Idle
@@ -492,7 +960,9 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
               <span>Add role under: <strong>${nodes.find((n) => n.id === _addTargetId)?.name ?? "—"}</strong></span>
               <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
                 _addTargetId = null;
-              }}>${icons.x}</button>
+              }}>
+                ${icons.x}
+              </button>
             </div>
             <div class="cd-oc-add-panel__quick">
               ${QUICK_ROLES.map(
@@ -536,6 +1006,9 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
                   status: "idle",
                   model: "claude-sonnet-4-5",
                   team: "general",
+                  description: "",
+                  toolCount: 0,
+                  cronCount: 0,
                   children: [],
                 };
                 addChildTo(ORG_TREE, _addTargetId!, newNode);
@@ -554,7 +1027,7 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
           : ""
       }
 
-      <!-- Floating detail card (appears on node click) -->
+      <!-- Floating detail card (top-right) -->
       ${
         selected
           ? html`
@@ -563,11 +1036,13 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
             <span class="cd-oc-detail__emoji">${selected.emoji}</span>
             <div style="flex:1;min-width:0">
               <div class="cd-oc-detail__name">${selected.name}</div>
-              <div class="cd-oc-detail__role">${selected.role}</div>
+              <div class="cd-oc-detail__role" style="color:${selected.color}">${selected.role}</div>
             </div>
             <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
               _selectedId = null;
-            }}>${icons.x}</button>
+            }}>
+              ${icons.x}
+            </button>
           </div>
           <div class="cd-oc-detail__body">
             <div class="cd-oc-kv"><span>Team</span><span class="cd-oc-kv__val">${selected.team}</span></div>
@@ -575,6 +1050,16 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
             <div class="cd-oc-kv"><span>Status</span>
               <span class="cd-badge ${selected.status === "active" ? "cd-badge--ok" : selected.status === "crashed" ? "cd-badge--danger" : "cd-badge--muted"}">${selected.status}</span>
             </div>
+            ${
+              (selected.toolCount ?? 0) > 0
+                ? html`<div class="cd-oc-kv"><span>Tools</span><span class="cd-oc-kv__val">${selected.toolCount}</span></div>`
+                : ""
+            }
+            ${
+              (selected.cronCount ?? 0) > 0
+                ? html`<div class="cd-oc-kv"><span>Crons</span><span class="cd-oc-kv__val">${selected.cronCount}</span></div>`
+                : ""
+            }
             <div class="cd-oc-kv"><span>Reports to</span>
               <span class="cd-oc-kv__val cd-mono">${(() => {
                 const parent = nodes.find((n) =>
@@ -590,6 +1075,11 @@ export function renderCompanyOrgChart(_props: CompanyOrgChartProps) {
                 <span class="cd-oc-kv__val">${(selected.children as LayoutNode[]).map((c) => c.name).join(", ")}</span>
               </div>
             `
+                : ""
+            }
+            ${
+              selected.description
+                ? html`<div style="font-size:11px;color:var(--muted-foreground);line-height:1.5;margin-top:4px">${selected.description}</div>`
                 : ""
             }
             <div class="cd-oc-detail__actions">

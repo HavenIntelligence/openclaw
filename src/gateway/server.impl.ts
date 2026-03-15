@@ -8,6 +8,7 @@ import type { CanvasHostServer } from "../canvas-host/server.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { createDefaultDeps } from "../cli/deps.js";
+import { initCompanyService } from "../company/company-service.js";
 import { isRestartEnabled } from "../config/commands.js";
 import {
   CONFIG_PATH,
@@ -766,6 +767,10 @@ export async function startGatewayServer(
 
   if (!minimalTestGateway) {
     void cron.start().catch((err) => logCron.error(`failed to start: ${String(err)}`));
+    // Initialize ClawDock company service (best-effort — do not block gateway startup)
+    void initCompanyService(broadcast).catch((err) =>
+      log.warn(`company service init failed: ${String(err)}`),
+    );
   }
 
   // Recover pending outbound deliveries from previous crash/restart.

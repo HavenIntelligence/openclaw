@@ -43,6 +43,15 @@ export const loadValidatedConfigForPluginRegistration =
 // and set the flag accordingly.
 const entries: SubCliEntry[] = [
   {
+    name: "clawdock",
+    description: "ClawDock multi-agent orchestration — manage agents, fleet, tasks, teams",
+    hasSubcommands: true,
+    register: async (program) => {
+      const mod = await import("../company-cli.js");
+      mod.registerClawDockCli(program);
+    },
+  },
+  {
     name: "acp",
     description: "Agent Control Protocol tools",
     hasSubcommands: true,

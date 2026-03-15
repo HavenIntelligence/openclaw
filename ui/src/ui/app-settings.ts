@@ -12,6 +12,7 @@ import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-iden
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
+import { loadCompanyAll } from "./controllers/company.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronRuns, loadCronStatus } from "./controllers/cron.ts";
 import { loadDebug } from "./controllers/debug.ts";
@@ -265,6 +266,16 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "debug") {
     await loadDebug(host as unknown as OpenClawApp);
     host.eventLog = host.eventLogBuffer;
+  }
+  if (
+    host.tab === "companyOverview" ||
+    host.tab === "companyFleet" ||
+    host.tab === "companyTeams" ||
+    host.tab === "companyOrgChart" ||
+    host.tab === "companyOffice" ||
+    host.tab === "companyTasks"
+  ) {
+    await loadCompanyAll(host as unknown as OpenClawApp);
   }
   if (host.tab === "logs") {
     host.logsAtBottom = true;

@@ -36,6 +36,7 @@ import {
   deleteTeam,
   saveCompanyProfile,
   sendMessageToCompany,
+  loadCompanyMessages,
 } from "./controllers/company.ts";
 import {
   applyConfig,
@@ -1947,6 +1948,7 @@ export function renderApp(state: AppViewState) {
                   },
                   onSendMessage: async (content) => {
                     await sendMessageToCompany(state, content);
+                    await loadCompanyMessages(state);
                     requestHostUpdate?.();
                   },
                 }),
@@ -2030,6 +2032,7 @@ export function renderApp(state: AppViewState) {
                   messages: state.companyMessages,
                   onSendMessage: async (content) => {
                     await sendMessageToCompany(state, content);
+                    await loadCompanyMessages(state);
                     requestHostUpdate?.();
                   },
                   onStopAgent: async (agentId) => {

@@ -1,5 +1,14 @@
 import type { EventLogEntry } from "./app-events.ts";
 import type { CompactionStatus, FallbackStatus } from "./app-tool-stream.ts";
+import type {
+  AgentMessage,
+  ClawDockAgent,
+  CompanyProfile,
+  FleetSnapshot,
+  LogEntry as CompanyLogEntry,
+  Task,
+  TeamConfig,
+} from "./company-types.ts";
 import type { CronModelSuggestionsState, CronState } from "./controllers/cron.ts";
 import type { DevicePairingList } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
@@ -226,6 +235,15 @@ export type AppViewState = {
   usageLogFilterTools: string[];
   usageLogFilterHasTools: boolean;
   usageLogFilterQuery: string;
+  // ── ClawDock company state ───────────────────────────────────────────────
+  companyAgents: ClawDockAgent[];
+  companyAgentsLoading: boolean;
+  companyFleetSnapshot: FleetSnapshot | null;
+  companyTasks: Task[];
+  companyTeams: TeamConfig[];
+  companyProfile: CompanyProfile | null;
+  companyAgentLogs: Map<string, CompanyLogEntry[]>;
+  companyMessages: AgentMessage[];
 } & Pick<
   CronState,
   | "cronLoading"
