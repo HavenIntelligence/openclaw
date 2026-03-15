@@ -144,6 +144,7 @@ export class Orchestrator {
             description: entry.subtask,
             status: "in_progress",
             priority: "medium",
+            agentId: entry.agentId,
             assignee: entry.agentId,
             assignedBy: agentId,
             assignedAt: Date.now(),
@@ -351,23 +352,21 @@ function buildVerifierPrompt(
 ): string {
   return (
     `You are a quality verifier for ${role}. ` +
-    `Review the following result against the original task and decide if it is complete and high-quality.\n\n` +
+    `Review the following result against the original task.\n\n` +
     `ORIGINAL TASK:\n${originalTask}\n\n` +
     `CURRENT RESULT (Round ${round}/${maxRounds}):\n${currentResult}\n\n` +
-    `Evaluate:\n` +
-    `1. Does the result fully address the original task?\n` +
-    `2. Is the quality sufficient for delivery?\n` +
-    `3. Are there significant gaps or errors?\n\n` +
-    `Respond with ONLY one word: "DONE" if the result is ready, or "REFINE" if another round is needed.`
+    `Only request another round when there are SERIOUS problems: major gaps, critical errors, or the result clearly fails the task. ` +
+    `If the result is acceptable, incomplete but usable, or only needs minor polish, approve it.\n\n` +
+    `Respond with ONLY one word: "DONE" to approve and finish, or "REFINE" only if another round is strictly necessary.`
   );
 }
 
 function parseVerifierVerdict(raw: string): "done" | "refine" {
   const normalized = raw.trim().toUpperCase();
-  if (normalized.includes("DONE")) {
-    return "done";
+  if (normalized.includes("REFINE")) {
+    return "refine";
   }
-  return "refine";
+  return "done";
 }
 
 // ── JSON plan parser ───────────────────────────────────────────────────────

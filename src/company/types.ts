@@ -142,9 +142,17 @@ export interface Task {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
+  /** Agent who is executing the task (same as assignee; stored explicitly for queries). */
+  agentId?: string;
   assignee?: string; // agentId — who is executing the task
   assignedBy?: string; // agentId — who created/delegated the task
   assignedAt?: number; // timestamp when assigned
+  /** When execution of this task started (ms). Set when status becomes in_progress. */
+  startTime?: number;
+  /** When execution of this task ended (ms). Set when status becomes done. */
+  endTime?: number;
+  /** Session key for the run (e.g. agent:main, agent:ceo). */
+  sessionId?: string;
   reviewedBy?: string; // agentId — who reviews (defaults to assignedBy)
   reviewNote?: string; // reviewer comment on review/done
   roundCount?: number; // how many review cycles this task has been through

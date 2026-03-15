@@ -45,10 +45,13 @@ export class TaskStore {
     params: Omit<Task, "id" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
   ): Promise<Task> {
     const now = Date.now();
+    const status = params.status ?? "backlog";
     const task: Task = {
       ...params,
-      status: params.status ?? "backlog",
+      status,
       id: generateId(),
+      agentId: params.agentId ?? params.assignee,
+      startTime: params.startTime ?? (status === "in_progress" ? now : undefined),
       createdAt: now,
       updatedAt: now,
     };
@@ -62,13 +65,29 @@ export class TaskStore {
     if (idx < 0) {
       return null;
     }
-    this.tasks[idx] = {
-      ...this.tasks[idx],
+    const now = Date.now();
+    const prev = this.tasks[idx];
+    const next: Task = {
+      ...prev,
       ...partial,
       id,
-      createdAt: this.tasks[idx].createdAt,
-      updatedAt: Date.now(),
+      createdAt: prev.createdAt,
+      updatedAt: now,
     };
+    if (partial.assignee !== undefined) {
+      next.agentId = partial.agentId ?? partial.assignee;
+    }
+    if (
+      partial.status === "in_progress" &&
+      prev.status !== "in_progress" &&
+      next.startTime == null
+    ) {
+      next.startTime = now;
+    }
+    if (partial.status === "done" && next.endTime == null) {
+      next.endTime = now;
+    }
+    this.tasks[idx] = next;
     await this.persist();
     return this.tasks[idx];
   }
@@ -84,7 +103,7 @@ export class TaskStore {
   }
 
   async assign(taskId: string, agentId: string): Promise<Task | null> {
-    return this.update(taskId, { assignee: agentId });
+    return this.update(taskId, { assignee: agentId, agentId });
   }
 
   private async persist(): Promise<void> {

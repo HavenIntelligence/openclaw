@@ -483,7 +483,11 @@ export const companyHandlers: GatewayRequestHandlers = {
       description: typeof params.description === "string" ? params.description : undefined,
       status: (params.status as never) ?? "backlog",
       priority: (params.priority as never) ?? "medium",
+      agentId: typeof params.agentId === "string" ? params.agentId : undefined,
       assignee: typeof params.assignee === "string" ? params.assignee : undefined,
+      startTime: typeof params.startTime === "number" ? params.startTime : undefined,
+      endTime: typeof params.endTime === "number" ? params.endTime : undefined,
+      sessionId: typeof params.sessionId === "string" ? params.sessionId : undefined,
       project: typeof params.project === "string" ? params.project : undefined,
       tags: Array.isArray(params.tags) ? (params.tags as string[]) : undefined,
       dueAt: typeof params.dueAt === "number" ? params.dueAt : undefined,
@@ -514,6 +518,18 @@ export const companyHandlers: GatewayRequestHandlers = {
     }
     if (typeof params.assignee === "string") {
       partial.assignee = params.assignee;
+    }
+    if (typeof params.agentId === "string") {
+      partial.agentId = params.agentId;
+    }
+    if (typeof params.startTime === "number") {
+      partial.startTime = params.startTime;
+    }
+    if (typeof params.endTime === "number") {
+      partial.endTime = params.endTime;
+    }
+    if (typeof params.sessionId === "string") {
+      partial.sessionId = params.sessionId;
     }
     if (typeof params.project === "string") {
       partial.project = params.project;
@@ -611,6 +627,7 @@ export const companyHandlers: GatewayRequestHandlers = {
               description: content,
               status: "in_progress",
               priority: "high",
+              agentId: director.id,
               assignee: director.id,
               project: "Orchestration",
             });
