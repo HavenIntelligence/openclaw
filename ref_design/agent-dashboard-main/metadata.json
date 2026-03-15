@@ -1,0 +1,5 @@
+{
+  "name": "AgentOps Dashboard",
+  "description": "A dashboard for tracking the state and lineage of multiple collaborative agents over time.",
+  "requestFramePermissions": []
+}
