@@ -37,7 +37,7 @@ interface DashboardProps {
 // ── Resize constants ────────────────────────────────────────────────────
 const LEFT_DEFAULT = 256;
 const LEFT_MIN = 120;
-const RIGHT_DEFAULT = 480;
+const RIGHT_DEFAULT = 360;
 const RIGHT_MIN = 200;
 const BOTTOM_DEFAULT = 280;
 const BOTTOM_MIN = 100;

@@ -13,7 +13,7 @@ import {
   Zap,
   MessageSquare,
 } from "lucide-react";
-import React, { useState } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { Agent, LifecycleEvent, AgentSnapshot } from "./types";
 
 interface RightPanelProps {
@@ -34,6 +34,40 @@ export function MonitorRightPanel({
   maxTime,
 }: Omit<RightPanelProps, "selectedAgentId" | "setSelectedAgentId">) {
   const [showLegendModal, setShowLegendModal] = useState(false);
+  const [chatHeight, setChatHeight] = useState<number | null>(null); // null = use 40% default
+  const chatDragging = useRef(false);
+  const chatStartY = useRef(0);
+  const chatStartH = useRef(0);
+
+  const chatRef = useRef<HTMLDivElement>(null);
+  const onChatResizeDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      chatDragging.current = true;
+      chatStartY.current = e.clientY;
+      chatStartH.current = chatRef.current?.offsetHeight ?? chatHeight ?? 160;
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+
+      const onMove = (ev: globalThis.MouseEvent) => {
+        if (!chatDragging.current) {
+          return;
+        }
+        const delta = chatStartY.current - ev.clientY;
+        setChatHeight(Math.max(60, chatStartH.current + delta));
+      };
+      const onUp = () => {
+        chatDragging.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [chatHeight],
+  );
 
   const groupedSnapshots = {
     running: snapshots.filter((s) => s.currentStatus === "running"),
@@ -46,7 +80,7 @@ export function MonitorRightPanel({
   return (
     <div className="w-full flex flex-col bg-[#0f0f0f] h-full min-w-0">
       {/* System Overview */}
-      <div className="flex-none max-h-[35%] overflow-y-auto p-4 custom-scrollbar border-b border-zinc-800/50">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
             <Layers size={16} className="text-zinc-400" />
@@ -180,10 +214,42 @@ export function MonitorRightPanel({
         </div>
       </div>
 
+      {/* Chat resize handle */}
+      <div
+        onMouseDown={onChatResizeDown}
+        style={{
+          height: 5,
+          cursor: "row-resize",
+          position: "relative",
+          flexShrink: 0,
+          marginTop: -2,
+          marginBottom: -3,
+          zIndex: 30,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 2,
+            height: 1,
+            background: "var(--border, rgba(63,63,70,0.5))",
+            transition: "background 0.15s",
+          }}
+        />
+      </div>
+
       {/* Chat */}
       <div
-        className="flex-1 flex flex-col overflow-hidden"
-        style={{ background: "var(--bg-elevated, #191c24)" }}
+        ref={chatRef}
+        className="flex flex-col overflow-hidden"
+        style={{
+          height: chatHeight ?? "40%",
+          flexShrink: 0,
+          minHeight: 60,
+          background: "var(--bg-elevated, #191c24)",
+        }}
       >
         <div
           className="p-3 border-b border-zinc-800/80"
