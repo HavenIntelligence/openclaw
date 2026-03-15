@@ -50,6 +50,8 @@ type CanvasBubble = {
 type LogEntry = {
   id: string;
   ts: string;
+  /** Numeric timestamp for stable sort (newest last). */
+  tsNum?: number;
   agent: string;
   agentEmoji: string;
   type: "tool_call" | "output" | "thinking" | "human" | "error" | "system";
@@ -155,6 +157,7 @@ function addLog(
   _execLog.push({
     id: `l-${_logIdCounter++}`,
     ts,
+    tsNum: now.getTime(),
     agent,
     agentEmoji: emoji,
     type,
@@ -550,6 +553,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
         backendEntries.push({
           id: e.id,
           ts: new Date(e.ts).toTimeString().slice(0, 8),
+          tsNum: e.ts,
           agent: e.agentId,
           agentEmoji: agent?.emoji ?? "🤖",
           type: e.type in typeMap ? typeMap[e.type] : (e.type as LogEntry["type"]),
@@ -559,20 +563,26 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
         });
       }
     }
-    backendEntries.sort((a, b) => a.id.localeCompare(b.id));
   }
   // _execLog holds only optimistic/human-action entries (not duplicated by backend).
   const backendIds = new Set(backendEntries.map((e) => e.id));
   const humanEntries = _execLog.filter((e) => !backendIds.has(e.id));
-  // Combined display list (backend real logs + optimistic human entries), newest last.
-  const displayLog = [...backendEntries, ...humanEntries].slice(-80);
+  // Sort by timestamp so order is chronological and final output appears at the bottom.
+  const combined = [...backendEntries, ...humanEntries].toSorted(
+    (a, b) => (a.tsNum ?? 0) - (b.tsNum ?? 0),
+  );
+  const displayLog = combined.slice(-80);
 
   const W = COLS * TILE;
   const H = ROWS * TILE;
 
-  // Filter out noise entries ([tools], [warn], [info] prefixes)
+  // Filter out noise: [tools]/[warn]/[info], and backend duplicate of human message
   const filteredLog = displayLog.filter((e) => {
     if (e.type === "system" && /^\[tools\]|\[warn\]|\[info\]/.test(e.content)) {
+      return false;
+    }
+    // Backend sends "[Human → Orchestrator] …"; we already show the human entry, so hide this duplicate
+    if (e.type === "system" && e.content.startsWith("[Human → Orchestrator]")) {
       return false;
     }
     return true;

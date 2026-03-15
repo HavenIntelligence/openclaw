@@ -515,14 +515,13 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         ];
       }
     }
-    // Also inject a synthetic log entry so orchestration phases show in the execution log
+    // Inject synthetic log only for phases that add clarity; skip "executing"/"complete"
+    // so the log ends with the actual final output (e.g. "2") instead of redundant labels.
     const phaseLabel: Record<string, string> = {
       planning: "Planning — analyzing task and determining delegation…",
       delegating: "Delegating subtasks to subordinates…",
       synthesizing: "Synthesizing subordinate results into final answer…",
       verifying: "Verifying result quality — checking if another round is needed…",
-      executing: "Executing task directly…",
-      complete: "Task completed.",
       failed: "Orchestration failed.",
     };
     if (phaseLabel[phase]) {
