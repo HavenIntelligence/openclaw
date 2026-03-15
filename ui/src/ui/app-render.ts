@@ -2062,6 +2062,14 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
 
+        ${
+          state.tab === "companyMonitor"
+            ? lazyRender(lazyCompanyMonitor, (m) =>
+                m.renderCompanyMonitor({ requestUpdate: requestHostUpdate }),
+              )
+            : nothing
+        }
+
         ${state.tab === "roleHub" ? lazyRender(lazyRoleHub, (m) => m.renderRoleHub({})) : nothing}
 
         ${
