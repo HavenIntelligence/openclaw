@@ -299,103 +299,9 @@ const INITIAL_AGENTS: OfficeAgent[] = [
 ];
 
 // ── Demo execution log ────────────────────────────────────────────────────
-let _execLog: LogEntry[] = [
-  {
-    id: "l-0",
-    ts: "09:41:02",
-    agent: "ai-director",
-    agentEmoji: "👑",
-    type: "system",
-    content: "Project Alpha started — 4 agents assigned",
-    tokens: undefined,
-  },
-  {
-    id: "l-1",
-    ts: "09:41:04",
-    agent: "research-alpha",
-    agentEmoji: "🔍",
-    type: "thinking",
-    content:
-      "Analyzing task: competitor pricing research for B2B AI SaaS landscape (10 companies)…",
-  },
-  {
-    id: "l-2",
-    ts: "09:41:08",
-    agent: "research-alpha",
-    agentEmoji: "🔍",
-    type: "tool_call",
-    content: "web_search({ query: 'AI SaaS pricing models 2026 comparison', max_results: 20 })",
-    tokens: 1_200,
-    duration: 1840,
-  },
-  {
-    id: "l-3",
-    ts: "09:41:12",
-    agent: "research-alpha",
-    agentEmoji: "🔍",
-    type: "output",
-    content:
-      "Found 18 sources. Extracting pricing tiers for: Anthropic API, OpenAI, Cohere, Mistral, Replicate, Modal, Together.ai, Groq, Fireworks, Perplexity…",
-    tokens: 4_800,
-  },
-  {
-    id: "l-4",
-    ts: "09:42:15",
-    agent: "code-agent",
-    agentEmoji: "💻",
-    type: "tool_call",
-    content: "bash({ cmd: 'npm run test -- --coverage --reporter=verbose' })",
-    tokens: 320,
-    duration: 12_400,
-  },
-  {
-    id: "l-5",
-    ts: "09:42:27",
-    agent: "code-agent",
-    agentEmoji: "💻",
-    type: "output",
-    content:
-      "Test suite: 142 passed, 2 failed\n  ✗ MCP retry test: timeout after 5000ms\n  ✗ Auth token refresh: expected 200, got 401",
-    tokens: 890,
-  },
-  {
-    id: "l-6",
-    ts: "09:43:01",
-    agent: "writing-beta",
-    agentEmoji: "✍️",
-    type: "thinking",
-    content:
-      "Drafting 'AI Agents in 2026' — structuring 5 sections: Overview, Use Cases, Architecture, Risks, Future Outlook…",
-  },
-  {
-    id: "l-7",
-    ts: "09:43:18",
-    agent: "writing-beta",
-    agentEmoji: "✍️",
-    type: "output",
-    content:
-      "**AI Agents in 2026: The Operational Layer**\n\nThe shift from language models to autonomous agents represents the most significant productivity unlock since cloud computing. In 2026, enterprises are deploying fleets of specialized agents…",
-    tokens: 2_400,
-  },
-  {
-    id: "l-8",
-    ts: "09:44:00",
-    agent: "ops-prime",
-    agentEmoji: "🏢",
-    type: "system",
-    content: "⚠️ review-gamma crashed (OOM). Supervisor initiating restart sequence (attempt 1/3).",
-  },
-  {
-    id: "l-9",
-    ts: "09:44:05",
-    agent: "ai-director",
-    agentEmoji: "👑",
-    type: "human",
-    content: "[Human override] Hold restart — check if context window exceeded first.",
-  },
-];
+let _execLog: LogEntry[] = [];
 
-let _logIdCounter = 10;
+let _logIdCounter = 0;
 
 // ── Projects ───────────────────────────────────────────────────────────────
 const PROJECTS: Project[] = [
@@ -439,7 +345,10 @@ let _onSendMessage: ((content: string) => void) | undefined;
 let _onStopAgent: ((agentId: string) => void) | undefined;
 
 // ── Animation state ────────────────────────────────────────────────────────
-let _agents: OfficeAgent[] = INITIAL_AGENTS.map((a) => ({ ...a }));
+// Starts empty — populated from real agent data via props. Falls back to INITIAL_AGENTS only in
+// dev/demo mode when no backend agents are present.
+let _agents: OfficeAgent[] = [];
+let _agentsSeededFromBackend = false;
 let _messages: FlyingMessage[] = [];
 let _canvasBubbles: CanvasBubble[] = [];
 let _bubbleIdCounter = 0;
@@ -705,6 +614,7 @@ export type CompanyOfficeProps = {
   requestUpdate?: () => void;
   agents?: ClawDockAgent[];
   logs?: Map<string, RealLogEntry[]>;
+  messages?: import("../company-types.js").AgentMessage[];
   onSendMessage?: (content: string) => void;
   onStopAgent?: (agentId: string) => void;
 };
@@ -716,7 +626,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   _onSendMessage = props.onSendMessage;
   _onStopAgent = props.onStopAgent;
 
-  // Sync real agent statuses into the simulation when provided.
+  // Rebuild agent list from real backend data on first seed or when the list changes.
   if (props.agents && props.agents.length > 0) {
     const statusMap: Record<string, OfficeAgent["status"]> = {
       active: "working",
@@ -726,13 +636,49 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       stopping: "idle",
       paused: "idle",
     };
+
+    // Seed new agents that don't exist in the animation yet.
+    let col = 0;
+    let row = 0;
     for (const realAgent of props.agents) {
       const existing = _agents.find((a) => a.id === realAgent.id);
       if (existing) {
-        // Only override status — preserve animation position.
         existing.status = statusMap[realAgent.status] ?? "idle";
+        existing.name = realAgent.name || existing.name;
+        existing.emoji = realAgent.emoji || existing.emoji;
+      } else {
+        // Assign a desk position based on layout order.
+        const deskX = col * TILE * 2 + TILE;
+        const deskY = row * TILE * 2 + TILE;
+        col++;
+        if (col > 3) {
+          col = 0;
+          row++;
+        }
+        _agents.push({
+          id: realAgent.id,
+          name: realAgent.name || realAgent.id,
+          emoji: realAgent.emoji || "🤖",
+          color: "#60a5fa",
+          team: realAgent.team || "general",
+          status: statusMap[realAgent.status] ?? "idle",
+          activity: "",
+          thoughtBubble: "",
+          thoughtTimer: 0,
+          messageTo: null,
+          x: deskX,
+          y: deskY,
+          targetX: deskX,
+          targetY: deskY,
+          deskX,
+          deskY,
+        });
+        _agentsSeededFromBackend = true;
       }
     }
+    // Remove agents that no longer exist in backend.
+    const backendIds = new Set(props.agents.map((a) => a.id));
+    _agents = _agents.filter((a) => backendIds.has(a.id));
   }
 
   // Merge real log entries into the execution log (most recent at top, deduplicated by id).
@@ -914,6 +860,20 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
           <div class="cd-office-canvas" style="width:${W}px;height:${H}px">
             <div class="cd-office-floor" style="width:${W}px;height:${H}px">
 
+              ${
+                _agents.length === 0
+                  ? html`
+                      <div class="cd-office-empty-state">
+                        <div class="cd-office-empty-state__icon">🏢</div>
+                        <div class="cd-office-empty-state__title">No active agents</div>
+                        <div class="cd-office-empty-state__sub">
+                          Start agents from the Agent Status page or configure them in Company Settings.
+                        </div>
+                      </div>
+                    `
+                  : ""
+              }
+
               <!-- Zones -->
               ${FLOOR_TILES.map(
                 (zone) => html`
@@ -1066,10 +1026,10 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             <div class="cd-office-summary-card">
               <span class="cd-office-summary-card__label">Now</span>
               <span class="cd-office-summary-card__title">
-                ${_execLog.length > 0 ? _execLog[_execLog.length - 1].content.slice(0, 60) : "Waiting for first event"}
+                ${_execLog.length > 0 ? _execLog[_execLog.length - 1].content.slice(0, 60) : "Waiting for agent activity…"}
               </span>
               <span class="cd-office-summary-card__detail">
-                ${_execLog.length > 0 ? `${_execLog[_execLog.length - 1].agentEmoji} ${_execLog[_execLog.length - 1].agent} · ${_execLog[_execLog.length - 1].ts}` : "Press play to start"}
+                ${_execLog.length > 0 ? `${_execLog[_execLog.length - 1].agentEmoji} ${_execLog[_execLog.length - 1].agent} · ${_execLog[_execLog.length - 1].ts}` : "No agents active yet"}
               </span>
             </div>
             <div class="cd-office-summary-card">
@@ -1131,11 +1091,16 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               )}
             </div>
             <div class="cd-office-log">
-              ${[..._execLog]
-                .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
-                .toReversed()
-                .map(
-                  (entry) => html`
+              ${
+                _execLog.length === 0
+                  ? html`
+                      <div class="cd-office-empty">No logs yet — start an agent to see activity here.</div>
+                    `
+                  : [..._execLog]
+                      .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
+                      .toReversed()
+                      .map(
+                        (entry) => html`
                 <div class="cd-log-entry ${logTypeClass(entry.type)}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type)}</span>
@@ -1147,7 +1112,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   <div class="cd-log-entry__content">${entry.content}</div>
                 </div>
               `,
-                )}
+                      )
+              }
             </div>
           `
               : ""
@@ -1196,71 +1162,82 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               ? html`
             <div class="cd-office-human">
               <div class="cd-human-desc">
-                Send a message to your company. The relevant agent(s) will receive and respond to your instruction.
+                Talk to your company. The AI Director will receive your message and coordinate agents to respond.
               </div>
+
+              <!-- Message history from real backend -->
+              <div class="cd-human-chat-log">
+                ${
+                  (props.messages ?? []).length === 0
+                    ? html`
+                        <div class="cd-office-empty">No messages yet. Start a conversation below.</div>
+                      `
+                    : (props.messages ?? []).slice(-30).map((msg) => {
+                        const isHuman = msg.from === "human" || msg.type === "task";
+                        const ts = new Date(msg.ts).toTimeString().slice(0, 8);
+                        return html`
+                    <div class="cd-human-chat-entry cd-human-chat-entry--${isHuman ? "human" : "agent"}">
+                      <div class="cd-human-chat-entry__meta">
+                        <span class="cd-human-chat-entry__who">${isHuman ? "👤 You" : `🤖 ${msg.from}`}</span>
+                        <span class="cd-human-chat-entry__ts">${ts}</span>
+                      </div>
+                      <div class="cd-human-chat-entry__content">${msg.content}</div>
+                    </div>
+                  `;
+                      })
+                }
+              </div>
+
               <label class="cd-form-label">Message to Company</label>
-              <textarea class="cd-form-textarea" rows="4"
-                placeholder="Type your instruction, question, or strategic directive…"
+              <textarea class="cd-form-textarea" rows="3"
+                placeholder="Type an instruction, question, or task for the AI Director…"
                 .value=${_humanInput}
                 @input=${(e: Event) => {
                   _humanInput = (e.target as HTMLTextAreaElement).value;
+                }}
+                @keydown=${(e: KeyboardEvent) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    const msg = _humanInput.trim();
+                    if (!msg) {
+                      return;
+                    }
+                    const directorAgent = _agents.find(
+                      (a) => a.id === "ai-director" || a.team === "executive",
+                    );
+                    if (directorAgent) {
+                      directorAgent.activity = "Processing your message";
+                      directorAgent.status = "thinking";
+                    }
+                    if (_onSendMessage) {
+                      _onSendMessage(msg);
+                    }
+                    _humanInput = "";
+                  }
                 }}></textarea>
               <div class="cd-human-actions">
                 <button class="cd-btn cd-btn--primary" @click=${() => {
-                  if (!_humanInput.trim()) {
+                  const msg = _humanInput.trim();
+                  if (!msg) {
                     return;
                   }
-                  const msg = _humanInput.trim();
-                  addLog("human", "👤", "human", `[Founder] ${msg}`);
-                  const founderAgent = _agents.find((a) => a.id === "ai-director");
-                  if (founderAgent) {
-                    founderAgent.activity = "Processing founder input";
-                    founderAgent.status = "thinking";
+                  const directorAgent = _agents.find(
+                    (a) => a.id === "ai-director" || a.team === "executive",
+                  );
+                  if (directorAgent) {
+                    directorAgent.activity = "Processing your message";
+                    directorAgent.status = "thinking";
                   }
-                  // Send to real backend if connected
                   if (_onSendMessage) {
                     _onSendMessage(msg);
                   }
                   _humanInput = "";
-                }}>📨 Send</button>
+                }}>📨 Send <span class="cd-btn__hint">⌘↵</span></button>
                 <button class="cd-btn cd-btn--outline" @click=${() => {
                   _isPaused = true;
-                  addLog("human", "👤", "system", "[Founder] Fleet paused.");
                 }}>⏸ Pause Fleet</button>
                 <button class="cd-btn cd-btn--outline" @click=${() => {
                   _isPaused = false;
-                  addLog("human", "👤", "system", "[Founder] Fleet resumed.");
                 }}>▶ Resume</button>
-              </div>
-
-              <!-- Pending reviews -->
-              <div class="cd-human-reviews">
-                <div class="cd-human-reviews__title">⚠️ Pending Review (2)</div>
-                <div class="cd-human-review-item">
-                  <div class="cd-human-review-item__title">writing-beta → Approve blog post</div>
-                  <div class="cd-human-review-item__desc">"AI Agents in 2026" — 2,480 words, ready to publish.</div>
-                  <div class="cd-human-review-item__actions">
-                    <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-                      addLog(
-                        "human",
-                        "👤",
-                        "human",
-                        "✅ Approved: 'AI Agents in 2026' for publish.",
-                      );
-                    }}>✅ Approve</button>
-                    <button class="cd-btn cd-btn--outline cd-btn--sm">↩ Revise</button>
-                  </div>
-                </div>
-                <div class="cd-human-review-item">
-                  <div class="cd-human-review-item__title">code-agent → Approve deploy v1.2.0</div>
-                  <div class="cd-human-review-item__desc">PR #42 merged. All tests passing.</div>
-                  <div class="cd-human-review-item__actions">
-                    <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-                      addLog("human", "👤", "human", "✅ Approved: production deploy v1.2.0.");
-                    }}>✅ Approve</button>
-                    <button class="cd-btn cd-btn--outline cd-btn--sm">⏸ Hold</button>
-                  </div>
-                </div>
               </div>
             </div>
           `

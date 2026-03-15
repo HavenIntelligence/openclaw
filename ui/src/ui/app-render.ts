@@ -1940,8 +1940,13 @@ export function renderApp(state: AppViewState) {
                   profile: state.companyProfile,
                   agents: state.companyAgents,
                   tasks: state.companyTasks,
+                  messages: state.companyMessages,
                   onSaveProfile: async (partial) => {
                     await saveCompanyProfile(state, partial);
+                    requestHostUpdate?.();
+                  },
+                  onSendMessage: async (content) => {
+                    await sendMessageToCompany(state, content);
                     requestHostUpdate?.();
                   },
                 }),
@@ -2022,6 +2027,7 @@ export function renderApp(state: AppViewState) {
                   requestUpdate: requestHostUpdate,
                   agents: state.companyAgents,
                   logs: state.companyAgentLogs,
+                  messages: state.companyMessages,
                   onSendMessage: async (content) => {
                     await sendMessageToCompany(state, content);
                     requestHostUpdate?.();

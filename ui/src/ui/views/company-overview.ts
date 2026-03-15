@@ -1,5 +1,6 @@
 import { html } from "lit";
 import type {
+  AgentMessage,
   ClawDockAgent,
   CompanyProfile as RealProfile,
   Task as RealTask,
@@ -66,8 +67,10 @@ let _newCompanyStage = "Pre-seed";
 let _realProfile: RealProfile | null = null;
 let _realAgents: ClawDockAgent[] = [];
 let _realTasks: RealTask[] = [];
+let _realMessages: AgentMessage[] = [];
 // ── Callbacks (set from props each render) ──────────────────────────────────
 let _onSaveProfile: ((partial: Partial<RealProfile>) => void) | undefined;
+let _onSendMessage: ((content: string) => void) | undefined;
 
 // ── Agent data (lifecycle + trace) ────────────────────────────────────────
 type AgentLifecycleState = "created" | "running" | "paused" | "crashed" | "archived";
@@ -855,99 +858,87 @@ function renderTasks() {
   });
 }
 function renderChats() {
-  const CHAT_LOG = [
-    {
-      ts: "09:54",
-      from: "👤 Founder",
-      to: "👑 ai-director",
-      content: "[Human override] Hold restart — check if context window exceeded first.",
-      type: "human",
-    },
-    {
-      ts: "09:47",
-      from: "👑 ai-director",
-      to: "📣 content-director",
-      content:
-        "📋 Strategy brief for Q1 content push — prioritize AI use-case blog and pricing page rewrite.",
-      type: "out",
-    },
-    {
-      ts: "09:47",
-      from: "📣 content-director",
-      to: "🔍 research-alpha",
-      content:
-        "🔍 Task: Competitor pricing analysis — focus on 10 top AI SaaS players, extract pricing tiers.",
-      type: "out",
-    },
-    {
-      ts: "09:48",
-      from: "🏢 ops-prime",
-      to: "👑 ai-director",
-      content:
-        "📊 Q1 OKR report filed — 87% target completion. 2 red items: hiring (delayed) and churn (+1.2%).",
-      type: "in",
-    },
-    {
-      ts: "09:46",
-      from: "💻 code-agent",
-      to: "🏢 ops-prime",
-      content:
-        "💻 PR #42 ready — MCP retry fix + auth token refresh. All 142 tests passing. Requesting approval.",
-      type: "in",
-    },
-    {
-      ts: "09:43",
-      from: "🔍 research-alpha",
-      to: "✍️ writing-beta",
-      content:
-        "📄 Research complete: 18 sources, pricing matrix attached. Avg entry $49/mo, enterprise ~$2K.",
-      type: "out",
-    },
-    {
-      ts: "09:40",
-      from: "📝 review-gamma",
-      to: "🔔 supervisor",
-      content: "❌ CRASH: Context window exceeded (128K). Supervisor restart requested.",
-      type: "error",
-    },
-    {
-      ts: "09:40",
-      from: "✍️ writing-beta",
-      to: "📝 review-gamma",
-      content:
-        "✍️ Draft ready: 'AI Agents in 2026' — 2,480 words, SEO score 84/100. Please review.",
-      type: "out",
-    },
-  ];
+  let _chatInput = "";
   const typeColor: Record<string, string> = {
-    out: "var(--border)",
-    in: "rgba(34,197,94,0.3)",
-    error: "rgba(239,68,68,0.3)",
-    human: "rgba(245,158,11,0.3)",
+    task: "rgba(245,158,11,0.3)",
+    result: "rgba(34,197,94,0.3)",
+    query: "rgba(96,165,250,0.3)",
+    notify: "var(--border)",
   };
   return html`
     <div class="cd-chats-view">
       <div class="cd-chats-header">
         <span class="cd-chats-header__title">💬 Company Chats</span>
         <span class="cd-chats-header__sub"
-          >All inter-agent messages and human overrides · ${CHAT_LOG.length} entries</span
+          >${
+            _realMessages.length > 0 ? `${_realMessages.length} messages` : "No messages yet"
+          }</span
         >
       </div>
       <div class="cd-chats-log">
-        ${CHAT_LOG.map(
-          (msg) => html`
-          <div class="cd-chat-entry" style="border-left-color:${typeColor[msg.type] ?? "var(--border)"}">
-            <div class="cd-chat-entry__meta">
-              <span class="cd-chat-entry__from">${msg.from}</span>
-              <span class="cd-chat-entry__arrow">→</span>
-              <span class="cd-chat-entry__to">${msg.to}</span>
-              <span class="cd-chat-entry__ts">${msg.ts}</span>
+        ${
+          _realMessages.length === 0
+            ? html`
+                <div class="cd-chat-empty">
+                  <div class="cd-chat-empty__icon">💬</div>
+                  <div class="cd-chat-empty__title">No messages yet</div>
+                  <div class="cd-chat-empty__sub">
+                    Agent-to-agent messages and human interactions will appear here once agents are active.
+                  </div>
+                </div>
+              `
+            : _realMessages.slice(-50).map((msg) => {
+                const isHuman = msg.from === "human";
+                const ts = new Date(msg.ts).toTimeString().slice(0, 8);
+                return html`
+            <div class="cd-chat-entry" style="border-left-color:${isHuman ? "rgba(245,158,11,0.5)" : (typeColor[msg.type] ?? "var(--border)")}">
+              <div class="cd-chat-entry__meta">
+                <span class="cd-chat-entry__from">${isHuman ? "👤 You" : msg.from}</span>
+                <span class="cd-chat-entry__arrow">→</span>
+                <span class="cd-chat-entry__to">${msg.to}</span>
+                <span class="cd-chat-entry__ts">${ts}</span>
+              </div>
+              <div class="cd-chat-entry__content">${msg.content}</div>
             </div>
-            <div class="cd-chat-entry__content">${msg.content}</div>
-          </div>
-        `,
-        )}
+          `;
+              })
+        }
       </div>
+
+      <!-- Send message to company -->
+      ${
+        _onSendMessage
+          ? html`
+        <div class="cd-chats-compose">
+          <textarea class="cd-form-textarea cd-chats-compose__input" rows="2"
+            placeholder="Message to AI Director…"
+            @input=${(e: Event) => {
+              _chatInput = (e.target as HTMLTextAreaElement).value;
+            }}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                const msg = _chatInput.trim();
+                if (msg) {
+                  _onSendMessage?.(msg);
+                  _chatInput = "";
+                  (e.target as HTMLTextAreaElement).value = "";
+                }
+              }
+            }}></textarea>
+          <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${(e: Event) => {
+            const textarea = (e.target as HTMLElement)
+              .previousElementSibling as HTMLTextAreaElement;
+            const msg = textarea?.value.trim() ?? _chatInput.trim();
+            if (msg) {
+              _onSendMessage?.(msg);
+              textarea.value = "";
+              _chatInput = "";
+            }
+          }}>Send ⌘↵</button>
+        </div>
+      `
+          : ""
+      }
     </div>
   `;
 }
@@ -1162,7 +1153,9 @@ export type CompanyOverviewProps = {
   profile?: RealProfile | null;
   agents?: ClawDockAgent[];
   tasks?: RealTask[];
+  messages?: AgentMessage[];
   onSaveProfile?: (partial: Partial<RealProfile>) => void;
+  onSendMessage?: (content: string) => void;
 };
 
 export function renderCompanyOverview(props: CompanyOverviewProps) {
@@ -1170,7 +1163,9 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _realProfile = props.profile ?? null;
   _realAgents = props.agents ?? [];
   _realTasks = props.tasks ?? [];
+  _realMessages = props.messages ?? [];
   _onSaveProfile = props.onSaveProfile;
+  _onSendMessage = props.onSendMessage;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🦀", label: "Company" },
     { id: "fleet", icon: "🤖", label: "Agent Status" },

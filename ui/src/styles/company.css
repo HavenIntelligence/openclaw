@@ -1337,6 +1337,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: auto;
   background:
     radial-gradient(circle at 50% 30%, rgba(59, 130, 246, 0.06), transparent 60%), var(--card);
 }
@@ -3680,6 +3682,88 @@
   filter: brightness(1.1);
 }
 
+/* ── Zoom controls (bottom-left floating) ─────────────────────────────── */
+.cd-oc-zoom-controls {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 20;
+}
+
+.cd-oc-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(16px);
+  color: #e2e8f0;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+  line-height: 1;
+}
+
+.cd-oc-zoom-btn:hover {
+  background: rgba(51, 65, 85, 0.85);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.cd-oc-zoom-btn--fit {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* ── Layout toggle (Teams / Hierarchy) ────────────────────────────────── */
+.cd-oc-layout-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.cd-oc-layout-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.8);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+  white-space: nowrap;
+}
+
+.cd-oc-layout-btn:hover {
+  color: #e2e8f0;
+}
+
+.cd-oc-layout-btn--active {
+  background: rgba(59, 130, 246, 0.22);
+  color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+/* ── Enhanced node selection glow ────────────────────────────────────── */
+.cd-oc-node--selected rect:first-of-type {
+  filter: none; /* handled inline per-node color */
+}
+
 /* Destructive button variant */
 .cd-btn--destructive {
   background: rgba(239, 68, 68, 0.15);
@@ -5570,4 +5654,132 @@
 /* Edge hit area for hover */
 .cd-office-edge__hit {
   cursor: pointer;
+}
+
+/* ── Office empty state ─────────────────────────────────────────────────── */
+.cd-office-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  z-index: 5;
+  pointer-events: none;
+}
+.cd-office-empty-state__icon {
+  font-size: 48px;
+  opacity: 0.4;
+}
+.cd-office-empty-state__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-strong);
+  opacity: 0.6;
+}
+.cd-office-empty-state__sub {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  text-align: center;
+  max-width: 320px;
+  opacity: 0.7;
+}
+
+/* ── Chat empty state ────────────────────────────────────────────────────── */
+.cd-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 10px;
+  text-align: center;
+}
+.cd-chat-empty__icon {
+  font-size: 36px;
+  opacity: 0.4;
+}
+.cd-chat-empty__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+  opacity: 0.6;
+}
+.cd-chat-empty__sub {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  max-width: 280px;
+}
+
+/* ── Chats compose bar ───────────────────────────────────────────────────── */
+.cd-chats-compose {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.cd-chats-compose__input {
+  flex: 1;
+  resize: none;
+  font-size: 13px;
+}
+
+/* ── Human chat entries (office Talk to Company) ─────────────────────────── */
+.cd-human-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  max-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface2);
+}
+.cd-human-chat-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.cd-human-chat-entry--human {
+  background: rgba(245, 158, 11, 0.08);
+}
+.cd-human-chat-entry--agent {
+  background: rgba(96, 165, 250, 0.07);
+}
+.cd-human-chat-entry__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cd-human-chat-entry__who {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.cd-human-chat-entry__ts {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-left: auto;
+}
+.cd-human-chat-entry__content {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* ── Btn hint (keyboard shortcut hint inside button) ─────────────────────── */
+.cd-btn__hint {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 4px;
 }

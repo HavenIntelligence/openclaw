@@ -97,6 +97,7 @@ export async function loadCompanyAll(state: CompanyState): Promise<void> {
     loadCompanyTasks(state),
     loadCompanyTeams(state),
     loadCompanyProfile(state),
+    loadCompanyMessages(state),
   ]);
 }
 
