@@ -59,6 +59,7 @@ export class CompanyService {
       this.logStore,
       this.messageBus,
       broadcast,
+      this.taskStore,
     );
     this.fleetMonitor = new FleetMonitor(this.processManager, broadcast);
 

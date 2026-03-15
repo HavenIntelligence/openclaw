@@ -3,6 +3,7 @@ import type { LogStore } from "./log-store.js";
 import type { MessageBus } from "./message-bus.js";
 import type { ProcessManager } from "./process-manager.js";
 import type { AgentRegistry } from "./registry.js";
+import type { TaskStore } from "./task-store.js";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ export class Orchestrator {
     private readonly logStore: LogStore,
     private readonly messageBus: MessageBus,
     private readonly broadcast: GatewayBroadcastFn,
+    private readonly taskStore?: TaskStore,
   ) {}
 
   /**
@@ -124,8 +126,9 @@ export class Orchestrator {
         break;
       }
 
-      // Phase 2: Delegate
+      // Phase 2: Delegate — create tasks and dispatch
       this.emitPhase(orchId, agentId, "delegating", depth);
+      const subtaskIds: Map<string, string> = new Map(); // agentId → taskId
       for (const entry of plan) {
         this.messageBus.send(agentId, entry.agentId, entry.subtask, "task");
         this.logSystem(
@@ -133,10 +136,76 @@ export class Orchestrator {
           orchId,
           `Delegated to ${entry.agentId}: ${entry.subtask.slice(0, 100)}`,
         );
+        // Auto-create and assign a Task for each subtask
+        if (this.taskStore) {
+          const taskTitle = entry.subtask.slice(0, 100) + (entry.subtask.length > 100 ? "…" : "");
+          const task = await this.taskStore.create({
+            title: taskTitle,
+            description: entry.subtask,
+            status: "in_progress",
+            priority: "medium",
+            assignee: entry.agentId,
+            project: orchId,
+          });
+          subtaskIds.set(entry.agentId, task.id);
+          this.broadcast("company.task.updated", { task });
+          this.logSystem(
+            entry.agentId,
+            orchId,
+            `[TASK_ASSIGNED] ${entry.agentId} picked up: ${taskTitle}`,
+          );
+        }
       }
 
       const subtaskResults = await Promise.all(
-        plan.map((entry) => this.execute(entry.agentId, entry.subtask, opts, depth + 1)),
+        plan.map(async (entry) => {
+          const taskId = subtaskIds.get(entry.agentId);
+          try {
+            const result = await this.execute(entry.agentId, entry.subtask, opts, depth + 1);
+            // Mark task as done on success
+            if (taskId && this.taskStore) {
+              const task = this.taskStore.get(taskId);
+              const updated = await this.taskStore.update(taskId, {
+                status: "done",
+                tokensUsed: result.tokensUsed,
+              });
+              if (updated) {
+                this.broadcast("company.task.updated", { task: updated });
+                this.logSystem(
+                  entry.agentId,
+                  orchId,
+                  `[TASK_DONE] ${entry.agentId} completed: ${task?.title ?? taskId}`,
+                );
+              }
+            }
+            return result;
+          } catch (err) {
+            // Mark task as backlog on failure
+            if (taskId && this.taskStore) {
+              const task = this.taskStore.get(taskId);
+              const updated = await this.taskStore.update(taskId, { status: "backlog" });
+              if (updated) {
+                this.broadcast("company.task.updated", { task: updated });
+                this.logSystem(
+                  entry.agentId,
+                  orchId,
+                  `[TASK_FAILED] ${entry.agentId} failed: ${task?.title ?? taskId}`,
+                );
+              }
+            }
+            const errMsg = err instanceof Error ? err.message : String(err);
+            this.logSystem(entry.agentId, orchId, `❌ Subtask failed: ${errMsg}`);
+            return {
+              agentId: entry.agentId,
+              content: `[FAILED] ${errMsg}`,
+              tokensUsed: 0,
+              subtasks: [],
+              phase: "leaf" as const,
+              durationMs: 0,
+              rounds: 0,
+            };
+          }
+        }),
       );
 
       for (const sub of subtaskResults) {
