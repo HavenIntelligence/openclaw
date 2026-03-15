@@ -1101,13 +1101,14 @@
 .cd-fleet-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12.5px;
 }
 
 .cd-fleet-table th {
   text-align: left;
-  padding: 10px 14px;
-  font-size: 10.5px;
+  padding: 8px 12px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--muted-foreground);
   text-transform: uppercase;
@@ -1133,49 +1134,93 @@
 }
 
 .cd-fleet-cell {
-  padding: 10px 14px;
+  padding: 8px 12px;
   color: var(--text);
   vertical-align: middle;
 }
 
 .cd-fleet-cell--name {
-  min-width: 180px;
+  width: 22%;
 }
 .cd-fleet-cell--model {
   white-space: nowrap;
 }
 .cd-fleet-cell--resource {
-  min-width: 120px;
+  width: 9%;
 }
 .cd-fleet-cell--muted {
   color: var(--muted-foreground);
-  font-size: 11.5px;
+  font-size: 11px;
 }
 .cd-fleet-cell--actions {
   white-space: nowrap;
-  display: flex;
-  gap: 4px;
+  width: 88px;
+  text-align: right;
+}
+
+.cd-fleet-actions {
+  display: inline-flex;
   align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+  width: 100%;
 }
 
 .cd-fleet-name-cell {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
 }
 
 .cd-fleet-name-cell__name {
   font-weight: 600;
   color: var(--text-strong);
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: 11.5px;
   display: block;
 }
 
 .cd-fleet-name-cell__team {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--muted-foreground);
   display: block;
+}
+
+.cd-fleet-table th:nth-child(1) {
+  width: 22%;
+}
+
+.cd-fleet-table th:nth-child(2) {
+  width: 15%;
+}
+
+.cd-fleet-table th:nth-child(3) {
+  width: 10%;
+}
+
+.cd-fleet-table th:nth-child(4) {
+  width: 10%;
+}
+
+.cd-fleet-table th:nth-child(5) {
+  width: 7%;
+}
+
+.cd-fleet-table th:nth-child(6),
+.cd-fleet-table th:nth-child(7) {
+  width: 9%;
+}
+
+.cd-fleet-table th:nth-child(8) {
+  width: 6%;
+}
+
+.cd-fleet-table th:nth-child(9) {
+  width: 8%;
+}
+
+.cd-fleet-table th:nth-child(10) {
+  width: 88px;
 }
 
 .cd-model-chip {
@@ -1191,9 +1236,9 @@
 .cd-pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 20px;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1242,10 +1287,10 @@
   background: var(--bg-muted);
   border-radius: 4px;
   overflow: hidden;
-  width: 64px;
+  width: 56px;
   display: inline-block;
   vertical-align: middle;
-  margin-right: 6px;
+  margin-right: 5px;
 }
 
 .cd-resource-bar__fill {
@@ -1255,7 +1300,7 @@
 }
 
 .cd-resource-bar__label {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--muted-foreground);
   vertical-align: middle;
 }
@@ -4061,31 +4106,31 @@
 /* ═══════════════════════════════════════════════════════════════
    Fleet table
    ═══════════════════════════════════════════════════════════════ */
-.cd-fleet-view {
+.cd-fleet-legacy-view {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.cd-fleet-header {
+.cd-fleet-legacy-header {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.cd-fleet-header__title {
+.cd-fleet-legacy-header__title {
   font-size: 16px;
   font-weight: 700;
   color: var(--text-strong);
 }
 
-.cd-fleet-header__sub {
+.cd-fleet-legacy-header__sub {
   font-size: 12px;
   color: var(--muted-foreground);
   flex: 1;
 }
 
-.cd-fleet-table {
+.cd-fleet-legacy-table {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
@@ -4093,7 +4138,7 @@
   overflow: hidden;
 }
 
-.cd-fleet-thead {
+.cd-fleet-legacy-thead {
   display: grid;
   grid-template-columns: 2fr 1.2fr 2fr 0.8fr 0.5fr 0.6fr 0.5fr;
   padding: 8px 16px;
@@ -4106,7 +4151,7 @@
   gap: 8px;
 }
 
-.cd-fleet-row {
+.cd-fleet-legacy-row {
   display: grid;
   grid-template-columns: 2fr 1.2fr 2fr 0.8fr 0.5fr 0.6fr 0.5fr;
   padding: 10px 16px;
@@ -4118,20 +4163,20 @@
   transition: background 0.12s;
 }
 
-.cd-fleet-row:hover {
+.cd-fleet-legacy-row:hover {
   background: var(--bg-muted);
 }
 
-.cd-fleet-row--selected {
+.cd-fleet-legacy-row--selected {
   background: rgba(99, 102, 241, 0.06);
 }
 
-.cd-fleet-row-detail {
+.cd-fleet-legacy-row-detail {
   border-top: 1px solid var(--border);
   background: var(--bg-muted);
 }
 
-.cd-fleet-agent {
+.cd-fleet-legacy-agent {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4770,8 +4815,8 @@
 }
 
 /* 8-column fleet grid for Agent Status */
-.cd-fleet-thead,
-.cd-fleet-row {
+.cd-fleet-legacy-thead,
+.cd-fleet-legacy-row {
   grid-template-columns: 2fr 1.4fr 2fr 0.8fr 0.5fr 0.6fr 0.5fr 0.8fr;
 }
 
@@ -6095,19 +6140,53 @@
 /* ── Chats compose bar ───────────────────────────────────────────────────── */
 .cd-chats-compose {
   display: flex;
-  gap: 8px;
-  align-items: flex-end;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 4px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+.cd-chats-compose__controls {
+  display: flex;
+}
+.cd-chats-compose__target {
+  width: min(320px, 100%);
+  max-width: 100%;
+}
+.cd-chats-compose__editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
 .cd-chats-compose__input {
-  flex: 1;
-  resize: none;
+  min-width: 0;
+  min-height: 96px;
+  resize: vertical;
   font-size: 13px;
 }
 
 /* ── Human chat entries (office Talk to Company) ─────────────────────────── */
+.cd-chats-compose__send {
+  min-height: 96px;
+  align-self: stretch;
+}
+
+@media (max-width: 720px) {
+  .cd-chats-compose__editor {
+    grid-template-columns: 1fr;
+  }
+
+  .cd-chats-compose__target,
+  .cd-chats-compose__send {
+    width: 100%;
+  }
+
+  .cd-chats-compose__send {
+    min-height: 40px;
+  }
+}
+
 .cd-human-chat-log {
   flex: 1;
   overflow-y: auto;

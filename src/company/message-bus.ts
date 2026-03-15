@@ -50,8 +50,17 @@ export class MessageBus {
     return msg;
   }
 
-  getHistory(opts?: { from?: string; to?: string; limit?: number }): AgentMessage[] {
+  getHistory(opts?: {
+    from?: string;
+    to?: string;
+    participants?: string[];
+    limit?: number;
+  }): AgentMessage[] {
     let result = this.history;
+    if (opts?.participants && opts.participants.length > 0) {
+      const participants = new Set(opts.participants);
+      result = result.filter((m) => participants.has(m.from) || participants.has(m.to));
+    }
     if (opts?.from) {
       result = result.filter((m) => m.from === opts.from);
     }

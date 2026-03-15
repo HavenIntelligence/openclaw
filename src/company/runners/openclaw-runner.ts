@@ -1,14 +1,15 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { loadConfig } from "../../config/config.js";
+import { resolveOpenClawPackageRootSync } from "../../infra/openclaw-root.js";
 import type { CliAgentRunner, ParsedOutput, RunOpts } from "./base.js";
 import { isBinaryAvailable } from "./base.js";
 
 /**
- * Runner that invokes an OpenClaw agent via `openclaw agent --local`.
+ * Runner that invokes an OpenClaw agent via the bundled CLI entry when the
+ * current package root can be resolved, and falls back to `openclaw` on PATH.
  *
  * Output modes:
  *  - `--json` emits a single pretty-printed JSON object to stdout (all on one
@@ -23,22 +24,25 @@ export class OpenClawRunner implements CliAgentRunner {
   readonly name = "openclaw" as const;
 
   async isAvailable(): Promise<boolean> {
-    if (resolveOpenClawEntryPath()) {
-      return true;
-    }
-    return isBinaryAvailable("openclaw");
+    return Boolean(resolveBundledOpenClawCliEntry()) || isBinaryAvailable("openclaw");
   }
 
   runTask(agentId: string, prompt: string, opts?: RunOpts): ChildProcess {
-    // Use the provided agent ID or fall back to the ClawDock agent's own ID
-    // (not "main") to prevent session lock collisions during parallel runs.
-    const openclawAgent = opts?.openclawAgentId ?? agentId;
+    const openclawAgent = opts?.openclawAgentId ?? resolveDefaultOpenClawAgentId();
     const fullPrompt = opts?.systemPrompt ? `[Role: ${opts.systemPrompt}]\n\n${prompt}` : prompt;
+    const { command, argsPrefix } = resolveOpenClawCliInvocation();
+    const args = [
+      ...argsPrefix,
+      "agent",
+      "--local",
+      "--json",
+      "--agent",
+      openclawAgent,
+      "-m",
+      fullPrompt,
+    ];
 
-    const args = ["agent", "--local", "--json", "--agent", openclawAgent, "-m", fullPrompt];
-    const invocation = resolveOpenClawSpawnInvocation(args);
-
-    return spawn(invocation.command, invocation.args, {
+    return spawn(command, args, {
       cwd: opts?.cwd,
       env: { ...process.env, ...opts?.env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -130,63 +134,6 @@ export function createOpenClawLineParser(): (line: string) => ParsedOutput | nul
   };
 }
 
-type OpenClawSpawnDeps = {
-  argv?: string[];
-  cwd?: string;
-  execPath?: string;
-  existsSync?: (filePath: string) => boolean;
-  moduleUrl?: string;
-};
-
-function looksLikeOpenClawEntry(filePath: string): boolean {
-  const base = path.basename(filePath).toLowerCase();
-  return base === "openclaw.mjs" || base === "entry.js" || base === "entry.mjs";
-}
-
-export function resolveOpenClawEntryPath(deps: OpenClawSpawnDeps = {}): string | null {
-  const existsSync = deps.existsSync ?? fs.existsSync;
-
-  try {
-    const here = fileURLToPath(deps.moduleUrl ?? import.meta.url);
-    const candidates = [
-      path.resolve(path.dirname(here), "../../../openclaw.mjs"),
-      path.resolve(path.dirname(here), "../../entry.js"),
-      path.resolve(path.dirname(here), "../../entry.mjs"),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const argv1 = (deps.argv ?? process.argv)[1]?.trim();
-  if (!argv1) {
-    return null;
-  }
-  const resolved = path.isAbsolute(argv1) ? argv1 : path.resolve(deps.cwd ?? process.cwd(), argv1);
-  if (!looksLikeOpenClawEntry(resolved) || !existsSync(resolved)) {
-    return null;
-  }
-  return resolved;
-}
-
-export function resolveOpenClawSpawnInvocation(
-  args: string[],
-  deps: OpenClawSpawnDeps = {},
-): { command: string; args: string[] } {
-  const entryPath = resolveOpenClawEntryPath(deps);
-  if (entryPath) {
-    return {
-      command: deps.execPath ?? process.execPath,
-      args: [entryPath, ...args],
-    };
-  }
-  return { command: "openclaw", args };
-}
-
 function parseJsonResult(obj: Record<string, unknown>): ParsedOutput | null {
   // { payloads: [{ text: string }], meta: { durationMs, agentMeta: { usage: { output } } } }
   if (Array.isArray(obj.payloads)) {
@@ -223,4 +170,36 @@ function parseJsonResult(obj: Record<string, unknown>): ParsedOutput | null {
   }
 
   return null;
+}
+
+function resolveOpenClawCliInvocation(): { command: string; argsPrefix: string[] } {
+  const bundledCliEntry = resolveBundledOpenClawCliEntry();
+  if (bundledCliEntry) {
+    return {
+      command: process.execPath,
+      argsPrefix: [bundledCliEntry],
+    };
+  }
+
+  return {
+    command: "openclaw",
+    argsPrefix: [],
+  };
+}
+
+function resolveBundledOpenClawCliEntry(): string | null {
+  const packageRoot = resolveOpenClawPackageRootSync({
+    moduleUrl: import.meta.url,
+    argv1: process.argv[1],
+    cwd: process.cwd(),
+  });
+  return packageRoot ? path.join(packageRoot, "openclaw.mjs") : null;
+}
+
+function resolveDefaultOpenClawAgentId(): string {
+  try {
+    return resolveDefaultAgentId(loadConfig());
+  } catch {
+    return "main";
+  }
 }

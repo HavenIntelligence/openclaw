@@ -1,72 +1,123 @@
-import { describe, expect, it } from "vitest";
-import {
-  createOpenClawLineParser,
-  resolveOpenClawEntryPath,
-  resolveOpenClawSpawnInvocation,
-} from "./openclaw-runner.js";
+import type { ChildProcess } from "node:child_process";
+import path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("resolveOpenClawEntryPath", () => {
-  it("prefers a local openclaw.mjs entry when present", () => {
-    const entry = resolveOpenClawEntryPath();
-    expect(entry).toBeTruthy();
-    expect(entry?.endsWith("/openclaw.mjs")).toBe(true);
-  });
+const spawnMock = vi.hoisted(() => vi.fn());
+const spawnSyncMock = vi.hoisted(() => vi.fn());
+const resolveOpenClawPackageRootSyncMock = vi.hoisted(() => vi.fn());
+const loadConfigMock = vi.hoisted(() => vi.fn());
+const resolveDefaultAgentIdMock = vi.hoisted(() => vi.fn());
 
-  it("ignores unrelated argv entries", () => {
-    const entry = resolveOpenClawEntryPath({
-      argv: ["/usr/local/bin/node", "/tmp/vitest.mjs"],
-      cwd: "/tmp",
-      existsSync: () => false,
-      moduleUrl: "file:///tmp/dist/company/runners/openclaw-runner.js",
-    });
-    expect(entry).toBeNull();
-  });
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: spawnMock,
+    spawnSync: spawnSyncMock,
+  };
 });
 
-describe("resolveOpenClawSpawnInvocation", () => {
-  it("spawns node with the local entry when available", () => {
-    const invocation = resolveOpenClawSpawnInvocation(["agent", "--local"], {
-      execPath: "/usr/local/bin/node",
-    });
-    expect(invocation.command).toBe("/usr/local/bin/node");
-    expect(invocation.args[0]?.endsWith("/openclaw.mjs")).toBe(true);
-    expect(invocation.args.slice(1)).toEqual(["agent", "--local"]);
+vi.mock("../../infra/openclaw-root.js", () => ({
+  resolveOpenClawPackageRootSync: resolveOpenClawPackageRootSyncMock,
+}));
+
+vi.mock("../../config/config.js", () => ({
+  loadConfig: loadConfigMock,
+}));
+
+vi.mock("../../agents/agent-scope.js", () => ({
+  resolveDefaultAgentId: resolveDefaultAgentIdMock,
+}));
+
+const { OpenClawRunner } = await import("./openclaw-runner.js");
+
+describe("OpenClawRunner", () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+    spawnSyncMock.mockReset();
+    resolveOpenClawPackageRootSyncMock.mockReset();
+    loadConfigMock.mockReset();
+    resolveDefaultAgentIdMock.mockReset();
+    spawnMock.mockReturnValue({} as ChildProcess);
+    loadConfigMock.mockReturnValue({});
+    resolveDefaultAgentIdMock.mockReturnValue("dev");
   });
 
-  it("falls back to the openclaw binary when no local entry exists", () => {
-    const invocation = resolveOpenClawSpawnInvocation(["agent", "--local"], {
-      execPath: "/usr/local/bin/node",
-      argv: ["/usr/local/bin/node", "/tmp/not-openclaw.js"],
-      cwd: "/tmp",
-      existsSync: () => false,
-      moduleUrl: "file:///tmp/dist/company/runners/openclaw-runner.js",
-    });
-    expect(invocation).toEqual({
-      command: "openclaw",
-      args: ["agent", "--local"],
-    });
-  });
-});
+  it("uses the bundled CLI entry when the current package root is available", () => {
+    resolveOpenClawPackageRootSyncMock.mockReturnValue("E:\\claw\\openclaw");
 
-describe("createOpenClawLineParser", () => {
-  it("ignores stdout preamble lines and parses the first JSON result object", () => {
-    const parseLine = createOpenClawLineParser();
-    expect(parseLine("🦞 OpenClaw 2026.3.13")).toBeNull();
-    expect(
-      parseLine(
-        "19:41:04 [plugins] plugins.allow is empty; discovered non-bundled plugins may auto-load",
-      ),
-    ).toBeNull();
-    expect(parseLine("{")).toBeNull();
-    expect(parseLine('  "payloads": [')).toBeNull();
-    expect(parseLine('    { "text": "Hey! 👋 What can I help you with?" }')).toBeNull();
-    expect(parseLine("  ],")).toBeNull();
-    expect(parseLine('  "meta": { "agentMeta": { "usage": { "output": 16 } } }')).toBeNull();
-    const result = parseLine("}");
-    expect(result).toEqual({
-      type: "result",
-      content: "Hey! 👋 What can I help you with?",
-      tokensUsed: 16,
+    const runner = new OpenClawRunner();
+    runner.runTask("engineering", "hello", {
+      cwd: "E:\\claw\\openclaw",
+      env: { OPENCLAW_PROFILE: "dev" },
+      openclawAgentId: "dev",
     });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        path.join("E:\\claw\\openclaw", "openclaw.mjs"),
+        "agent",
+        "--local",
+        "--json",
+        "--agent",
+        "dev",
+        "-m",
+        "hello",
+      ],
+      expect.objectContaining({
+        cwd: "E:\\claw\\openclaw",
+        env: expect.objectContaining({ OPENCLAW_PROFILE: "dev" }),
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
+  });
+
+  it("falls back to the PATH-installed openclaw binary when no package root is found", () => {
+    resolveOpenClawPackageRootSyncMock.mockReturnValue(null);
+
+    const runner = new OpenClawRunner();
+    runner.runTask("engineering", "hello");
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      "openclaw",
+      ["agent", "--local", "--json", "--agent", "dev", "-m", "hello"],
+      expect.any(Object),
+    );
+  });
+
+  it("falls back to main when config default agent resolution throws", () => {
+    resolveOpenClawPackageRootSyncMock.mockReturnValue(null);
+    loadConfigMock.mockImplementation(() => {
+      throw new Error("bad config");
+    });
+
+    const runner = new OpenClawRunner();
+    runner.runTask("engineering", "hello");
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      "openclaw",
+      ["agent", "--local", "--json", "--agent", "main", "-m", "hello"],
+      expect.any(Object),
+    );
+  });
+
+  it("reports available when the bundled CLI entry can be resolved", async () => {
+    resolveOpenClawPackageRootSyncMock.mockReturnValue("E:\\claw\\openclaw");
+
+    const runner = new OpenClawRunner();
+
+    await expect(runner.isAvailable()).resolves.toBe(true);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("checks PATH availability when the bundled CLI entry is not available", async () => {
+    resolveOpenClawPackageRootSyncMock.mockReturnValue(null);
+    spawnSyncMock.mockReturnValue({ status: 0 });
+
+    const runner = new OpenClawRunner();
+
+    await expect(runner.isAvailable()).resolves.toBe(true);
+    expect(spawnSyncMock).toHaveBeenCalledWith("which", ["openclaw"], { stdio: "ignore" });
   });
 });

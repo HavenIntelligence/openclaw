@@ -354,6 +354,8 @@ export class OpenClawApp extends LitElement {
   @state() companyProfile: import("./company-types.js").CompanyProfile | null = null;
   @state() companyAgentLogs: Map<string, import("./company-types.js").LogEntry[]> = new Map();
   @state() companyMessages: import("./company-types.js").AgentMessage[] = [];
+  @state() companyChatMessages: import("./company-types.js").AgentMessage[] = [];
+  @state() companyChatFilterAgentIds: string[] = [];
 
   @state() cronLoading = false;
   @state() cronJobsLoadingMore = false;

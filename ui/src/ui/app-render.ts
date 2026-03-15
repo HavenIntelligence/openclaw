@@ -28,6 +28,7 @@ import {
   pauseAgent,
   resumeAgent,
   createAgent,
+  updateAgent,
   createTask,
   updateTask,
   deleteTask,
@@ -37,6 +38,7 @@ import {
   deleteTeam,
   saveCompanyProfile,
   sendMessageToCompany,
+  loadCompanyChatMessages,
   loadCompanyMessages,
 } from "./controllers/company.ts";
 import {
@@ -1944,14 +1946,55 @@ export function renderApp(state: AppViewState) {
                   agents: state.companyAgents,
                   teams: state.companyTeams,
                   tasks: state.companyTasks,
-                  messages: state.companyMessages,
+                  messages: state.companyChatMessages,
+                  allMessages: state.companyMessages,
+                  logs: state.companyAgentLogs,
+                  chatFilterAgentIds: state.companyChatFilterAgentIds,
                   onSaveProfile: async (partial) => {
                     await saveCompanyProfile(state, partial);
                     requestHostUpdate?.();
                   },
-                  onSendMessage: async (content) => {
-                    await sendMessageToCompany(state, content);
-                    await loadCompanyMessages(state);
+                  onStartAgent: async (agentId) => {
+                    await startAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onStopAgent: async (agentId) => {
+                    await stopAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onRestartAgent: async (agentId) => {
+                    await restartAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onPauseAgent: async (agentId) => {
+                    await pauseAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onResumeAgent: async (agentId) => {
+                    await resumeAgent(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onLoadAgentLogs: async (agentId) => {
+                    await loadAgentLogs(state, agentId);
+                    requestHostUpdate?.();
+                  },
+                  onCreateAgent: async (params) => {
+                    await createAgent(state, params);
+                    requestHostUpdate?.();
+                  },
+                  onUpdateAgent: async (agentId, params) => {
+                    await updateAgent(state, agentId, params);
+                    requestHostUpdate?.();
+                  },
+                  onSetChatFilterAgentIds: async (agentIds) => {
+                    const loadPromise = loadCompanyChatMessages(state, { agentIds });
+                    requestHostUpdate?.();
+                    await loadPromise;
+                    requestHostUpdate?.();
+                  },
+                  onSendMessage: async ({ content, targetAgentId }) => {
+                    await sendMessageToCompany(state, { content, targetAgentId });
+                    await Promise.all([loadCompanyMessages(state), loadCompanyChatMessages(state)]);
                     requestHostUpdate?.();
                   },
                   onCreateTeam: async (params) => {
@@ -2002,6 +2045,7 @@ export function renderApp(state: AppViewState) {
             ? lazyRender(lazyCompanyFleet, (m) =>
                 m.renderCompanyFleet({
                   agents: state.companyAgents,
+                  logs: state.companyAgentLogs,
                   onStart: async (agentId) => {
                     await startAgent(state, agentId);
                     requestHostUpdate?.();
@@ -2030,6 +2074,10 @@ export function renderApp(state: AppViewState) {
                     await createAgent(state, params);
                     requestHostUpdate?.();
                   },
+                  onUpdate: async (agentId, params) => {
+                    await updateAgent(state, agentId, params);
+                    requestHostUpdate?.();
+                  },
                   _requestUpdate: () => requestHostUpdate?.(),
                 }),
               )
@@ -2054,7 +2102,7 @@ export function renderApp(state: AppViewState) {
                   messages: state.companyMessages,
                   onSendMessage: async (content) => {
                     await sendMessageToCompany(state, content);
-                    await loadCompanyMessages(state);
+                    await Promise.all([loadCompanyMessages(state), loadCompanyChatMessages(state)]);
                     requestHostUpdate?.();
                   },
                   onStopAgent: async (agentId) => {

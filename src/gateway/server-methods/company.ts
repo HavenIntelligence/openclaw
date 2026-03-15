@@ -6,6 +6,69 @@ function strParam(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
 
+function strArrayParam(v: unknown): string[] {
+  if (!Array.isArray(v)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of v) {
+    if (typeof value !== "string") {
+      continue;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function formatErrorMessage(err: unknown): string {
+  return String(err instanceof Error ? err.message : err);
+}
+
+function selectCompanyDirector(
+  agents: import("../../company/types.js").ClawDockAgent[],
+): import("../../company/types.js").ClawDockAgent | undefined {
+  return (
+    agents.find((a) => a.role?.toLowerCase().includes("orchestrator")) ??
+    agents.find((a) => a.id === "orchestrator") ??
+    agents[0]
+  );
+}
+
+function emitAgentLog(
+  svc: ReturnType<typeof getCompanyService>,
+  params: {
+    agentId: string;
+    runId: string;
+    type: "system" | "error";
+    content: string;
+  },
+): void {
+  const entry = svc.logStore.append(params);
+  svc.broadcast("company.agent.log", {
+    agentId: params.agentId,
+    runId: params.runId,
+    entry,
+  });
+}
+
+function sendFinalCompanyReply(
+  svc: ReturnType<typeof getCompanyService>,
+  agentId: string,
+  content: string,
+): void {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return;
+  }
+  svc.messageBus.send(agentId, "human", trimmed, "result");
+}
+
 /**
  * Gateway RPC handlers for the company.* namespace.
  *
@@ -84,7 +147,10 @@ export const companyHandlers: GatewayRequestHandlers = {
       metaPartial.runtime = params.runtime;
     }
     if (typeof params.reportTo === "string") {
-      metaPartial.reportTo = params.reportTo;
+      const reportTo = params.reportTo.trim();
+      metaPartial.reportTo = reportTo || undefined;
+    } else if (params.reportTo === null) {
+      metaPartial.reportTo = undefined;
     }
     if (Array.isArray(params.directReports)) {
       metaPartial.directReports = params.directReports;
@@ -441,16 +507,19 @@ export const companyHandlers: GatewayRequestHandlers = {
       respond(false, undefined, { code: "INVALID_REQUEST", message: "content required" });
       return;
     }
-    const content = params.content;
+    const content = params.content.trim();
     const svc = getCompanyService();
-    // Record the human message on the bus so WS clients see it
-    const msg = svc.messageBus.send("human", "company", content, "task");
-    // Dispatch to Agent Orchestrator (first orchestrator, then first agent)
-    const agents = svc.registry.getAgents();
-    const director =
-      agents.find((a) => a.role?.toLowerCase().includes("orchestrator")) ??
-      agents.find((a) => a.id === "orchestrator") ??
-      agents[0];
+    const targetAgentId = strParam(params.targetAgentId).trim();
+    const explicitTarget = targetAgentId ? svc.registry.getAgent(targetAgentId) : undefined;
+    if (targetAgentId && !explicitTarget) {
+      respond(false, undefined, {
+        code: "NOT_FOUND",
+        message: `agent "${targetAgentId}" not found`,
+      });
+      return;
+    }
+    const msg = svc.messageBus.send("human", explicitTarget?.id ?? "company", content, "task");
+    const director = explicitTarget ?? selectCompanyDirector(svc.registry.getAgents());
     if (director) {
       const orchestrationRunId = `msg_${msg.id}`;
       // Immediately broadcast the director as active so the frontend animation reacts.
@@ -459,17 +528,11 @@ export const companyHandlers: GatewayRequestHandlers = {
         status: "active",
         updatedAt: Date.now(),
       });
-      // Log the dispatch so the frontend execution log shows the handoff.
-      const dispatchEntry = svc.logStore.append({
+      emitAgentLog(svc, {
         agentId: director.id,
         runId: orchestrationRunId,
         type: "system",
-        content: `[Human → Orchestrator] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
-      });
-      svc.broadcast("company.agent.log", {
-        agentId: director.id,
-        runId: orchestrationRunId,
-        entry: dispatchEntry,
+        content: `[Human → ${director.id}] ${content.slice(0, 120)}${content.length > 120 ? "…" : ""}`,
       });
       // Check if director has subordinates — if so, orchestrate automatically
       const directReports = svc.registry.getDirectReports(director.id);
@@ -477,89 +540,69 @@ export const companyHandlers: GatewayRequestHandlers = {
         // Fire-and-forget orchestration (long-running; broadcasts progress via WS)
         respond(true, { ok: true, orchestrating: true, msgId: msg.id }, undefined);
 
-        // Create a task entry for this orchestration so it shows up in the Tasks view
-        const orchTask = await svc.taskStore.create({
-          title: content.slice(0, 100) + (content.length > 100 ? "…" : ""),
-          description: content,
-          status: "in_progress",
-          priority: "high",
-          assignee: director.id,
-          project: "Orchestration",
-        });
-        svc.broadcast("company.task.updated", { task: orchTask });
+        void (async () => {
+          let orchTask: Awaited<ReturnType<(typeof svc.taskStore)["create"]>> | null | undefined;
+          try {
+            orchTask = await svc.taskStore.create({
+              title: content.slice(0, 100) + (content.length > 100 ? "…" : ""),
+              description: content,
+              status: "in_progress",
+              priority: "high",
+              assignee: director.id,
+              project: "Orchestration",
+            });
+            svc.broadcast("company.task.updated", { task: orchTask });
 
-        const maxRounds = svc.profileStore.get().maxOrchestrationRounds ?? 5;
-        svc.orchestrator
-          .execute(director.id, content, { maxRounds })
-          .then(async (result) => {
-            const finalContent = result.content.trim() || "(empty response)";
-            const resultEntry = svc.logStore.append({
-              agentId: director.id,
-              runId: orchestrationRunId,
-              type: "output",
-              content: finalContent,
-              tokensUsed: result.tokensUsed,
-            });
-            svc.broadcast("company.agent.log", {
-              agentId: director.id,
-              runId: orchestrationRunId,
-              entry: resultEntry,
-            });
-            svc.messageBus.send(director.id, "human", finalContent, "result");
-            // Mark task as done upon successful completion
-            const updated = await svc.taskStore.update(orchTask.id, {
-              status: "done",
-              tokensUsed: result.tokensUsed,
-            });
-            if (updated) {
-              svc.broadcast("company.task.updated", { task: updated });
+            const maxRounds = svc.profileStore.get().maxOrchestrationRounds ?? 5;
+            const result = await svc.orchestrator.execute(director.id, content, { maxRounds });
+            sendFinalCompanyReply(svc, director.id, result.content);
+
+            if (orchTask) {
+              const updated = await svc.taskStore.update(orchTask.id, {
+                status: "done",
+                tokensUsed: result.tokensUsed,
+              });
+              if (updated) {
+                svc.broadcast("company.task.updated", { task: updated });
+              }
             }
-          })
-          .catch(async (err) => {
-            const errorMessage = `Orchestration failed: ${String(err instanceof Error ? err.message : err)}`;
-            const errEntry = svc.logStore.append({
+          } catch (err) {
+            emitAgentLog(svc, {
               agentId: director.id,
               runId: orchestrationRunId,
               type: "error",
-              content: errorMessage,
+              content: `Orchestration failed: ${formatErrorMessage(err)}`,
             });
-            svc.broadcast("company.agent.log", {
-              agentId: director.id,
-              runId: orchestrationRunId,
-              entry: errEntry,
-            });
-            svc.messageBus.send(director.id, "human", errorMessage, "notify");
-            // Mark task as failed
-            const updated = await svc.taskStore.update(orchTask.id, { status: "backlog" });
-            if (updated) {
-              svc.broadcast("company.task.updated", { task: updated });
+            if (orchTask) {
+              const updated = await svc.taskStore.update(orchTask.id, { status: "backlog" });
+              if (updated) {
+                svc.broadcast("company.task.updated", { task: updated });
+              }
             }
-          });
+          }
+        })();
+        return;
       } else {
         // Leaf director — run directly
         try {
-          const runId = await svc.processManager.runTask(director.id, content);
-          respond(true, { ok: true, runId, msgId: msg.id }, undefined);
+          const result = await svc.processManager.runTaskAwait(director.id, content);
+          sendFinalCompanyReply(svc, director.id, result.content);
+          respond(true, { ok: true, runId: result.runId, msgId: msg.id }, undefined);
         } catch (err) {
           svc.broadcast("company.agent.status", {
             agentId: director.id,
             status: "idle",
             updatedAt: Date.now(),
           });
-          const errEntry = svc.logStore.append({
+          emitAgentLog(svc, {
             agentId: director.id,
             runId: `msg_${msg.id}`,
             type: "error",
-            content: `Failed to start task: ${String(err instanceof Error ? err.message : err)}`,
-          });
-          svc.broadcast("company.agent.log", {
-            agentId: director.id,
-            runId: `msg_${msg.id}`,
-            entry: errEntry,
+            content: `Task failed: ${formatErrorMessage(err)}`,
           });
           respond(false, undefined, {
             code: "INTERNAL_ERROR",
-            message: String(err instanceof Error ? err.message : err),
+            message: formatErrorMessage(err),
           });
         }
       }
@@ -593,7 +636,11 @@ export const companyHandlers: GatewayRequestHandlers = {
   "company.messages.list": ({ params, respond }) => {
     const svc = getCompanyService();
     const limit = typeof params.limit === "number" ? params.limit : 100;
-    const history = svc.messageBus.getHistory({ limit });
+    const agentIds = strArrayParam(params.agentIds);
+    const history = svc.messageBus.getHistory({
+      limit,
+      participants: agentIds.length > 0 ? agentIds : undefined,
+    });
     respond(true, history, undefined);
   },
 };

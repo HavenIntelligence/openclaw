@@ -21,7 +21,41 @@ export type CompanyState = {
   companyProfile: CompanyProfile | null;
   companyAgentLogs: Map<string, LogEntry[]>;
   companyMessages: AgentMessage[];
+  companyChatMessages: AgentMessage[];
+  companyChatFilterAgentIds: string[];
 };
+
+export function normalizeCompanyChatAgentIds(agentIds: string[] | undefined): string[] {
+  if (!agentIds || agentIds.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const agentId of agentIds) {
+    const trimmed = agentId.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function sameCompanyChatAgentIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+export function messageMatchesCompanyChatFilter(
+  message: AgentMessage,
+  agentIds: string[] | undefined,
+): boolean {
+  const participants = normalizeCompanyChatAgentIds(agentIds);
+  if (participants.length === 0) {
+    return true;
+  }
+  return participants.includes(message.from) || participants.includes(message.to);
+}
 
 // ── Loaders ────────────────────────────────────────────────────────────────
 
@@ -99,6 +133,11 @@ export async function loadCompanyAll(state: CompanyState): Promise<void> {
     loadCompanyProfile(state),
     loadCompanyMessages(state),
   ]);
+  if (state.companyChatFilterAgentIds.length > 0) {
+    await loadCompanyChatMessages(state);
+  } else {
+    state.companyChatMessages = state.companyMessages.slice(-50);
+  }
   // Load logs after agents are fetched (loadCompanyAgents populates state.companyAgents).
   await loadAllAgentLogs(state);
 }
@@ -114,6 +153,21 @@ export type CreateAgentParams = {
   color?: string;
   runtime?: string;
   description?: string;
+};
+
+export type UpdateAgentParams = {
+  role?: string;
+  team?: string;
+  emoji?: string;
+  color?: string;
+  runtime?: string;
+  description?: string;
+  reportTo?: string | null;
+};
+
+export type SendCompanyMessageParams = {
+  content: string;
+  targetAgentId?: string | null;
 };
 
 export async function createAgent(
@@ -134,22 +188,19 @@ export async function createAgent(
 
 export async function updateAgent(
   state: CompanyState,
-  agentId: string,
-  partial: Record<string, unknown>,
+  id: string,
+  params: UpdateAgentParams,
 ): Promise<ClawDockAgent | null> {
   if (!state.client) {
     return null;
   }
-  try {
-    const agent = await state.client.request<ClawDockAgent>("company.agents.update", {
-      id: agentId,
-      ...partial,
-    });
-    await loadCompanyAgents(state);
-    return agent;
-  } catch {
-    return null;
+  const payload: Record<string, unknown> = { id, ...params };
+  if (params.reportTo === null) {
+    payload.reportTo = null;
   }
+  const agent = await state.client.request<ClawDockAgent>("company.agents.update", payload);
+  await loadCompanyAgents(state);
+  return agent;
 }
 
 // ── Agent actions ─────────────────────────────────────────────────────────
@@ -195,14 +246,21 @@ export async function resumeAgent(state: CompanyState, agentId: string): Promise
 
 export async function sendMessageToCompany(
   state: CompanyState,
-  content: string,
+  params: string | SendCompanyMessageParams,
 ): Promise<string | null> {
   if (!state.client) {
     return null;
   }
+  const requestParams =
+    typeof params === "string"
+      ? { content: params }
+      : {
+          content: params.content,
+          ...(params.targetAgentId ? { targetAgentId: params.targetAgentId } : {}),
+        };
   const result = await state.client.request<{ runId?: string; msgId: string }>(
     "company.message.send",
-    { content },
+    requestParams,
   );
   return result.runId ?? null;
 }
@@ -215,6 +273,35 @@ export async function loadCompanyMessages(state: CompanyState, limit = 100): Pro
     state.companyMessages = await state.client.request<AgentMessage[]>("company.messages.list", {
       limit,
     });
+  } catch {
+    // best-effort
+  }
+}
+
+export async function loadCompanyChatMessages(
+  state: CompanyState,
+  opts?: { limit?: number; agentIds?: string[] },
+): Promise<void> {
+  const requestedAgentIds = normalizeCompanyChatAgentIds(
+    opts?.agentIds ?? state.companyChatFilterAgentIds,
+  );
+  if (opts && "agentIds" in opts) {
+    state.companyChatFilterAgentIds = requestedAgentIds;
+  }
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const limit = typeof opts?.limit === "number" ? opts.limit : 50;
+  try {
+    const params: { limit: number; agentIds?: string[] } = { limit };
+    if (requestedAgentIds.length > 0) {
+      params.agentIds = requestedAgentIds;
+    }
+    const messages = await state.client.request<AgentMessage[]>("company.messages.list", params);
+    if (!sameCompanyChatAgentIds(state.companyChatFilterAgentIds, requestedAgentIds)) {
+      return;
+    }
+    state.companyChatMessages = messages;
   } catch {
     // best-effort
   }

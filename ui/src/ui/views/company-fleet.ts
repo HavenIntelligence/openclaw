@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
-import type { ClawDockAgent, ClawDockRuntime } from "../company-types.ts";
+import type { ClawDockAgent, ClawDockRuntime, LogEntry } from "../company-types.ts";
 import { icons } from "../icons.ts";
+import { renderCompanyAgentLogsPanel } from "./company-agent-logs.ts";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) {
@@ -63,33 +64,34 @@ function statusPill(status: string) {
   return html`<span class="cd-pill ${cls[status] ?? ""}">${status}</span>`;
 }
 
-function renderFleetRow(agent: FleetAgent, props: CompanyFleetProps) {
+function renderFleetRow(agent: ClawDockAgent, props: CompanyFleetProps) {
+  const row = toFleetAgent(agent);
   return html`
-    <tr class="cd-fleet-row ${agent.status === "crashed" ? "cd-fleet-row--crashed" : ""}">
+    <tr class="cd-fleet-row ${row.status === "crashed" ? "cd-fleet-row--crashed" : ""}">
       <td class="cd-fleet-cell cd-fleet-cell--name">
         <div class="cd-fleet-name-cell">
-          <span class="cd-pulse cd-pulse--${agent.status}"></span>
+          <span class="cd-pulse cd-pulse--${row.status}"></span>
           <div>
-            <span class="cd-fleet-name-cell__name">${agent.name}</span>
-            <span class="cd-fleet-name-cell__team">${agent.team}</span>
+            <span class="cd-fleet-name-cell__name">${row.name}</span>
+            <span class="cd-fleet-name-cell__team">${row.team}</span>
           </div>
         </div>
       </td>
-      <td class="cd-fleet-cell">${agent.role}</td>
+      <td class="cd-fleet-cell">${row.role}</td>
       <td class="cd-fleet-cell cd-fleet-cell--model">
-        <span class="cd-model-chip">${agent.model}</span>
+        <span class="cd-model-chip">${row.model}</span>
       </td>
-      <td class="cd-fleet-cell">${statusPill(agent.status)}</td>
+      <td class="cd-fleet-cell">${statusPill(row.status)}</td>
       <td class="cd-fleet-cell">
         <div class="cd-tasks-cell">
-          ${agent.tasksRunning > 0 ? html`<span class="cd-tasks-cell__running">${agent.tasksRunning}↑</span>` : ""}
-          <span class="cd-tasks-cell__done">${agent.tasksCompleted}</span>
+          ${row.tasksRunning > 0 ? html`<span class="cd-tasks-cell__running">${row.tasksRunning}↑</span>` : ""}
+          <span class="cd-tasks-cell__done">${row.tasksCompleted}</span>
         </div>
       </td>
       <td class="cd-fleet-cell cd-fleet-cell--resource">
         ${
-          agent.status !== "crashed"
-            ? cpuBar(agent.cpuPercent)
+          row.status !== "crashed"
+            ? cpuBar(row.cpuPercent)
             : html`
                 <span class="cd-muted">—</span>
               `
@@ -97,33 +99,38 @@ function renderFleetRow(agent: FleetAgent, props: CompanyFleetProps) {
       </td>
       <td class="cd-fleet-cell cd-fleet-cell--resource">
         ${
-          agent.status !== "crashed"
-            ? memBar(agent.memoryMb)
+          row.status !== "crashed"
+            ? memBar(row.memoryMb)
             : html`
                 <span class="cd-muted">—</span>
               `
         }
       </td>
-      <td class="cd-fleet-cell">${formatTokens(agent.tokensUsed)}</td>
-      <td class="cd-fleet-cell cd-fleet-cell--muted">${agent.lastActivity}</td>
+      <td class="cd-fleet-cell">${formatTokens(row.tokensUsed)}</td>
+      <td class="cd-fleet-cell cd-fleet-cell--muted">${row.lastActivity}</td>
       <td class="cd-fleet-cell cd-fleet-cell--actions">
-        ${
-          agent.status === "crashed"
-            ? html`<button class="cd-btn cd-btn--xs cd-btn--danger" title="Restart" @click=${() => props.onRestart?.(agent.id)}>${icons.rotateCounterClockwise}</button>`
-            : agent.status === "running"
-              ? html`
-                  <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Pause" @click=${() => props.onPause?.(agent.id)}>${icons.pause}</button>
-                  <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Stop" @click=${() => props.onStop?.(agent.id)}>${icons.stop}</button>
-                `
-              : agent.status === "stopped"
-                ? html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Start" @click=${() => props.onStart?.(agent.id)}>${icons.play}</button>`
-                : agent.status === "starting"
-                  ? html`
-                      <span class="cd-muted">starting…</span>
-                    `
-                  : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Resume" @click=${() => props.onResume?.(agent.id)}>${icons.play}</button>`
-        }
-        <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs" @click=${() => props.onLoadLogs?.(agent.id)}>${icons.terminal2}</button>
+        <div class="cd-fleet-actions">
+          ${
+            row.status === "crashed"
+              ? html`<button class="cd-btn cd-btn--xs cd-btn--danger" title="Restart" @click=${() => props.onRestart?.(agent.id)}>${icons.rotateCounterClockwise}</button>`
+              : row.status === "running"
+                ? html`
+                    <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Pause" @click=${() => props.onPause?.(agent.id)}>${icons.pause}</button>
+                    <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Stop" @click=${() => props.onStop?.(agent.id)}>${icons.stop}</button>
+                  `
+                : row.status === "stopped"
+                  ? html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Start" @click=${() => props.onStart?.(agent.id)}>${icons.play}</button>`
+                  : row.status === "starting"
+                    ? html`
+                        <span class="cd-muted">starting…</span>
+                      `
+                    : html`<button class="cd-btn cd-btn--xs cd-btn--ghost" title="Resume" @click=${() => props.onResume?.(agent.id)}>${icons.play}</button>`
+          }
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="Edit agent" @click=${() => beginEditAgent(agent, props)}>${icons.edit}</button>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" title="View logs" @click=${() => {
+            void openAgentLogs(agent, props);
+          }}>${icons.terminal2}</button>
+        </div>
       </td>
     </tr>
   `;
@@ -175,6 +182,19 @@ let _createFormData = {
   emoji: "🤖",
 };
 let _createLoading = false;
+let _editingAgentId: string | null = null;
+let _editFormData = {
+  role: "Agent",
+  team: "general",
+  runtime: "openclaw" as ClawDockRuntime,
+  emoji: "🤖",
+  description: "",
+  reportTo: "",
+};
+let _updateLoading = false;
+let _updateError: string | null = null;
+let _selectedLogAgentId: string | null = null;
+let _logsLoading = false;
 
 const RUNTIMES: { value: ClawDockRuntime; label: string }[] = [
   { value: "openclaw", label: "OpenClaw" },
@@ -195,6 +215,70 @@ const PRESET_ROLES = [
   "Manager",
 ];
 const PRESET_EMOJIS = ["🤖", "🧠", "✍️", "🔍", "🛠️", "🎯", "📊", "🚀", "💡", "🔧"];
+
+function beginEditAgent(agent: ClawDockAgent, props: CompanyFleetProps) {
+  _editingAgentId = agent.id;
+  _editFormData = {
+    role: agent.role,
+    team: agent.team,
+    runtime: agent.runtime,
+    emoji: agent.emoji,
+    description: agent.description ?? "",
+    reportTo: agent.reportTo ?? "",
+  };
+  _updateError = null;
+  props._requestUpdate?.();
+}
+
+function closeEditAgent(props: CompanyFleetProps) {
+  _editingAgentId = null;
+  _updateLoading = false;
+  _updateError = null;
+  props._requestUpdate?.();
+}
+
+async function openAgentLogs(agent: ClawDockAgent, props: CompanyFleetProps) {
+  _selectedLogAgentId = agent.id;
+  _logsLoading = true;
+  props._requestUpdate?.();
+  try {
+    await Promise.resolve(props.onLoadLogs?.(agent.id));
+  } finally {
+    _logsLoading = false;
+    props._requestUpdate?.();
+  }
+}
+
+function closeAgentLogs(props: CompanyFleetProps) {
+  _selectedLogAgentId = null;
+  _logsLoading = false;
+  props._requestUpdate?.();
+}
+
+function renderAgentLogs(props: CompanyFleetProps) {
+  const agent = props.agents?.find((entry) => entry.id === _selectedLogAgentId) ?? null;
+  if (!agent) {
+    _selectedLogAgentId = null;
+    return nothing;
+  }
+  const logs = props.logs?.get(agent.id) ?? [];
+  return renderCompanyAgentLogsPanel({
+    agent,
+    logs,
+    loading: _logsLoading,
+    onClose: () => closeAgentLogs(props),
+    onRefresh: async () => {
+      _logsLoading = true;
+      props._requestUpdate?.();
+      try {
+        await Promise.resolve(props.onLoadLogs?.(agent.id));
+      } finally {
+        _logsLoading = false;
+        props._requestUpdate?.();
+      }
+    },
+  });
+}
 
 function renderCreateForm(props: CompanyFleetProps) {
   if (!_showCreateForm) {
@@ -335,6 +419,188 @@ function renderCreateForm(props: CompanyFleetProps) {
   `;
 }
 
+function renderEditForm(props: CompanyFleetProps) {
+  if (!_editingAgentId) {
+    return nothing;
+  }
+  const agent = props.agents?.find((entry) => entry.id === _editingAgentId);
+  if (!agent) {
+    _editingAgentId = null;
+    return nothing;
+  }
+  const managerOptions = (props.agents ?? []).filter((entry) => entry.id !== agent.id);
+
+  return html`
+    <div class="cd-create-agent-overlay" @click=${(e: Event) => {
+      if ((e.target as HTMLElement).classList.contains("cd-create-agent-overlay")) {
+        closeEditAgent(props);
+      }
+    }}>
+      <div class="cd-create-agent-panel">
+        <div class="cd-create-agent-panel__header">
+          <h3>Edit Agent</h3>
+          <button class="cd-btn cd-btn--xs cd-btn--ghost" @click=${() => closeEditAgent(props)}>
+            ${icons.x}
+          </button>
+        </div>
+
+        <div class="cd-create-agent-panel__body">
+          ${
+            _updateError
+              ? html`
+                  <div
+                    role="alert"
+                    style="
+                      display:flex;
+                      gap:8px;
+                      align-items:flex-start;
+                      margin-bottom:16px;
+                      padding:10px 12px;
+                      border-radius:12px;
+                      border:1px solid rgba(239, 68, 68, 0.28);
+                      background:rgba(239, 68, 68, 0.08);
+                      color:var(--destructive);
+                    "
+                  >
+                    <span style="flex:none; line-height:1;">${icons.alertTriangle}</span>
+                    <span style="line-height:1.45;">${_updateError}</span>
+                  </div>
+                `
+              : nothing
+          }
+          <div class="cd-form-group">
+            <label class="cd-form-label">Agent</label>
+            <div class="cd-muted">${agent.emoji} ${agent.name} <span class="cd-mono">(${agent.id})</span></div>
+          </div>
+
+          <div class="cd-form-row">
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Role</label>
+              <input
+                class="cd-form-input"
+                type="text"
+                .value=${_editFormData.role}
+                @input=${(e: Event) => {
+                  _editFormData.role = (e.target as HTMLInputElement).value;
+                }}
+              />
+            </div>
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Team</label>
+              <input
+                class="cd-form-input"
+                type="text"
+                .value=${_editFormData.team}
+                @input=${(e: Event) => {
+                  _editFormData.team = (e.target as HTMLInputElement).value;
+                }}
+              />
+            </div>
+          </div>
+
+          <div class="cd-form-row">
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Manager</label>
+              <select class="cd-form-input" @change=${(e: Event) => {
+                _editFormData.reportTo = (e.target as HTMLSelectElement).value;
+              }}>
+                <option value="" ?selected=${_editFormData.reportTo === ""}>None</option>
+                ${managerOptions.map(
+                  (entry) => html`
+                    <option
+                      value=${entry.id}
+                      ?selected=${entry.id === _editFormData.reportTo}
+                    >
+                      ${entry.emoji} ${entry.name}
+                    </option>
+                  `,
+                )}
+              </select>
+            </div>
+            <div class="cd-form-group cd-form-group--half">
+              <label class="cd-form-label">Runtime</label>
+              <select class="cd-form-input" @change=${(e: Event) => {
+                _editFormData.runtime = (e.target as HTMLSelectElement).value as ClawDockRuntime;
+              }}>
+                ${RUNTIMES.map(
+                  (rt) => html`
+                    <option value=${rt.value} ?selected=${rt.value === _editFormData.runtime}>
+                      ${rt.label}
+                    </option>
+                  `,
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Emoji</label>
+            <div class="cd-emoji-picker">
+              ${PRESET_EMOJIS.map(
+                (emoji) => html`
+                  <button
+                    class="cd-emoji-chip ${emoji === _editFormData.emoji ? "cd-emoji-chip--active" : ""}"
+                    @click=${() => {
+                      _editFormData.emoji = emoji;
+                      props._requestUpdate?.();
+                    }}
+                  >${emoji}</button>
+                `,
+              )}
+            </div>
+          </div>
+
+          <div class="cd-form-group">
+            <label class="cd-form-label">Description</label>
+            <textarea
+              class="cd-form-input"
+              rows="3"
+              .value=${_editFormData.description}
+              @input=${(e: Event) => {
+                _editFormData.description = (e.target as HTMLTextAreaElement).value;
+              }}
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="cd-create-agent-panel__footer">
+          <button class="cd-btn cd-btn--sm cd-btn--ghost" @click=${() => closeEditAgent(props)}>Cancel</button>
+          <button
+            class="cd-btn cd-btn--sm cd-btn--primary"
+            ?disabled=${_updateLoading || !_editFormData.role.trim() || !_editFormData.team.trim()}
+            @click=${async () => {
+              if (_updateLoading || !_editingAgentId) {
+                return;
+              }
+              _updateLoading = true;
+              _updateError = null;
+              props._requestUpdate?.();
+              try {
+                await props.onUpdate?.(_editingAgentId, {
+                  role: _editFormData.role.trim(),
+                  team: _editFormData.team.trim(),
+                  runtime: _editFormData.runtime,
+                  emoji: _editFormData.emoji,
+                  description: _editFormData.description.trim(),
+                  reportTo: _editFormData.reportTo || null,
+                });
+                closeEditAgent(props);
+              } catch (err) {
+                _updateError = err instanceof Error ? err.message : String(err);
+              } finally {
+                _updateLoading = false;
+                props._requestUpdate?.();
+              }
+            }}
+          >
+            ${_updateLoading ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderEmptyState(props: CompanyFleetProps) {
   return html`
     <div class="cd-fleet-empty">
@@ -380,6 +646,7 @@ function renderEmptyState(props: CompanyFleetProps) {
 
 export type CompanyFleetProps = {
   agents?: ClawDockAgent[];
+  logs?: Map<string, LogEntry[]>;
   onStart?: (agentId: string) => void;
   onStop?: (agentId: string) => void;
   onRestart?: (agentId: string) => void;
@@ -393,6 +660,17 @@ export type CompanyFleetProps = {
     runtime?: string;
     emoji?: string;
   }) => Promise<void>;
+  onUpdate?: (
+    agentId: string,
+    params: {
+      role?: string;
+      team?: string;
+      runtime?: string;
+      emoji?: string;
+      description?: string;
+      reportTo?: string | null;
+    },
+  ) => Promise<void>;
   _requestUpdate?: () => void;
 };
 
@@ -485,7 +763,7 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
             </tr>
           </thead>
           <tbody>
-            ${fleet.map((a) => renderFleetRow(a, props))}
+            ${(props.agents ?? []).map((a) => renderFleetRow(a, props))}
           </tbody>
         </table>
       </div>
@@ -500,6 +778,8 @@ export function renderCompanyFleet(props: CompanyFleetProps) {
       </div>
 
       ${renderCreateForm(props)}
+      ${renderEditForm(props)}
+      ${renderAgentLogs(props)}
     </div>
   `;
 }

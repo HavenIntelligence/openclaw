@@ -2,10 +2,12 @@ import { html } from "lit";
 import type {
   AgentMessage,
   ClawDockAgent,
+  LogEntry as RealLogEntry,
   CompanyProfile as RealProfile,
   Task as RealTask,
   TeamConfig,
 } from "../company-types.ts";
+import { renderCompanyFleet } from "./company-fleet.ts";
 import { renderCompanyTasks } from "./company-tasks.ts";
 import { renderRoleHub } from "./role-hub.ts";
 
@@ -69,14 +71,52 @@ let _realProfile: RealProfile | null = null;
 let _realAgents: ClawDockAgent[] = [];
 let _realTasks: RealTask[] = [];
 let _realMessages: AgentMessage[] = [];
+let _realAllMessages: AgentMessage[] = [];
+let _realLogs: Map<string, RealLogEntry[]> = new Map();
 // ── Callbacks (set from props each render) ──────────────────────────────────
 let _onSaveProfile: ((partial: Partial<RealProfile>) => void) | undefined;
-let _onSendMessage: ((content: string) => void) | undefined;
+let _onSendMessage:
+  | ((params: { content: string; targetAgentId?: string | null }) => Promise<void> | void)
+  | undefined;
 let _onCreateTeam: ((params: Omit<TeamConfig, "id">) => Promise<void>) | undefined;
 let _onUpdateTeam:
   | ((id: string, partial: Partial<Omit<TeamConfig, "id">>) => Promise<void>)
   | undefined;
 let _onDeleteTeam: ((id: string) => Promise<void>) | undefined;
+let _onSetChatFilterAgentIds: ((agentIds: string[]) => void | Promise<void>) | undefined;
+let _chatFilterAgentIds: string[] = [];
+let _chatInput = "";
+let _chatComposeTargetAgentId: string | null = null;
+let _chatSendError: string | null = null;
+let _chatSending = false;
+let _onStartAgent: ((agentId: string) => void | Promise<void>) | undefined;
+let _onStopAgent: ((agentId: string) => void | Promise<void>) | undefined;
+let _onRestartAgent: ((agentId: string) => void | Promise<void>) | undefined;
+let _onPauseAgent: ((agentId: string) => void | Promise<void>) | undefined;
+let _onResumeAgent: ((agentId: string) => void | Promise<void>) | undefined;
+let _onLoadAgentLogs: ((agentId: string) => void | Promise<void>) | undefined;
+let _onCreateAgent:
+  | ((params: {
+      name: string;
+      role?: string;
+      team?: string;
+      runtime?: string;
+      emoji?: string;
+    }) => void | Promise<void>)
+  | undefined;
+let _onUpdateAgent:
+  | ((
+      agentId: string,
+      params: {
+        role?: string;
+        team?: string;
+        runtime?: string;
+        emoji?: string;
+        description?: string;
+        reportTo?: string | null;
+      },
+    ) => void | Promise<void>)
+  | undefined;
 let _requestUpdate: (() => void) | undefined;
 let _realTeams: TeamConfig[] = [];
 
@@ -345,37 +385,6 @@ function stateColor(state: string) {
   return "var(--text-strong)";
 }
 
-function formatSince(ts?: number): string {
-  if (!ts) {
-    return "—";
-  }
-  const secs = Math.floor((Date.now() - ts) / 1000);
-  if (secs < 60) {
-    return `${secs}s ago`;
-  }
-  if (secs < 3600) {
-    return `${Math.floor(secs / 60)}m ago`;
-  }
-  if (secs < 86400) {
-    return `${Math.floor(secs / 3600)}h ago`;
-  }
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function formatStartedAt(ts?: number): string {
-  return ts ? new Date(ts).toLocaleString() : "—";
-}
-
-function formatCompactTokens(n: number): string {
-  if (n >= 1_000_000) {
-    return `${(n / 1_000_000).toFixed(1)}M`;
-  }
-  if (n >= 1_000) {
-    return `${(n / 1_000).toFixed(1)}K`;
-  }
-  return `${n}`;
-}
-
 function triggerOverviewUpdate() {
   _requestUpdate?.();
 }
@@ -625,178 +634,35 @@ function _renderAgentDetail(agent: AgentRecord) {
 
 // ── Sub-tab: Agent Status (renamed from Fleet) ────────────────────────────
 function renderFleet() {
-  // Use real agents from backend
-  const agents = _realAgents;
-  if (agents.length === 0) {
-    return html`
-      <div class="cd-fleet-view">
-        <div class="cd-office-empty" style="padding: 48px 24px; text-align: center">
-          <div style="font-size: 2rem; margin-bottom: 12px">🤖</div>
-          <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 8px">No agents registered</div>
-          <div style="color: var(--muted-foreground)">Use the Fleet tab to create your first agent.</div>
-        </div>
-      </div>
-    `;
-  }
-
-  const agentStatusColor = (s: string) => {
-    if (s === "active") {
-      return "var(--ok)";
-    }
-    if (s === "idle") {
-      return "#f59e0b";
-    }
-    if (s === "crashed") {
-      return "var(--destructive)";
-    }
-    return "var(--muted-foreground)";
-  };
-
-  const renderFleetDetail = (agent: ClawDockAgent) => {
-    const manager = agent.reportTo
-      ? (agents.find((candidate) => candidate.id === agent.reportTo)?.name ?? agent.reportTo)
-      : "—";
-    const directReports =
-      agent.directReports.length > 0
-        ? agent.directReports
-            .map((id) => agents.find((candidate) => candidate.id === id)?.name ?? id)
-            .join(", ")
-        : "None";
-    return html`
-      <div class="cd-fleet-row-detail">
-        <div class="cd-agent-detail" style="padding: 14px 18px">
-          <div class="cd-agent-detail__header" style="border-left:3px solid ${agent.color}">
-            <div class="cd-agent-detail__avatar">${agent.emoji}</div>
-            <div class="cd-agent-detail__meta">
-              <div class="cd-agent-detail__name">${agent.name}</div>
-              <div class="cd-agent-detail__role">${agent.role} · ${agent.team}</div>
-              <div class="cd-agent-detail__badges">
-                <span
-                  class="cd-ad-badge"
-                  style="background:${agentStatusColor(agent.status)}22;color:${agentStatusColor(agent.status)};border-color:${agentStatusColor(agent.status)}44"
-                >
-                  ${agent.status}
-                </span>
-                <span class="cd-ad-badge cd-ad-badge--model">${agent.model}</span>
-                <span class="cd-ad-badge cd-ad-badge--model">${agent.runtime}</span>
-              </div>
-            </div>
-            <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${(e: Event) => {
-              e.stopPropagation();
-              _expandedFleetAgentId = null;
-              triggerOverviewUpdate();
-            }}>✕</button>
-          </div>
-
-          <div class="cd-agent-detail__stats">
-            <div class="cd-ad-stat">
-              <div class="cd-ad-stat__val">${agent.tasksCompleted}</div>
-              <div class="cd-ad-stat__label">Tasks done</div>
-            </div>
-            <div class="cd-ad-stat">
-              <div class="cd-ad-stat__val">${formatCompactTokens(agent.tokensUsed)}</div>
-              <div class="cd-ad-stat__label">Tokens used</div>
-            </div>
-            <div class="cd-ad-stat">
-              <div class="cd-ad-stat__val">${agent.toolCount}</div>
-              <div class="cd-ad-stat__label">Tools</div>
-            </div>
-            <div class="cd-ad-stat">
-              <div class="cd-ad-stat__val">${agent.cronCount}</div>
-              <div class="cd-ad-stat__label">Crons</div>
-            </div>
-          </div>
-
-          <div class="cd-agent-detail__workspace">
-            <span class="cd-ad-ws-label">🧭 Current task</span>
-            <span class="cd-ad-ws-val">${agent.currentTask || "Idle — no active task"}</span>
-          </div>
-
-          <div class="cd-agent-detail__workspace">
-            <span class="cd-ad-ws-label">🕒 Last active</span>
-            <span class="cd-ad-ws-val">${formatSince(agent.lastActiveAt)}</span>
-            <span class="cd-ad-ws-label">Started</span>
-            <span class="cd-ad-ws-val">${formatStartedAt(agent.startedAt)}</span>
-            <span class="cd-ad-ws-label">PID</span>
-            <span class="cd-ad-ws-val">${agent.pid ?? "—"}</span>
-          </div>
-
-          <div class="cd-agent-detail__workspace">
-            <span class="cd-ad-ws-label">👤 Reports to</span>
-            <span class="cd-ad-ws-val">${manager}</span>
-            <span class="cd-ad-ws-label">👥 Direct reports</span>
-            <span class="cd-ad-ws-val">${directReports}</span>
-          </div>
-
-          ${
-            agent.description
-              ? html`
-                  <div class="cd-agent-detail__workspace">
-                    <span class="cd-ad-ws-label">📝 Description</span>
-                    <span class="cd-ad-ws-val">${agent.description}</span>
-                  </div>
-                `
-              : ""
-          }
-        </div>
-      </div>
-    `;
-  };
-
-  return html`
-    <div class="cd-fleet-view">
-      <div class="cd-fleet-header">
-        <span class="cd-fleet-header__title">Agent Status</span>
-        <span class="cd-fleet-header__sub"
-          >${agents.length} agents · ${agents.filter((a) => a.status === "active").length} active ·
-          ${agents.filter((a) => a.status === "idle").length} idle ·
-          ${agents.filter((a) => a.status === "crashed").length} crashed</span
-        >
-      </div>
-      <div class="cd-fleet-table">
-        <div class="cd-fleet-thead">
-          <span>Agent</span><span>Role / Team</span><span>Model</span><span>Status</span><span>Tasks Done</span>
-        </div>
-        ${agents.map((a) => {
-          const isExpanded = _expandedFleetAgentId === a.id;
-          return html`
-          <div
-            class="cd-fleet-row ${isExpanded ? "cd-fleet-row--selected" : ""}"
-            role="button"
-            tabindex="0"
-            aria-expanded=${isExpanded ? "true" : "false"}
-            @click=${() => {
-              _expandedFleetAgentId = isExpanded ? null : a.id;
-              triggerOverviewUpdate();
-            }}
-            @keydown=${(e: KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                _expandedFleetAgentId = isExpanded ? null : a.id;
-                triggerOverviewUpdate();
-              }
-            }}
-          >
-            <span class="cd-fleet-agent">
-              <span class="cd-fleet-dot" style="background:${agentStatusColor(a.status)}"></span>
-              ${a.emoji} <strong>${a.name}</strong>
-              <span class="cd-muted" style="margin-left:auto">${isExpanded ? "▾" : "▸"}</span>
-            </span>
-            <span class="cd-muted" style="font-size:12px">${a.role}<br /><span style="font-size:10px;opacity:.6">${a.team}</span></span>
-            <span class="cd-muted cd-mono" style="font-size:11px">${a.model}</span>
-            <span
-              class="cd-ad-badge"
-              style="background:${agentStatusColor(a.status)}22;color:${agentStatusColor(a.status)};border-color:${agentStatusColor(a.status)}44"
-              >${a.status}</span
-            >
-            <span>${a.tasksCompleted}</span>
-          </div>
-          ${isExpanded ? renderFleetDetail(a) : ""}
-        `;
-        })}
-      </div>
-    </div>
-  `;
+  return renderCompanyFleet({
+    agents: _realAgents,
+    logs: _realLogs,
+    onStart: async (agentId) => {
+      await _onStartAgent?.(agentId);
+    },
+    onStop: async (agentId) => {
+      await _onStopAgent?.(agentId);
+    },
+    onRestart: async (agentId) => {
+      await _onRestartAgent?.(agentId);
+    },
+    onPause: async (agentId) => {
+      await _onPauseAgent?.(agentId);
+    },
+    onResume: async (agentId) => {
+      await _onResumeAgent?.(agentId);
+    },
+    onLoadLogs: async (agentId) => {
+      await _onLoadAgentLogs?.(agentId);
+    },
+    onCreate: async (params) => {
+      await _onCreateAgent?.(params);
+    },
+    onUpdate: async (agentId, params) => {
+      await _onUpdateAgent?.(agentId, params);
+    },
+    _requestUpdate: () => _requestUpdate?.(),
+  });
 }
 
 // ── Sub-tab stubs ──────────────────────────────────────────────────────────
@@ -1155,8 +1021,52 @@ function renderTasks() {
     agents: _realAgents.length ? _realAgents : undefined,
   });
 }
+function selectedChatTargetAgent(): ClawDockAgent | null {
+  if (!_chatComposeTargetAgentId) {
+    return null;
+  }
+  return _realAgents.find((agent) => agent.id === _chatComposeTargetAgentId) ?? null;
+}
+
+async function submitChatMessage() {
+  const msg = _chatInput.trim();
+  if (!msg || !_onSendMessage || _chatSending) {
+    return;
+  }
+  const previousInput = _chatInput;
+  _chatSending = true;
+  _chatSendError = null;
+  _chatInput = "";
+  _requestUpdate?.();
+  try {
+    await _onSendMessage({
+      content: previousInput,
+      targetAgentId: _chatComposeTargetAgentId,
+    });
+  } catch (err) {
+    _chatInput = previousInput;
+    _chatSendError = String(err instanceof Error ? err.message : err);
+  } finally {
+    _chatSending = false;
+    _requestUpdate?.();
+  }
+}
+
 function renderChats() {
-  let _chatInput = "";
+  if (
+    _chatComposeTargetAgentId &&
+    !_realAgents.some((agent) => agent.id === _chatComposeTargetAgentId)
+  ) {
+    _chatComposeTargetAgentId = null;
+  }
+  const filtered = _realMessages;
+  const isFiltered = _chatFilterAgentIds.length > 0;
+  const selectedTarget = selectedChatTargetAgent();
+  const composeTargetLabel = selectedTarget?.name ?? "Company";
+  const emptyTitle = isFiltered ? "No messages for selected agents" : "No messages yet";
+  const emptySub = isFiltered
+    ? "Try selecting different agents or clear the filter to browse the full chat history."
+    : "Agent-to-agent messages and human interactions will appear here once agents are active.";
   const typeColor: Record<string, string> = {
     task: "rgba(245,158,11,0.3)",
     result: "rgba(34,197,94,0.3)",
@@ -1169,23 +1079,53 @@ function renderChats() {
         <span class="cd-chats-header__title">💬 Company Chats</span>
         <span class="cd-chats-header__sub"
           >${
-            _realMessages.length > 0 ? `${_realMessages.length} messages` : "No messages yet"
+            filtered.length > 0
+              ? isFiltered
+                ? `${filtered.length} of ${_realAllMessages.length} messages`
+                : `${filtered.length} messages`
+              : emptyTitle
           }</span
         >
       </div>
+      ${
+        _realAgents.length > 0
+          ? html`
+              <div class="cd-tasks-agent-filter">
+                <span class="cd-tasks-agent-filter__label">Filter by agent:</span>
+                <button class="cd-log-af-btn ${_chatFilterAgentIds.length === 0 ? "cd-log-af-btn--active" : ""}"
+                  @click=${() => {
+                    void _onSetChatFilterAgentIds?.([]);
+                  }}>All</button>
+                ${_realAgents.map(
+                  (agent) => html`
+                    <button
+                      class="cd-log-af-btn ${_chatFilterAgentIds.includes(agent.id) ? "cd-log-af-btn--active" : ""}"
+                      @click=${() => {
+                        const next = _chatFilterAgentIds.includes(agent.id)
+                          ? _chatFilterAgentIds.filter((id) => id !== agent.id)
+                          : [..._chatFilterAgentIds, agent.id];
+                        void _onSetChatFilterAgentIds?.(next);
+                      }}
+                    >
+                      ${agent.emoji} ${agent.name}
+                    </button>
+                  `,
+                )}
+              </div>
+            `
+          : ""
+      }
       <div class="cd-chats-log">
         ${
-          _realMessages.length === 0
+          filtered.length === 0
             ? html`
                 <div class="cd-chat-empty">
                   <div class="cd-chat-empty__icon">💬</div>
-                  <div class="cd-chat-empty__title">No messages yet</div>
-                  <div class="cd-chat-empty__sub">
-                    Agent-to-agent messages and human interactions will appear here once agents are active.
-                  </div>
+                  <div class="cd-chat-empty__title">${emptyTitle}</div>
+                  <div class="cd-chat-empty__sub">${emptySub}</div>
                 </div>
               `
-            : _realMessages.slice(-50).map((msg) => {
+            : filtered.map((msg) => {
                 const isHuman = msg.from === "human";
                 const ts = new Date(msg.ts).toTimeString().slice(0, 8);
                 return html`
@@ -1203,37 +1143,62 @@ function renderChats() {
         }
       </div>
 
-      <!-- Send message to company -->
       ${
         _onSendMessage
           ? html`
         <div class="cd-chats-compose">
-          <textarea class="cd-form-textarea cd-chats-compose__input" rows="2"
-            placeholder="Message to AI Director…"
-            @input=${(e: Event) => {
-              _chatInput = (e.target as HTMLTextAreaElement).value;
-            }}
-            @keydown=${(e: KeyboardEvent) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                const msg = _chatInput.trim();
-                if (msg) {
-                  _onSendMessage?.(msg);
-                  _chatInput = "";
-                  (e.target as HTMLTextAreaElement).value = "";
+          <div class="cd-chats-compose__controls">
+            <select
+              class="cd-form-input cd-chats-compose__target"
+              aria-label="Chat target"
+              .value=${_chatComposeTargetAgentId ?? ""}
+              @change=${(e: Event) => {
+                _chatComposeTargetAgentId = (e.target as HTMLSelectElement).value || null;
+                _chatSendError = null;
+                _requestUpdate?.();
+              }}
+            >
+              <option value="">Company</option>
+              ${_realAgents.map(
+                (agent) => html`<option value=${agent.id}>${agent.emoji} ${agent.name}</option>`,
+              )}
+            </select>
+          </div>
+          <div class="cd-chats-compose__editor">
+            <textarea
+              class="cd-form-textarea cd-chats-compose__input"
+              rows="4"
+              .value=${_chatInput}
+              ?disabled=${_chatSending}
+              placeholder=${`Message to ${composeTargetLabel}…`}
+              @input=${(e: Event) => {
+                _chatInput = (e.target as HTMLTextAreaElement).value;
+                _chatSendError = null;
+                _requestUpdate?.();
+              }}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void submitChatMessage();
                 }
-              }
-            }}></textarea>
-          <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${(e: Event) => {
-            const textarea = (e.target as HTMLElement)
-              .previousElementSibling as HTMLTextAreaElement;
-            const msg = textarea?.value.trim() ?? _chatInput.trim();
-            if (msg) {
-              _onSendMessage?.(msg);
-              textarea.value = "";
-              _chatInput = "";
-            }
-          }}>Send ⌘↵</button>
+              }}
+            ></textarea>
+            <button
+              class="cd-btn cd-btn--primary cd-btn--sm cd-chats-compose__send"
+              ?disabled=${!_chatInput.trim() || _chatSending}
+              @click=${() => {
+                void submitChatMessage();
+              }}
+            >
+              ${_chatSending ? "Sending…" : "Send ⌘↵"}
+            </button>
+          </div>
         </div>
+        ${
+          _chatSendError
+            ? html`<div class="cd-muted" style="margin-top:8px;color:var(--destructive)">${_chatSendError}</div>`
+            : ""
+        }
       `
           : ""
       }
@@ -1474,11 +1439,42 @@ export type CompanyOverviewProps = {
   teams?: TeamConfig[];
   tasks?: RealTask[];
   messages?: AgentMessage[];
+  allMessages?: AgentMessage[];
+  logs?: Map<string, RealLogEntry[]>;
+  chatFilterAgentIds?: string[];
   onSaveProfile?: (partial: Partial<RealProfile>) => void;
-  onSendMessage?: (content: string) => void;
+  onSendMessage?: (params: {
+    content: string;
+    targetAgentId?: string | null;
+  }) => Promise<void> | void;
   onCreateTeam?: (params: Omit<TeamConfig, "id">) => Promise<void>;
   onUpdateTeam?: (id: string, partial: Partial<Omit<TeamConfig, "id">>) => Promise<void>;
   onDeleteTeam?: (id: string) => Promise<void>;
+  onSetChatFilterAgentIds?: (agentIds: string[]) => void | Promise<void>;
+  onStartAgent?: (agentId: string) => void | Promise<void>;
+  onStopAgent?: (agentId: string) => void | Promise<void>;
+  onRestartAgent?: (agentId: string) => void | Promise<void>;
+  onPauseAgent?: (agentId: string) => void | Promise<void>;
+  onResumeAgent?: (agentId: string) => void | Promise<void>;
+  onLoadAgentLogs?: (agentId: string) => void | Promise<void>;
+  onCreateAgent?: (params: {
+    name: string;
+    role?: string;
+    team?: string;
+    runtime?: string;
+    emoji?: string;
+  }) => void | Promise<void>;
+  onUpdateAgent?: (
+    agentId: string,
+    params: {
+      role?: string;
+      team?: string;
+      runtime?: string;
+      emoji?: string;
+      description?: string;
+      reportTo?: string | null;
+    },
+  ) => void | Promise<void>;
   requestUpdate?: () => void;
 };
 
@@ -1489,11 +1485,23 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _realTasks = props.tasks ?? [];
   _realMessages = props.messages ?? [];
   _realTeams = props.teams ?? [];
+  _realAllMessages = props.allMessages ?? props.messages ?? [];
+  _realLogs = props.logs ?? new Map();
   _onSaveProfile = props.onSaveProfile;
   _onSendMessage = props.onSendMessage;
   _onCreateTeam = props.onCreateTeam;
   _onUpdateTeam = props.onUpdateTeam;
   _onDeleteTeam = props.onDeleteTeam;
+  _onSetChatFilterAgentIds = props.onSetChatFilterAgentIds;
+  _chatFilterAgentIds = props.chatFilterAgentIds ?? [];
+  _onStartAgent = props.onStartAgent;
+  _onStopAgent = props.onStopAgent;
+  _onRestartAgent = props.onRestartAgent;
+  _onPauseAgent = props.onPauseAgent;
+  _onResumeAgent = props.onResumeAgent;
+  _onLoadAgentLogs = props.onLoadAgentLogs;
+  _onCreateAgent = props.onCreateAgent;
+  _onUpdateAgent = props.onUpdateAgent;
   _requestUpdate = props.requestUpdate;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🦀", label: "Company" },

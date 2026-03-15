@@ -26,7 +26,7 @@ import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
-import { loadCompanyAll } from "./controllers/company.ts";
+import { loadCompanyAll, messageMatchesCompanyChatFilter } from "./controllers/company.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import {
@@ -111,6 +111,8 @@ type GatewayHost = {
   companyTeams: TeamConfig[];
   companyAgentLogs: Map<string, CompanyLogEntry[]>;
   companyMessages: AgentMessage[];
+  companyChatMessages: AgentMessage[];
+  companyChatFilterAgentIds: string[];
 };
 
 type SessionDefaultsSnapshot = {
@@ -488,6 +490,10 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     const { msg } = evt.payload as { msg: AgentMessage };
     const messages = host.companyMessages ?? [];
     host.companyMessages = [...messages.slice(-499), msg];
+    if (messageMatchesCompanyChatFilter(msg, host.companyChatFilterAgentIds ?? [])) {
+      const chatMessages = host.companyChatMessages ?? [];
+      host.companyChatMessages = [...chatMessages.slice(-49), msg];
+    }
     return;
   }
 

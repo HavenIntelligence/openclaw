@@ -244,6 +244,8 @@ export type AppViewState = {
   companyProfile: CompanyProfile | null;
   companyAgentLogs: Map<string, CompanyLogEntry[]>;
   companyMessages: AgentMessage[];
+  companyChatMessages: AgentMessage[];
+  companyChatFilterAgentIds: string[];
 } & Pick<
   CronState,
   | "cronLoading"

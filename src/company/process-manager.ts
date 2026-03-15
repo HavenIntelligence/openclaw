@@ -14,11 +14,29 @@ export interface TaskResult {
   exitCode: number;
 }
 
+interface SpawnOutcome {
+  content: string;
+  tokensUsed: number;
+  exitCode: number;
+  errorMessage?: string;
+}
+
 function generateRunId(): string {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 const SIGTERM_TIMEOUT_MS = 5000;
+
+function isIgnorableShellStartupNoise(line: string): boolean {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  return (
+    /profile\.ps1/i.test(line) ||
+    /about_Execution_Policies/i.test(line) ||
+    /PSSecurityException/i.test(line)
+  );
+}
 
 export class ProcessManager {
   private states: Map<string, AgentRuntimeState> = new Map();
@@ -92,6 +110,10 @@ export class ProcessManager {
 
       void resultPromise.then((r) => {
         clearTimeout(timer);
+        if (r.errorMessage) {
+          reject(new Error(r.errorMessage));
+          return;
+        }
         resolve({ runId, ...r });
       });
     });
@@ -105,7 +127,7 @@ export class ProcessManager {
     opts?: RunOpts,
   ): {
     runId: string;
-    resultPromise: Promise<{ content: string; tokensUsed: number; exitCode: number }>;
+    resultPromise: Promise<SpawnOutcome>;
   } {
     const meta = this.registry.getMeta(agentId);
     const runtime = meta?.runtime ?? "openclaw";
@@ -126,7 +148,49 @@ export class ProcessManager {
       systemPrompt: meta?.systemPrompt ?? opts?.systemPrompt,
     };
 
-    const child = runner.runTask(agentId, prompt, mergedOpts);
+    const appendRunEntry = (entry: {
+      type: "system" | "error" | "output" | "tool_call";
+      content: string;
+      tokensUsed?: number;
+    }) => {
+      const appended = this.logStore.append({
+        agentId,
+        runId,
+        type: entry.type,
+        content: entry.content,
+        tokensUsed: entry.tokensUsed,
+      });
+      const state = this.getState(agentId);
+      state.logBuffer.push(appended);
+      if (state.logBuffer.length > 200) {
+        state.logBuffer.shift();
+      }
+      this.broadcast("company.agent.log", { agentId, runId, entry: appended });
+      return appended;
+    };
+
+    const formatStartupError = (err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      return `Failed to start agent "${agentId}" runtime "${runtime}": ${detail}`;
+    };
+
+    let child: ChildProcess;
+    try {
+      child = runner.runTask(agentId, prompt, mergedOpts);
+    } catch (err) {
+      const errorMessage = formatStartupError(err);
+      appendRunEntry({ type: "error", content: errorMessage });
+      this.setStatus(agentId, "crashed", { pid: undefined, currentTask: undefined });
+      return {
+        runId,
+        resultPromise: Promise.resolve({
+          content: "",
+          tokensUsed: 0,
+          exitCode: 1,
+          errorMessage,
+        }),
+      };
+    }
     this.processes.set(agentId, child);
 
     const lineParser: (line: string) => ParsedOutput | null =
@@ -135,6 +199,34 @@ export class ProcessManager {
     // Accumulate result content for runTaskAwait callers
     let resultContent = "";
     let resultTokens = 0;
+    let settled = false;
+
+    let resolveResult!: (value: SpawnOutcome) => void;
+    const resultPromise = new Promise<SpawnOutcome>((resolve) => {
+      resolveResult = resolve;
+    });
+
+    const finish = (result: SpawnOutcome) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      this.processes.delete(agentId);
+      const status: AgentStatus = result.exitCode === 0 ? "idle" : "crashed";
+      this.setStatus(agentId, status, { pid: undefined, currentTask: undefined });
+      resolveResult(result);
+    };
+
+    child.once("error", (err) => {
+      const errorMessage = formatStartupError(err);
+      appendRunEntry({ type: "error", content: errorMessage });
+      finish({
+        content: "",
+        tokensUsed: 0,
+        exitCode: 1,
+        errorMessage,
+      });
+    });
 
     if (child.stdout) {
       const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
@@ -145,19 +237,11 @@ export class ProcessManager {
         }
 
         if (parsed.type === "log") {
-          const entry = this.logStore.append({
-            agentId,
-            runId,
-            type: parsed.entry.type ?? "output",
+          appendRunEntry({
+            type: (parsed.entry.type ?? "output") as "system" | "error" | "output" | "tool_call",
             content: parsed.entry.content ?? "",
-            ...parsed.entry,
+            tokensUsed: parsed.entry.tokensUsed,
           });
-          const state = this.getState(agentId);
-          state.logBuffer.push(entry);
-          if (state.logBuffer.length > 200) {
-            state.logBuffer.shift();
-          }
-          this.broadcast("company.agent.log", { agentId, runId, entry });
         } else if (parsed.type === "result") {
           resultContent = parsed.content;
           resultTokens = parsed.tokensUsed ?? 0;
@@ -168,18 +252,11 @@ export class ProcessManager {
           state.currentTask = undefined;
 
           if (parsed.content) {
-            const entry = this.logStore.append({
-              agentId,
-              runId,
+            appendRunEntry({
               type: "output",
               content: parsed.content,
               tokensUsed: parsed.tokensUsed,
             });
-            state.logBuffer.push(entry);
-            if (state.logBuffer.length > 200) {
-              state.logBuffer.shift();
-            }
-            this.broadcast("company.agent.log", { agentId, runId, entry });
           }
         }
       });
@@ -192,37 +269,29 @@ export class ProcessManager {
         if (!trimmed) {
           return;
         }
+        // Ignore Windows PowerShell profile execution-policy noise emitted by child tools.
+        if (isIgnorableShellStartupNoise(trimmed)) {
+          return;
+        }
         // CLI warnings/info are not errors — classify as system
         const isInfoLine =
           trimmed.startsWith("[tools]") ||
           trimmed.startsWith("[warn]") ||
           trimmed.startsWith("[info]");
-        const entry = this.logStore.append({
-          agentId,
-          runId,
+        appendRunEntry({
           type: isInfoLine ? "system" : "error",
           content: line,
         });
-        const state = this.getState(agentId);
-        state.logBuffer.push(entry);
-        if (state.logBuffer.length > 200) {
-          state.logBuffer.shift();
-        }
-        this.broadcast("company.agent.log", { agentId, runId, entry });
       });
     }
 
-    const resultPromise = new Promise<{ content: string; tokensUsed: number; exitCode: number }>(
-      (resolve) => {
-        child.once("exit", (code) => {
-          this.processes.delete(agentId);
-          const exitCode = code ?? 1;
-          const status: AgentStatus = exitCode === 0 ? "idle" : "crashed";
-          this.setStatus(agentId, status, { pid: undefined, currentTask: undefined });
-          resolve({ content: resultContent, tokensUsed: resultTokens, exitCode });
-        });
-      },
-    );
+    child.once("exit", (code) => {
+      finish({
+        content: resultContent,
+        tokensUsed: resultTokens,
+        exitCode: code ?? 1,
+      });
+    });
 
     return { runId, resultPromise };
   }

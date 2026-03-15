@@ -111,6 +111,14 @@ function createHost() {
     execApprovalQueue: [],
     execApprovalError: null,
     updateAvailable: null,
+    companyAgents: [],
+    companyFleetSnapshot: null,
+    companyTasks: [],
+    companyTeams: [],
+    companyAgentLogs: new Map(),
+    companyMessages: [],
+    companyChatMessages: [],
+    companyChatFilterAgentIds: [],
   } as unknown as Parameters<typeof connectGateway>[0];
 }
 
@@ -156,6 +164,83 @@ describe("connectGateway", () => {
     secondClient.emitEvent({ event: "presence", payload: { presence: [{ host: "active" }] } });
     expect(host.eventLogBuffer).toHaveLength(1);
     expect(host.eventLogBuffer[0]?.event).toBe("presence");
+  });
+
+  it("appends company messages to both full and chat lists when no chat filter is active", () => {
+    const host = createHost();
+
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeDefined();
+
+    client.emitEvent({
+      event: "company.agent.message",
+      payload: {
+        msg: {
+          id: "msg-1",
+          from: "engineering",
+          to: "orchestrator",
+          content: "done",
+          type: "result",
+          ts: 1,
+        },
+      },
+    });
+
+    expect(host.companyMessages).toHaveLength(1);
+    expect(host.companyChatMessages).toHaveLength(1);
+  });
+
+  it("appends matching company messages to the chat list when a chat filter is active", () => {
+    const host = createHost();
+    host.companyChatFilterAgentIds = ["engineering"];
+
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeDefined();
+
+    client.emitEvent({
+      event: "company.agent.message",
+      payload: {
+        msg: {
+          id: "msg-1",
+          from: "engineering",
+          to: "orchestrator",
+          content: "done",
+          type: "result",
+          ts: 1,
+        },
+      },
+    });
+
+    expect(host.companyMessages).toHaveLength(1);
+    expect(host.companyChatMessages).toHaveLength(1);
+  });
+
+  it("keeps non-matching company messages out of the chat list when a chat filter is active", () => {
+    const host = createHost();
+    host.companyChatFilterAgentIds = ["engineering"];
+
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeDefined();
+
+    client.emitEvent({
+      event: "company.agent.message",
+      payload: {
+        msg: {
+          id: "msg-1",
+          from: "marketing",
+          to: "orchestrator",
+          content: "ready",
+          type: "result",
+          ts: 1,
+        },
+      },
+    });
+
+    expect(host.companyMessages).toHaveLength(1);
+    expect(host.companyChatMessages).toEqual([]);
   });
 
   it("applies update.available only from active client", () => {
