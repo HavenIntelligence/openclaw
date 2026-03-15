@@ -176,5 +176,7 @@ export interface CompanyProfile {
   values?: string[];
   businessModel?: string;
   focusAreas?: string[];
+  /** Max orchestration rounds before forcing final synthesis (default 5). */
+  maxOrchestrationRounds?: number;
   updatedAt: number;
 }

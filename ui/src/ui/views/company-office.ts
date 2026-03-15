@@ -1,7 +1,7 @@
 import { html } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
-import { toSanitizedMarkdownHtml } from "../markdown.ts";
+import { formatExecutionLogContent, toSanitizedMarkdownHtml } from "../markdown.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentStatus = "thinking" | "working" | "idle" | "crashed" | "messaging";
@@ -23,6 +23,7 @@ type OfficeAgent = {
   deskY: number;
   messageTo: string | null;
   team: string;
+  role?: string;
 };
 
 type FlyingMessage = {
@@ -57,290 +58,41 @@ type LogEntry = {
   duration?: number;
 };
 
-// ── Project definition ──────────────────────────────────────────────────────
-type Project = {
-  id: string;
-  name: string;
-  status: "running" | "paused" | "completed";
-  agents: string[];
-  progress: number;
-  description: string;
-};
+// ── (Project type removed — projects UI stripped) ───────────────────────────
 
-// ── Demo data ──────────────────────────────────────────────────────────────
-const TILE = 62;
-const COLS = 14;
-const ROWS = 9;
+// ── Layout — matches Orchestrator + 4 department structure ────────────────
+// Canvas is a compact grid: orchestrator at top center, 4 leads in a row below.
+const TILE = 80;
+const COLS = 12;
+const ROWS = 5;
 
+// Fixed desk positions: orchestrator top-center, departments spaced below
 const DESKS: Record<string, { x: number; y: number }> = {
-  "ai-director": { x: 6, y: 0 },
-  "ops-prime": { x: 1, y: 2 },
-  "content-director": { x: 11, y: 2 },
-  "nanoclaw-primary": { x: 6, y: 2 },
-  "code-agent": { x: 0, y: 6 },
-  "test-runner": { x: 3, y: 6 },
-  "research-alpha": { x: 9, y: 6 },
-  "writing-beta": { x: 11, y: 6 },
-  "review-gamma": { x: 13, y: 6 },
+  orchestrator: { x: 5, y: 0 },
+  engineering: { x: 1, y: 3 },
+  marketing: { x: 4, y: 3 },
+  operations: { x: 7, y: 3 },
+  finance: { x: 10, y: 3 },
 };
 
-const THOUGHTS: Record<string, string[]> = {
-  "ai-director": [
-    "Reviewing Q2 roadmap…",
-    "Should we prioritize the MCP marketplace?",
-    "Fundraise deck looks solid. One more round of feedback.",
-  ],
-  "ops-prime": [
-    "Churn is up 1.2% — need to flag this.",
-    "Deployment window set for Thursday 2am.",
-    "Team velocity is healthy this sprint.",
-  ],
-  "content-director": [
-    "New blog angle: AI agents vs. human teams.",
-    "SEO score needs work on the pricing page.",
-    "Let's A/B test two headline variants.",
-  ],
-  "nanoclaw-primary": [
-    "Founder meeting notes synced.",
-    "Calendar blocked for deep work: 9–12am.",
-    "3 reminders queued for tomorrow.",
-  ],
-  "code-agent": [
-    "MCP retry fix looks clean. Running tests.",
-    "Auth token refresh was a race condition.",
-    "PR #42 ready. All 142 tests passing ✅",
-  ],
-  "test-runner": [
-    "Coverage at 89%. Need 3 more edge cases.",
-    "Flakey test in auth suite — investigating.",
-    "Regression suite finished. 0 new failures.",
-  ],
-  "research-alpha": [
-    "Found pricing data for 18 competitors.",
-    "Anthropic API: $3/M input tokens at scale.",
-    "Building comparison table for writing-beta.",
-  ],
-  "writing-beta": [
-    "Draft at 1,800 words. 700 more to go.",
-    "Adding a 'Key Takeaways' section.",
-    "SEO keywords woven in. Reads naturally.",
-  ],
-  "review-gamma": [
-    "Context window exceeded 128K limit.",
-    "Supervisor restarting… attempt 2/3.",
-    "Unable to resume — awaiting human review.",
-  ],
-};
+const _THOUGHTS: Record<string, string[]> = {};
+const _MESSAGE_SCRIPTS: { from: string; to: string; emoji: string; label: string }[] = [];
 
-const MESSAGE_SCRIPTS = [
-  { from: "ai-director", to: "content-director", emoji: "📋", label: "Strategy brief" },
-  { from: "content-director", to: "research-alpha", emoji: "🔍", label: "Research task" },
-  { from: "research-alpha", to: "writing-beta", emoji: "📄", label: "Research output" },
-  { from: "writing-beta", to: "review-gamma", emoji: "✍️", label: "Draft ready" },
-  { from: "ai-director", to: "ops-prime", emoji: "📊", label: "OKR review" },
-  { from: "ops-prime", to: "code-agent", emoji: "⚙️", label: "Deploy task" },
-  { from: "code-agent", to: "test-runner", emoji: "💻", label: "PR ready" },
-  { from: "test-runner", to: "ops-prime", emoji: "✅", label: "Tests passed" },
-  { from: "nanoclaw-primary", to: "ai-director", emoji: "💬", label: "Summary ready" },
-];
-
-const INITIAL_AGENTS: OfficeAgent[] = [
-  {
-    id: "ai-director",
-    name: "AI Director",
-    emoji: "🧑‍💻",
-    color: "#ff5c5c",
-    team: "executive",
-    status: "thinking",
-    activity: "Setting strategy",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["ai-director"],
-    targetX: DESKS["ai-director"].x,
-    targetY: DESKS["ai-director"].y,
-    deskX: DESKS["ai-director"].x,
-    deskY: DESKS["ai-director"].y,
-  },
-  {
-    id: "ops-prime",
-    name: "Ops Prime",
-    emoji: "🧑‍💼",
-    color: "#60a5fa",
-    team: "executive",
-    status: "working",
-    activity: "Reviewing OKRs",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["ops-prime"],
-    targetX: DESKS["ops-prime"].x,
-    targetY: DESKS["ops-prime"].y,
-    deskX: DESKS["ops-prime"].x,
-    deskY: DESKS["ops-prime"].y,
-  },
-  {
-    id: "content-director",
-    name: "CMO",
-    emoji: "👩‍🎨",
-    color: "#fb923c",
-    team: "content",
-    status: "working",
-    activity: "Planning content",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["content-director"],
-    targetX: DESKS["content-director"].x,
-    targetY: DESKS["content-director"].y,
-    deskX: DESKS["content-director"].x,
-    deskY: DESKS["content-director"].y,
-  },
-  {
-    id: "nanoclaw-primary",
-    name: "NanoClaw",
-    emoji: "🤖",
-    color: "#14b8a6",
-    team: "executive",
-    status: "idle",
-    activity: "Awaiting tasks",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["nanoclaw-primary"],
-    targetX: DESKS["nanoclaw-primary"].x,
-    targetY: DESKS["nanoclaw-primary"].y,
-    deskX: DESKS["nanoclaw-primary"].x,
-    deskY: DESKS["nanoclaw-primary"].y,
-  },
-  {
-    id: "code-agent",
-    name: "Code Agent",
-    emoji: "👨‍💻",
-    color: "#22c55e",
-    team: "devops",
-    status: "working",
-    activity: "Fixing MCP retry",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["code-agent"],
-    targetX: DESKS["code-agent"].x,
-    targetY: DESKS["code-agent"].y,
-    deskX: DESKS["code-agent"].x,
-    deskY: DESKS["code-agent"].y,
-  },
-  {
-    id: "test-runner",
-    name: "Test Runner",
-    emoji: "🧪",
-    color: "#a78bfa",
-    team: "devops",
-    status: "idle",
-    activity: "Waiting for PR",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["test-runner"],
-    targetX: DESKS["test-runner"].x,
-    targetY: DESKS["test-runner"].y,
-    deskX: DESKS["test-runner"].x,
-    deskY: DESKS["test-runner"].y,
-  },
-  {
-    id: "research-alpha",
-    name: "Researcher",
-    emoji: "🔍",
-    color: "#f97316",
-    team: "content",
-    status: "working",
-    activity: "Competitor analysis",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["research-alpha"],
-    targetX: DESKS["research-alpha"].x,
-    targetY: DESKS["research-alpha"].y,
-    deskX: DESKS["research-alpha"].x,
-    deskY: DESKS["research-alpha"].y,
-  },
-  {
-    id: "writing-beta",
-    name: "Writer",
-    emoji: "✍️",
-    color: "#fbbf24",
-    team: "content",
-    status: "working",
-    activity: "Drafting blog post",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["writing-beta"],
-    targetX: DESKS["writing-beta"].x,
-    targetY: DESKS["writing-beta"].y,
-    deskX: DESKS["writing-beta"].x,
-    deskY: DESKS["writing-beta"].y,
-  },
-  {
-    id: "review-gamma",
-    name: "Reviewer",
-    emoji: "🧐",
-    color: "#ef4444",
-    team: "content",
-    status: "crashed",
-    activity: "CRASHED",
-    thoughtBubble: "",
-    thoughtTimer: 0,
-    messageTo: null,
-    ...DESKS["review-gamma"],
-    targetX: DESKS["review-gamma"].x,
-    targetY: DESKS["review-gamma"].y,
-    deskX: DESKS["review-gamma"].x,
-    deskY: DESKS["review-gamma"].y,
-  },
-];
+const _INITIAL_AGENTS: OfficeAgent[] = [];
 
 // ── Demo execution log ────────────────────────────────────────────────────
 let _execLog: LogEntry[] = [];
 
 let _logIdCounter = 0;
 
-// ── Projects ───────────────────────────────────────────────────────────────
-const PROJECTS: Project[] = [
-  {
-    id: "alpha",
-    name: "Project Alpha",
-    status: "running",
-    agents: ["code-agent", "test-runner", "research-alpha", "writing-beta"],
-    progress: 62,
-    description: "Core platform v1.2.0 — reliability improvements and MCP client refactor.",
-  },
-  {
-    id: "beta",
-    name: "Project Beta",
-    status: "paused",
-    agents: ["research-alpha", "writing-beta"],
-    progress: 28,
-    description: "AI agent fleet white-paper and thought leadership content series.",
-  },
-  {
-    id: "content",
-    name: "Content Pipeline",
-    status: "running",
-    agents: ["research-alpha", "writing-beta", "review-gamma"],
-    progress: 85,
-    description: "Automated content production pipeline: research → draft → review → publish.",
-  },
-];
+// ── (Projects removed — UI stripped) ────────────────────────────────────────
 
 // ── Human input state ──────────────────────────────────────────────────────
 let _humanInput = "";
 let _isPaused = false;
-let _activeProject = "alpha";
-let _showAddProject = false;
-let _newProjectName = "";
-let _rightTab: "log" | "output" | "human" = "log";
-let _logAgentFilter: string = "all"; // "all" or agent id
+let _rightTab: "log" | "output" = "log";
+let _logAgentFilter: string = "all";
+let _expandedOutputIds: Set<string> = new Set();
 
 // ── Callbacks from props (module-level to be accessible in renderFn) ────────
 let _onSendMessage: ((content: string) => void) | undefined;
@@ -363,8 +115,17 @@ function _sendToCompany(msg: string) {
   if (_onSendMessage) {
     _onSendMessage(msg);
   }
-  // Switch the right panel to Log tab so the user sees the entry immediately.
   _rightTab = "log";
+  _scrollLogToBottom();
+}
+
+function _scrollLogToBottom() {
+  requestAnimationFrame(() => {
+    const el = document.getElementById("cd-exec-log");
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  });
 }
 
 // ── Animation state ────────────────────────────────────────────────────────
@@ -378,7 +139,6 @@ let _activeEdges: { from: string; to: string; timer: number }[] = [];
 let _bubbleIdCounter = 0;
 let _tick = 0;
 let _msgIdCounter = 0;
-let _scriptIdx = 0;
 let _animFrame: number | null = null;
 let _hostUpdate: (() => void) | null = null;
 let _simulationStarted = false;
@@ -404,24 +164,27 @@ function addLog(
   if (_execLog.length > 80) {
     _execLog = _execLog.slice(-60);
   }
+  _scrollLogToBottom();
   // Spawn canvas bubble for output and thinking entries
   if (type === "output" || type === "thinking" || type === "tool_call") {
     const shortText = content.length > 60 ? content.slice(0, 57) + "…" : content;
     const color = type === "output" ? "var(--ok)" : type === "tool_call" ? "#a78bfa" : "#60a5fa";
+    // Remove existing bubble for same agent before adding new one (prevents overlap)
+    _canvasBubbles = _canvasBubbles.filter((b) => b.agentId !== agent);
     _canvasBubbles.push({
       id: `bubble-${_bubbleIdCounter++}`,
       agentId: agent,
       text: shortText,
-      timer: 340,
+      timer: 200,
       color,
     });
-    if (_canvasBubbles.length > 5) {
-      _canvasBubbles = _canvasBubbles.slice(-5);
+    if (_canvasBubbles.length > 3) {
+      _canvasBubbles = _canvasBubbles.slice(-3);
     }
   }
 }
 
-function spawnMessage(fromId: string, toId: string, emoji: string, label: string) {
+function _spawnMessage(fromId: string, toId: string, emoji: string, label: string) {
   const from = _agents.find((a) => a.id === fromId);
   const to = _agents.find((a) => a.id === toId);
   if (!from || !to) {
@@ -445,8 +208,9 @@ function simulationStep() {
   }
   _tick++;
 
+  // Advance flying messages
   for (const msg of _messages) {
-    msg.progress += 0.012;
+    msg.progress += 0.015;
   }
   _messages = _messages.filter((m) => m.progress < 1.0);
 
@@ -462,67 +226,22 @@ function simulationStep() {
   }
   _activeEdges = _activeEdges.filter((e) => e.timer > 0);
 
-  // Only spawn visual message-packet animations — no fake log entries.
-  if (_tick % 200 === 0 && _agents.length > 0) {
-    const script = MESSAGE_SCRIPTS[_scriptIdx % MESSAGE_SCRIPTS.length];
-    const fromAgent = _agents.find((a) => a.id === script.from);
-    const toAgent = _agents.find((a) => a.id === script.to);
-    if (fromAgent && toAgent) {
-      spawnMessage(script.from, script.to, script.emoji, script.label);
-      _scriptIdx++;
-      if (fromAgent.status !== "crashed") {
-        fromAgent.status = "messaging";
-        fromAgent.activity = `→ ${script.to}`;
-      }
-    }
-  }
-
+  // Agents stay fixed at their desks — no random movement.
   for (const agent of _agents) {
-    if (agent.status === "crashed") {
-      continue;
-    }
-
-    if (_tick % 60 === Math.abs(agent.id.charCodeAt(0)) % 60) {
-      const thoughts = THOUGHTS[agent.id] ?? [];
-      if (thoughts.length > 0) {
-        agent.thoughtBubble = thoughts[Math.floor(_tick / 60) % thoughts.length];
-        agent.thoughtTimer = 180;
-      }
-    }
+    // Decay thought bubbles
     if (agent.thoughtTimer > 0) {
       agent.thoughtTimer--;
       if (agent.thoughtTimer === 0) {
         agent.thoughtBubble = "";
       }
     }
+    // Snap to desk position (no wandering)
+    agent.x = agent.deskX;
+    agent.y = agent.deskY;
+    agent.targetX = agent.deskX;
+    agent.targetY = agent.deskY;
 
-    if (_tick % 600 === Math.abs(agent.id.charCodeAt(2) ?? 0) % 600) {
-      // 15% chance to go to meeting room, otherwise stay at desk
-      const goMeet = Math.random() < 0.15;
-      if (goMeet) {
-        agent.targetX = 5 + Math.floor(Math.random() * 3);
-        agent.targetY = 4;
-        agent.status = "thinking";
-      } else {
-        agent.targetX = agent.deskX;
-        agent.targetY = agent.deskY;
-        agent.status = "working";
-        agent.activity = "Back at desk";
-      }
-    }
-
-    const dx = agent.targetX - agent.x;
-    const dy = agent.targetY - agent.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 0.1) {
-      const speed = 0.022;
-      agent.x += (dx / dist) * speed;
-      agent.y += (dy / dist) * speed;
-    } else {
-      agent.x = agent.targetX;
-      agent.y = agent.targetY;
-    }
-
+    // Reset messaging status after a brief period
     if (agent.status === "messaging" && _tick % 60 === 0) {
       agent.status = "working";
     }
@@ -545,49 +264,57 @@ function startSimulation(update: () => void) {
   _animFrame = requestAnimationFrame(loop);
 }
 
-// ── Floor zones ────────────────────────────────────────────────────────────
+// ── Floor zones — orchestrator + 4 departments ────────────────────────────
 const FLOOR_TILES = [
   {
-    x: 0,
+    x: 3,
     y: 0,
-    w: COLS,
+    w: 6,
     h: 2,
-    label: "Executive Suite",
-    color: "rgba(96,165,250,0.05)",
-    border: "rgba(96,165,250,0.15)",
-  },
-  {
-    x: 5,
-    y: 3,
-    w: 4,
-    h: 3,
-    label: "Meeting Room",
-    color: "rgba(255,92,92,0.06)",
-    border: "rgba(255,92,92,0.25)",
+    label: "Orchestrator",
+    color: "rgba(99,102,241,0.06)",
+    border: "rgba(99,102,241,0.2)",
   },
   {
     x: 0,
-    y: 5,
-    w: 7,
-    h: 4,
-    label: "Dev Area",
+    y: 2,
+    w: 3,
+    h: 3,
+    label: "Engineering",
     color: "rgba(34,197,94,0.06)",
     border: "rgba(34,197,94,0.2)",
   },
   {
-    x: 8,
-    y: 5,
-    w: 6,
-    h: 4,
-    label: "Content Area",
-    color: "rgba(251,146,60,0.06)",
-    border: "rgba(251,146,60,0.2)",
+    x: 3,
+    y: 2,
+    w: 3,
+    h: 3,
+    label: "Marketing",
+    color: "rgba(249,115,22,0.06)",
+    border: "rgba(249,115,22,0.2)",
+  },
+  {
+    x: 6,
+    y: 2,
+    w: 3,
+    h: 3,
+    label: "Operations",
+    color: "rgba(96,165,250,0.06)",
+    border: "rgba(96,165,250,0.2)",
+  },
+  {
+    x: 9,
+    y: 2,
+    w: 3,
+    h: 3,
+    label: "Finance",
+    color: "rgba(234,179,8,0.06)",
+    border: "rgba(234,179,8,0.2)",
   },
 ];
 
-const DESK_ITEMS = Object.entries(DESKS).map(([id, pos]) => {
-  const a = INITIAL_AGENTS.find((x) => x.id === id);
-  return { ...pos, emoji: "🖥️", agent: a };
+const DESK_ITEMS = Object.entries(DESKS).map(([_id, pos]) => {
+  return { ...pos, emoji: "🖥️" };
 });
 
 // ── Log type helpers ───────────────────────────────────────────────────────
@@ -614,6 +341,12 @@ function logTypeIcon(type: LogEntry["type"], content?: string) {
     }
     if (content.includes("Synthesizing")) {
       return "🔄";
+    }
+    if (content.includes("Verifying") || content.includes("Verifier")) {
+      return "✅";
+    }
+    if (content.includes("Round ")) {
+      return "🔁";
     }
     if (content.includes("→")) {
       return "➡️";
@@ -658,11 +391,9 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       paused: "idle",
     };
 
-    // Seed new agents that don't exist in the animation yet.
-    // Use the DESKS grid layout if we have enough positions, otherwise dynamic placement.
-    const deskKeys = Object.keys(DESKS);
-    let dynamicCol = 0;
-    let dynamicRow = 0;
+    // Seed new agents. Match by agent ID to DESKS layout; orchestrator at top,
+    // department leads spaced evenly below. Extra agents get dynamic positions.
+    let dynamicIdx = 0;
     for (let i = 0; i < props.agents.length; i++) {
       const realAgent = props.agents[i];
       const existing = _agents.find((a) => a.id === realAgent.id);
@@ -672,26 +403,23 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
         existing.emoji = realAgent.emoji || existing.emoji;
         existing.color = realAgent.color || existing.color;
         existing.team = realAgent.team || existing.team;
-        // Update activity text based on status
+        existing.role = realAgent.role || existing.role;
         if (realAgent.currentTask && existing.status === "working") {
           existing.activity = realAgent.currentTask.slice(0, 40);
         }
       } else {
-        // Assign desk position: use preset DESKS if available, otherwise grid
+        // Match agent to a named desk position, or assign dynamic grid slot
         let deskX: number;
         let deskY: number;
-        if (i < deskKeys.length) {
-          const desk = DESKS[deskKeys[i]];
+        const desk = DESKS[realAgent.id];
+        if (desk) {
           deskX = desk.x;
           deskY = desk.y;
         } else {
-          deskX = 1 + dynamicCol * 3;
-          deskY = 2 + dynamicRow * 3;
-          dynamicCol++;
-          if (dynamicCol >= 4) {
-            dynamicCol = 0;
-            dynamicRow++;
-          }
+          // Space extra agents evenly on row 3
+          deskX = 1 + dynamicIdx * 3;
+          deskY = 3;
+          dynamicIdx++;
         }
         _agents.push({
           id: realAgent.id,
@@ -699,6 +427,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
           emoji: realAgent.emoji || "🤖",
           color: realAgent.color || "#60a5fa",
           team: realAgent.team || "general",
+          role: realAgent.role || "",
           status: statusMap[realAgent.status] ?? "idle",
           activity: realAgent.currentTask?.slice(0, 40) || "",
           thoughtBubble: "",
@@ -840,7 +569,14 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
   const W = COLS * TILE;
   const H = ROWS * TILE;
-  const activeProject = PROJECTS.find((p) => p.id === _activeProject) ?? PROJECTS[0];
+
+  // Filter out noise entries ([tools], [warn], [info] prefixes)
+  const filteredLog = displayLog.filter((e) => {
+    if (e.type === "system" && /^\[tools\]|\[warn\]|\[info\]/.test(e.content)) {
+      return false;
+    }
+    return true;
+  });
 
   return html`
     <div class="cd-page cd-page--office">
@@ -849,39 +585,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       <div class="cd-office-bar">
         <div class="cd-office-bar__left">
           <span class="cd-office-bar__title">🏢 Live Office</span>
-          <span class="cd-office-bar__sub">Real-time agent simulation</span>
+          <span class="cd-office-bar__sub">Real-time agent orchestration</span>
         </div>
-
-        <!-- Project tabs -->
-        <div class="cd-office-projects">
-          ${PROJECTS.map(
-            (p) => html`
-            <button class="cd-office-proj-tab ${_activeProject === p.id ? "cd-office-proj-tab--active" : ""} cd-office-proj-tab--${p.status}"
-              @click=${() => {
-                _activeProject = p.id;
-              }}>
-              ${
-                p.status === "running"
-                  ? html`
-                      <span class="cd-pulse cd-pulse--running"></span>
-                    `
-                  : p.status === "paused"
-                    ? "⏸"
-                    : "✅"
-              }
-              ${p.name}
-              <span class="cd-office-proj-tab__pct">${p.progress}%</span>
-            </button>
-          `,
-          )}
-          <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
-            _showAddProject = !_showAddProject;
-          }} title="New Project">
-            + Project
-          </button>
-        </div>
-
-        <!-- Controls -->
         <div class="cd-office-bar__chips">
           <button class="cd-btn cd-btn--${_isPaused ? "primary" : "outline"} cd-btn--sm" @click=${() => {
             _isPaused = !_isPaused;
@@ -893,81 +598,11 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
         </div>
       </div>
 
-      <!-- Add project inline form -->
-      ${
-        _showAddProject
-          ? html`
-        <div class="cd-office-new-proj">
-          <input class="cd-form-input" placeholder="Project name…"
-            .value=${_newProjectName}
-            @input=${(e: Event) => {
-              _newProjectName = (e.target as HTMLInputElement).value;
-            }} />
-          <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-            if (_newProjectName.trim()) {
-              PROJECTS.push({
-                id: `proj-${Date.now()}`,
-                name: _newProjectName.trim(),
-                status: "running",
-                agents: [],
-                progress: 0,
-                description: "New project",
-              });
-              _newProjectName = "";
-              _showAddProject = false;
-            }
-          }}>Launch</button>
-          <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
-            _showAddProject = false;
-          }}>Cancel</button>
-        </div>
-      `
-          : ""
-      }
-
       <!-- ── Main split layout ───────────────────────────────────────── -->
       <div class="cd-office-split">
 
         <!-- LEFT: animated office canvas -->
         <div class="cd-office-canvas-wrap">
-          <!-- Project progress bar (clawport style) -->
-          <div class="cd-office-proj-bar">
-            <div class="cd-office-proj-bar__copy">
-              <span class="cd-office-proj-bar__name">${activeProject.name}</span>
-              <span class="cd-office-proj-bar__desc">${activeProject.description}</span>
-            </div>
-            <div class="cd-office-proj-bar__meta">
-              <span class="cd-office-proj-status cd-office-proj-status--${activeProject.status}">${activeProject.status}</span>
-              <div class="cd-office-proj-progress">
-                <div class="cd-office-proj-progress__fill" style="width:${activeProject.progress}%"></div>
-              </div>
-              <span class="cd-office-proj-bar__pct">${activeProject.progress}%</span>
-            </div>
-          </div>
-
-          <!-- Focus strip (all active agents) -->
-          <div class="cd-office-focus-strip">
-            <span class="cd-office-focus-strip__label">${_agents.filter((a) => a.status === "working" || a.status === "thinking" || a.status === "messaging").length > 0 ? "Active now" : "Fleet"}</span>
-            <div class="cd-office-focus-track">
-              ${_agents.map((a, i, arr) => {
-                const isHot =
-                  a.status === "working" || a.status === "thinking" || a.status === "messaging";
-                return html`
-                  <span class="cd-office-focus-pill ${isHot ? "cd-office-focus-pill--hot" : ""} ${a.status === "crashed" ? "cd-office-focus-pill--crashed" : ""}">
-                    ${a.emoji} ${a.name}
-                  </span>
-                  ${
-                    i < arr.length - 1
-                      ? html`
-                          <span class="cd-office-focus-arrow">→</span>
-                        `
-                      : ""
-                  }
-                `;
-              })}
-            </div>
-          </div>
-
           <div class="cd-office-canvas" style="width:${W}px;height:${H}px">
             <div class="cd-office-floor" style="width:${W}px;height:${H}px">
 
@@ -1024,32 +659,28 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     </g>
                   `;
                 })}
-                ${
-                  !_agentsSeededFromBackend
-                    ? MESSAGE_SCRIPTS.map((script) => {
-                        const from = _agents.find((a) => a.id === script.from);
-                        const to = _agents.find((a) => a.id === script.to);
-                        if (!from || !to) {
-                          return "";
-                        }
-                        const x1 = from.x * TILE + TILE / 2;
-                        const y1 = from.y * TILE + 20;
-                        const x2 = to.x * TILE + TILE / 2;
-                        const y2 = to.y * TILE + 20;
-                        const cpX = (x1 + x2) / 2;
-                        const cpY = Math.min(y1, y2) - Math.max(48, Math.abs(x2 - x1) * 0.18);
-                        const hasActiveMsg = _messages.some(
-                          (m) => Math.abs(m.fromX - x1) < TILE && Math.abs(m.toX - x2) < TILE,
-                        );
-                        return html`
-                          <g class="cd-office-edge ${hasActiveMsg ? "cd-office-edge--active" : ""}">
-                            <path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__line"/>
-                            ${hasActiveMsg ? html`<path d="M ${x1} ${y1} Q ${cpX} ${cpY} ${x2} ${y2}" class="cd-office-edge__pulse"/>` : ""}
-                          </g>
-                        `;
-                      })
-                    : ""
-                }
+                <!-- Static edges: orchestrator to each department -->
+                ${(() => {
+                  const orch = _agents.find(
+                    (a) => a.role === "Orchestrator" || a.id === "orchestrator",
+                  );
+                  if (!orch) {
+                    return "";
+                  }
+                  return _agents
+                    .filter((a) => a.id !== orch.id)
+                    .map((dept) => {
+                      const x1 = orch.x * TILE + TILE / 2;
+                      const y1 = orch.y * TILE + TILE - 4;
+                      const x2 = dept.x * TILE + TILE / 2;
+                      const y2 = dept.y * TILE + 4;
+                      return html`
+                        <g class="cd-office-edge">
+                          <path d="M ${x1} ${y1} L ${x2} ${y2}" class="cd-office-edge__line"/>
+                        </g>
+                      `;
+                    });
+                })()}
               </svg>
 
               <!-- Edge labels for active flying messages -->
@@ -1090,13 +721,14 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 if (!agent) {
                   return "";
                 }
-                const fadeIn = (340 - bubble.timer) / 15;
-                const fadeOut = bubble.timer < 50 ? bubble.timer / 50 : 1;
+                const fadeIn = (200 - bubble.timer) / 10;
+                const fadeOut = bubble.timer < 40 ? bubble.timer / 40 : 1;
                 const opacity = Math.min(fadeIn, fadeOut);
-                const offsetY = -TILE * 0.6 - (340 - bubble.timer) * 0.04;
+                // Position bubble above the agent, offset to the right to avoid overlap
+                const offsetY = -TILE * 1.1;
                 return html`
                   <div class="cd-canvas-bubble" style="
-                    left:${agent.x * TILE - 60}px;
+                    left:${agent.x * TILE + TILE * 0.6}px;
                     top:${agent.y * TILE + offsetY}px;
                     opacity:${opacity};
                     border-color:${bubble.color}40;
@@ -1110,11 +742,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
               <!-- Agents -->
               ${_agents.map((agent) => {
-                const isMoving =
-                  Math.abs(agent.x - agent.targetX) > 0.15 ||
-                  Math.abs(agent.y - agent.targetY) > 0.15;
                 return html`
-                  <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${isMoving ? "cd-office-agent--moving" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
+                  <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
                     style="left:${agent.x * TILE}px;top:${agent.y * TILE}px;--agent-accent:${agent.color}">
                     <span class="cd-office-agent__status-dot" style="background:${
                       agent.status === "working" || agent.status === "thinking"
@@ -1145,31 +774,117 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             </div>
           </div>
 
-          <!-- Summary strip (clawport style) -->
-          <div class="cd-office-summary-strip">
-            <div class="cd-office-summary-card">
-              <span class="cd-office-summary-card__label">Now</span>
-              <span class="cd-office-summary-card__title">
-                ${displayLog.length > 0 ? displayLog[displayLog.length - 1].content.slice(0, 60) : "Waiting for agent activity…"}
-              </span>
-              <span class="cd-office-summary-card__detail">
-                ${displayLog.length > 0 ? `${displayLog[displayLog.length - 1].agentEmoji} ${displayLog[displayLog.length - 1].agent} · ${displayLog[displayLog.length - 1].ts}` : "No agents active yet"}
-              </span>
-            </div>
-            <div class="cd-office-summary-card">
-              <span class="cd-office-summary-card__label">Active</span>
-              <span class="cd-office-summary-card__title">${_agents.filter((a) => a.status === "working" || a.status === "thinking").length} agents working</span>
-              <span class="cd-office-summary-card__detail">${_messages.length} messages in flight · ${_canvasBubbles.length} outputs visible</span>
-            </div>
-            <div class="cd-office-summary-card ${_agents.some((a) => a.status === "crashed") ? "cd-office-summary-card--danger" : ""}">
-              <span class="cd-office-summary-card__label">Blocked</span>
-              <span class="cd-office-summary-card__title">
-                ${_agents.find((a) => a.status === "crashed") ? `${_agents.find((a) => a.status === "crashed")?.name} crashed` : "No active blocker"}
-              </span>
-              <span class="cd-office-summary-card__detail">
-                ${_agents.find((a) => a.status === "crashed") ? "Awaiting supervisor restart or human review" : "All paths clear"}
-              </span>
-            </div>
+          <!-- Statistics strip -->
+          <div class="cd-office-stats-strip">
+            ${(() => {
+              const working = _agents.filter(
+                (a) => a.status === "working" || a.status === "thinking",
+              );
+              const idle = _agents.filter((a) => a.status === "idle");
+              const crashed = _agents.filter((a) => a.status === "crashed");
+              const messaging = _agents.filter((a) => a.status === "messaging");
+              const total = _agents.length;
+              const workingPct = total > 0 ? Math.round((working.length / total) * 100) : 0;
+              const totalOutputs = filteredLog.filter((e) => e.type === "output").length;
+              const totalTools = filteredLog.filter((e) => e.type === "tool_call").length;
+              const totalErrors = filteredLog.filter((e) => e.type === "error").length;
+              return html`
+                <!-- Agent status ring -->
+                <div class="cd-stat-card cd-stat-card--agents">
+                  <div class="cd-stat-ring">
+                    <svg viewBox="0 0 36 36" class="cd-stat-ring__svg">
+                      <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--border)" stroke-width="2.5"/>
+                      ${
+                        working.length > 0
+                          ? html`<circle cx="18" cy="18" r="15.9" fill="none" stroke="#22c55e" stroke-width="2.5"
+                        stroke-dasharray="${workingPct} ${100 - workingPct}" stroke-dashoffset="25" stroke-linecap="round"/>`
+                          : ""
+                      }
+                    </svg>
+                    <span class="cd-stat-ring__value">${working.length}</span>
+                  </div>
+                  <div class="cd-stat-card__info">
+                    <span class="cd-stat-card__title">Agents</span>
+                    <div class="cd-stat-card__badges">
+                      ${working.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--ok">${working.length} active</span>` : ""}
+                      ${idle.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--warn">${idle.length} idle</span>` : ""}
+                      ${messaging.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--info">${messaging.length} messaging</span>` : ""}
+                      ${crashed.length > 0 ? html`<span class="cd-stat-badge cd-stat-badge--danger">${crashed.length} crashed</span>` : ""}
+                      ${
+                        total === 0
+                          ? html`
+                              <span class="cd-stat-badge">none</span>
+                            `
+                          : ""
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Activity metrics -->
+                <div class="cd-stat-card">
+                  <div class="cd-stat-card__metrics">
+                    <div class="cd-stat-metric">
+                      <span class="cd-stat-metric__value">${totalOutputs}</span>
+                      <span class="cd-stat-metric__label">outputs</span>
+                    </div>
+                    <div class="cd-stat-metric">
+                      <span class="cd-stat-metric__value">${totalTools}</span>
+                      <span class="cd-stat-metric__label">tool calls</span>
+                    </div>
+                    <div class="cd-stat-metric">
+                      <span class="cd-stat-metric__value ${totalErrors > 0 ? "cd-stat-metric__value--danger" : ""}">${totalErrors}</span>
+                      <span class="cd-stat-metric__label">errors</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Live feed -->
+                <div class="cd-stat-card cd-stat-card--feed">
+                  <div class="cd-stat-feed">
+                    ${
+                      displayLog.length > 0
+                        ? html`
+                      <div class="cd-stat-feed__line">
+                        <span class="cd-stat-feed__dot ${
+                          displayLog[displayLog.length - 1].type === "output"
+                            ? "cd-stat-feed__dot--ok"
+                            : displayLog[displayLog.length - 1].type === "error"
+                              ? "cd-stat-feed__dot--danger"
+                              : "cd-stat-feed__dot--info"
+                        }"></span>
+                        <span class="cd-stat-feed__text">${displayLog[displayLog.length - 1].agentEmoji} ${displayLog[displayLog.length - 1].content.slice(0, 50)}${displayLog[displayLog.length - 1].content.length > 50 ? "..." : ""}</span>
+                        <span class="cd-stat-feed__ts">${displayLog[displayLog.length - 1].ts}</span>
+                      </div>
+                      ${
+                        displayLog.length > 1
+                          ? html`
+                        <div class="cd-stat-feed__line cd-stat-feed__line--dim">
+                          <span class="cd-stat-feed__dot"></span>
+                          <span class="cd-stat-feed__text">${displayLog[displayLog.length - 2].agentEmoji} ${displayLog[displayLog.length - 2].content.slice(0, 50)}${displayLog[displayLog.length - 2].content.length > 50 ? "..." : ""}</span>
+                          <span class="cd-stat-feed__ts">${displayLog[displayLog.length - 2].ts}</span>
+                        </div>
+                      `
+                          : ""
+                      }
+                    `
+                        : html`
+                            <div class="cd-stat-feed__empty">Waiting for activity...</div>
+                          `
+                    }
+                  </div>
+                </div>
+
+                <!-- Messages in flight -->
+                <div class="cd-stat-card cd-stat-card--msgs">
+                  <span class="cd-stat-card__icon">${_messages.length > 0 ? "📡" : "📭"}</span>
+                  <div class="cd-stat-card__info">
+                    <span class="cd-stat-card__title">${_messages.length} in flight</span>
+                    <span class="cd-stat-card__sub">${_canvasBubbles.length} bubbles</span>
+                  </div>
+                </div>
+              `;
+            })()}
           </div>
         </div>
 
@@ -1186,17 +901,12 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               @click=${() => {
                 _rightTab = "output";
               }}>📤 Outputs</button>
-            <button class="cd-office-panel__tab ${_rightTab === "human" ? "cd-office-panel__tab--active" : ""}"
-              @click=${() => {
-                _rightTab = "human";
-              }}>👤 Talk to Company</button>
           </div>
 
-          <!-- Execution Log tab — with per-agent filter -->
+          <!-- Execution Log tab — newest at bottom, auto-scroll -->
           ${
             _rightTab === "log"
               ? html`
-            <!-- Agent filter row -->
             <div class="cd-log-agent-filter">
               <button class="cd-log-af-btn ${_logAgentFilter === "all" ? "cd-log-af-btn--active" : ""}"
                 @click=${() => {
@@ -1214,34 +924,42 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               `,
               )}
             </div>
-            <div class="cd-office-log">
+            <div class="cd-office-log" id="cd-exec-log">
               ${
-                displayLog.length === 0
+                filteredLog.length === 0
                   ? html`
-                      <div class="cd-office-empty">No logs yet — start an agent to see activity here.</div>
+                      <div class="cd-office-empty">No logs yet — send a message below to start.</div>
                     `
-                  : [...displayLog]
+                  : filteredLog
                       .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
-                      .toReversed()
-                      .map(
-                        (entry) => html`
-                <div class="cd-log-entry ${logTypeClass(entry.type)}">
+                      .map((entry) => {
+                        const isFinalOutput = entry.type === "output" && entry.content.length > 100;
+                        return html`
+                <div class="cd-log-entry ${logTypeClass(entry.type)} ${isFinalOutput ? "cd-log-entry--final" : ""}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
                     <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agent}</span>
+                    ${
+                      isFinalOutput
+                        ? html`
+                            <span class="cd-log-entry__final-badge">Final Output</span>
+                          `
+                        : ""
+                    }
                     <span class="cd-log-entry__ts">${entry.ts}</span>
                     ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
-                    ${entry.duration ? html`<span class="cd-log-entry__duration">${entry.duration}ms</span>` : ""}
                   </div>
                   <div class="cd-log-entry__content ${entry.type === "output" ? "cd-log-entry__content--md" : ""}">${
                     entry.type === "output" ||
                     (entry.type === "system" && entry.content.length > 200)
-                      ? unsafeHTML(toSanitizedMarkdownHtml(entry.content))
+                      ? unsafeHTML(
+                          toSanitizedMarkdownHtml(formatExecutionLogContent(entry.content)),
+                        )
                       : entry.content
                   }</div>
                 </div>
-              `,
-                      )
+              `;
+                      })
               }
             </div>
           `
@@ -1253,30 +971,47 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             _rightTab === "output"
               ? html`
             <div class="cd-office-outputs">
-              ${displayLog
+              ${filteredLog
                 .filter((e) => e.type === "output")
-                .toReversed()
-                .map(
-                  (entry) => html`
-                <div class="cd-output-card">
-                  <div class="cd-output-card__header">
+                .map((entry) => {
+                  const isExpanded = _expandedOutputIds.has(entry.id);
+                  const isLong = entry.content.length > 120;
+                  return html`
+                <div class="cd-output-card ${isExpanded ? "cd-output-card--expanded" : ""}">
+                  <div class="cd-output-card__header" @click=${() => {
+                    if (isExpanded) {
+                      _expandedOutputIds.delete(entry.id);
+                    } else {
+                      _expandedOutputIds.add(entry.id);
+                    }
+                    _expandedOutputIds = new Set(_expandedOutputIds);
+                  }}>
+                    <span class="cd-output-card__toggle">${isExpanded ? "▼" : "▶"}</span>
                     <span>${entry.agentEmoji} ${entry.agent}</span>
+                    <span class="cd-output-card__preview">${!isExpanded ? entry.content.slice(0, 60) + (entry.content.length > 60 ? "..." : "") : ""}</span>
                     <span class="cd-output-card__ts">${entry.ts}</span>
                     ${entry.tokens ? html`<span class="cd-log-entry__tokens">${(entry.tokens / 1000).toFixed(1)}K tk</span>` : ""}
                   </div>
-                  <div class="cd-output-card__content cd-log-entry__content--md">${unsafeHTML(toSanitizedMarkdownHtml(entry.content))}</div>
-                  <div class="cd-output-card__actions">
-                    <button class="cd-btn cd-btn--ghost cd-btn--xs">📋 Copy</button>
-                    <button class="cd-btn cd-btn--ghost cd-btn--xs">✅ Approve</button>
-                    <button class="cd-btn cd-btn--ghost cd-btn--xs">↩ Revise</button>
-                  </div>
+                  ${
+                    isExpanded
+                      ? html`
+                    <div class="cd-output-card__content cd-log-entry__content--md">${unsafeHTML(toSanitizedMarkdownHtml(formatExecutionLogContent(entry.content)))}</div>
+                    <div class="cd-output-card__actions">
+                      <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+                        void navigator.clipboard?.writeText(entry.content);
+                      }}>📋 Copy</button>
+                      ${isLong ? html`<span class="cd-output-card__len">${entry.content.length} chars</span>` : ""}
+                    </div>
+                  `
+                      : ""
+                  }
                 </div>
-              `,
-                )}
+              `;
+                })}
               ${
-                displayLog.filter((e) => e.type === "output").length === 0
+                filteredLog.filter((e) => e.type === "output").length === 0
                   ? html`
-                      <div class="cd-office-empty">No outputs yet — agents are working…</div>
+                      <div class="cd-office-empty">No outputs yet — agents are working...</div>
                     `
                   : ""
               }
@@ -1284,82 +1019,43 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
           `
               : ""
           }
+        </div>
+      </div>
 
-          <!-- Talk to Company tab -->
-          ${
-            _rightTab === "human"
-              ? html`
-            <div class="cd-office-human">
-              <div class="cd-human-desc">
-                Talk to your company. The Agent Orchestrator will receive your message, plan, delegate to department agents, and synthesize the response.
-              </div>
-
-              <!-- Message history from real backend -->
-              <div class="cd-human-chat-log">
-                ${
-                  (props.messages ?? []).length === 0
-                    ? html`
-                        <div class="cd-office-empty">No messages yet. Start a conversation below.</div>
-                      `
-                    : (props.messages ?? []).slice(-30).map((msg) => {
-                        const isHuman = msg.from === "human" || msg.type === "task";
-                        const ts = new Date(msg.ts).toTimeString().slice(0, 8);
-                        return html`
-                    <div class="cd-human-chat-entry cd-human-chat-entry--${isHuman ? "human" : "agent"}">
-                      <div class="cd-human-chat-entry__meta">
-                        <span class="cd-human-chat-entry__who">${isHuman ? "👤 You" : `🤖 ${msg.from}`}</span>
-                        <span class="cd-human-chat-entry__ts">${ts}</span>
-                      </div>
-                      <div class="cd-human-chat-entry__content">${msg.content}</div>
-                    </div>
-                  `;
-                      })
+      <!-- ── Talk to Company (below the split) ─────────────────────── -->
+      <div class="cd-office-chat-bar">
+        <div class="cd-office-chat-bar__input-wrap">
+          <textarea class="cd-office-chat-bar__input" rows="1"
+            placeholder="Message the Agent Orchestrator… (Enter to send, Shift+Enter for newline)"
+            .value=${_humanInput}
+            @input=${(e: Event) => {
+              _humanInput = (e.target as HTMLTextAreaElement).value;
+            }}
+            @keydown=${(e: KeyboardEvent) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                const msg = _humanInput.trim();
+                if (!msg) {
+                  return;
                 }
-              </div>
-
-              <label class="cd-form-label">Message to Company</label>
-              <textarea class="cd-form-textarea" rows="3"
-                placeholder="Type an instruction, question, or task for the Agent Orchestrator…"
-                .value=${_humanInput}
-                @input=${(e: Event) => {
-                  _humanInput = (e.target as HTMLTextAreaElement).value;
-                }}
-                @keydown=${(e: KeyboardEvent) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    const msg = _humanInput.trim();
-                    if (!msg) {
-                      return;
-                    }
-                    _sendToCompany(msg);
-                    _humanInput = "";
-                    (e.target as HTMLTextAreaElement).value = "";
-                  }
-                }}></textarea>
-              <div class="cd-human-actions">
-                <button class="cd-btn cd-btn--primary" @click=${(e: Event) => {
-                  const textarea = (e.target as HTMLElement).closest(".cd-human-actions")
-                    ?.previousElementSibling as HTMLTextAreaElement | null;
-                  const msg = textarea?.value.trim() ?? _humanInput.trim();
-                  if (!msg) {
-                    return;
-                  }
-                  _sendToCompany(msg);
-                  _humanInput = "";
-                  if (textarea) {
-                    textarea.value = "";
-                  }
-                }}>📨 Send <span class="cd-btn__hint">⌘↵</span></button>
-                <button class="cd-btn cd-btn--outline" @click=${() => {
-                  _isPaused = true;
-                }}>⏸ Pause Fleet</button>
-                <button class="cd-btn cd-btn--outline" @click=${() => {
-                  _isPaused = false;
-                }}>▶ Resume</button>
-              </div>
-            </div>
-          `
-              : ""
-          }
+                _sendToCompany(msg);
+                _humanInput = "";
+                (e.target as HTMLTextAreaElement).value = "";
+              }
+            }}></textarea>
+          <button class="cd-btn cd-btn--primary cd-office-chat-bar__send" @click=${(e: Event) => {
+            const wrap = (e.target as HTMLElement).closest(".cd-office-chat-bar__input-wrap");
+            const textarea = wrap?.querySelector("textarea") as HTMLTextAreaElement | null;
+            const msg = textarea?.value.trim() ?? _humanInput.trim();
+            if (!msg) {
+              return;
+            }
+            _sendToCompany(msg);
+            _humanInput = "";
+            if (textarea) {
+              textarea.value = "";
+            }
+          }}>Send</button>
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ export type OrchestrationPhase =
   | "planning"
   | "delegating"
   | "synthesizing"
+  | "verifying"
   | "executing"
   | "complete"
   | "failed";
@@ -17,6 +18,8 @@ export type OrchestrationPhase =
 export interface OrchestrationOpts {
   /** Max recursive delegation depth (default 3). */
   maxDepth?: number;
+  /** Max orchestration rounds before forcing final synthesis (default 5). */
+  maxRounds?: number;
   /** Per-agent timeout in ms (default 120 000). */
   timeoutMs?: number;
 }
@@ -28,6 +31,7 @@ export interface OrchestrationResult {
   subtasks: OrchestrationResult[];
   phase: "leaf" | "orchestrated";
   durationMs: number;
+  rounds: number;
 }
 
 interface DelegationEntry {
@@ -47,9 +51,9 @@ export class Orchestrator {
   ) {}
 
   /**
-   * Execute a task on `agentId`. If the agent has subordinates (directReports),
-   * the agent will plan subtasks, delegate them recursively, then synthesize
-   * the results. Leaf agents execute directly.
+   * Multi-round orchestration. Each round: plan → delegate → synthesize → verify.
+   * The verifier decides if the result is sufficient or another round is needed.
+   * Stops when verifier says "done" or maxRounds is reached.
    */
   async execute(
     agentId: string,
@@ -58,6 +62,7 @@ export class Orchestrator {
     depth = 0,
   ): Promise<OrchestrationResult> {
     const maxDepth = opts?.maxDepth ?? 3;
+    const maxRounds = opts?.maxRounds ?? 5;
     const timeoutMs = opts?.timeoutMs ?? 120_000;
     const start = Date.now();
     const orchId = `orch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -76,16 +81,18 @@ export class Orchestrator {
         subtasks: [],
         phase: "leaf",
         durationMs: Date.now() - start,
+        rounds: 1,
       };
     }
 
-    // ── Orchestrator path ─────────────────────────────────────────────────
+    // ── Multi-round orchestrator path ──────────────────────────────────
     const meta = this.registry.getMeta(agentId);
     const agentRole = meta?.role ?? agentId;
     let totalTokens = 0;
+    let allSubtasks: OrchestrationResult[] = [];
+    let currentSynthesis = "";
+    let round = 0;
 
-    // Phase 1: Plan — ask the agent to delegate
-    this.emitPhase(orchId, agentId, "planning", depth);
     const subordinates = reports
       .map((id) => {
         const m = this.registry.getMeta(id);
@@ -93,63 +100,91 @@ export class Orchestrator {
       })
       .filter((s) => s.id !== agentId);
 
-    const planPrompt = buildPlanPrompt(agentRole, prompt, subordinates);
-    const planResult = await this.pm.runTaskAwait(agentId, planPrompt, { timeoutMs });
-    totalTokens += planResult.tokensUsed;
+    for (round = 1; round <= maxRounds; round++) {
+      this.logSystem(agentId, orchId, `── Round ${round}/${maxRounds} ──`);
 
-    const plan = parseDelegationPlan(planResult.content, reports);
+      // Phase 1: Plan
+      this.emitPhase(orchId, agentId, "planning", depth);
+      const context =
+        round > 1
+          ? `\n\nPREVIOUS ROUND RESULT (Round ${round - 1}):\n${currentSynthesis}\n\nIMPROVEMENT NEEDED: The verifier determined the result needs refinement. Please re-delegate with more specific instructions to fill gaps.`
+          : "";
+      const planPrompt = buildPlanPrompt(agentRole, prompt + context, subordinates);
+      const planResult = await this.pm.runTaskAwait(agentId, planPrompt, { timeoutMs });
+      totalTokens += planResult.tokensUsed;
 
-    // Empty plan or parse failure → run directly as leaf
-    if (plan.length === 0) {
-      this.logSystem(agentId, orchId, "No delegation needed — executing directly.");
-      this.emitPhase(orchId, agentId, "executing", depth);
-      const directResult = await this.pm.runTaskAwait(agentId, prompt, { timeoutMs });
-      totalTokens += directResult.tokensUsed;
-      this.emitPhase(orchId, agentId, "complete", depth);
-      return {
-        agentId,
-        content: directResult.content,
-        tokensUsed: totalTokens,
-        subtasks: [],
-        phase: "orchestrated",
-        durationMs: Date.now() - start,
-      };
-    }
+      const plan = parseDelegationPlan(planResult.content, reports);
 
-    // Phase 2: Delegate — dispatch subtasks to subordinates in parallel
-    this.emitPhase(orchId, agentId, "delegating", depth);
-    for (const entry of plan) {
-      this.messageBus.send(agentId, entry.agentId, entry.subtask, "task");
-      this.logSystem(
-        agentId,
-        orchId,
-        `Delegated to ${entry.agentId}: ${entry.subtask.slice(0, 100)}`,
+      if (plan.length === 0) {
+        this.logSystem(agentId, orchId, "No delegation needed — executing directly.");
+        this.emitPhase(orchId, agentId, "executing", depth);
+        const directResult = await this.pm.runTaskAwait(agentId, prompt, { timeoutMs });
+        totalTokens += directResult.tokensUsed;
+        currentSynthesis = directResult.content;
+        break;
+      }
+
+      // Phase 2: Delegate
+      this.emitPhase(orchId, agentId, "delegating", depth);
+      for (const entry of plan) {
+        this.messageBus.send(agentId, entry.agentId, entry.subtask, "task");
+        this.logSystem(
+          agentId,
+          orchId,
+          `Delegated to ${entry.agentId}: ${entry.subtask.slice(0, 100)}`,
+        );
+      }
+
+      const subtaskResults = await Promise.all(
+        plan.map((entry) => this.execute(entry.agentId, entry.subtask, opts, depth + 1)),
       );
+
+      for (const sub of subtaskResults) {
+        totalTokens += sub.tokensUsed;
+        allSubtasks.push(sub);
+        this.messageBus.send(sub.agentId, agentId, sub.content.slice(0, 300), "result");
+      }
+
+      // Phase 3: Synthesize
+      this.emitPhase(orchId, agentId, "synthesizing", depth);
+      const synthesizePrompt = buildSynthesizePrompt(agentRole, prompt, subtaskResults);
+      const synthResult = await this.pm.runTaskAwait(agentId, synthesizePrompt, { timeoutMs });
+      totalTokens += synthResult.tokensUsed;
+      currentSynthesis = synthResult.content;
+
+      // Phase 4: Verify — should we do another round?
+      if (round < maxRounds) {
+        this.emitPhase(orchId, agentId, "verifying", depth);
+        this.logSystem(agentId, orchId, `Verifying result quality (Round ${round})…`);
+        const verifyResult = await this.pm.runTaskAwait(
+          agentId,
+          buildVerifierPrompt(agentRole, prompt, currentSynthesis, round, maxRounds),
+          { timeoutMs },
+        );
+        totalTokens += verifyResult.tokensUsed;
+
+        const verdict = parseVerifierVerdict(verifyResult.content);
+        if (verdict === "done") {
+          this.logSystem(agentId, orchId, `✅ Verifier: result is sufficient. Finalizing.`);
+          break;
+        }
+        this.logSystem(
+          agentId,
+          orchId,
+          `🔄 Verifier: needs refinement. Starting round ${round + 1}.`,
+        );
+      }
     }
-
-    const subtaskResults = await Promise.all(
-      plan.map((entry) => this.execute(entry.agentId, entry.subtask, opts, depth + 1)),
-    );
-
-    for (const sub of subtaskResults) {
-      totalTokens += sub.tokensUsed;
-      this.messageBus.send(sub.agentId, agentId, sub.content.slice(0, 300), "result");
-    }
-
-    // Phase 3: Synthesize — feed subordinate results back to orchestrator
-    this.emitPhase(orchId, agentId, "synthesizing", depth);
-    const synthesizePrompt = buildSynthesizePrompt(agentRole, prompt, subtaskResults);
-    const synthResult = await this.pm.runTaskAwait(agentId, synthesizePrompt, { timeoutMs });
-    totalTokens += synthResult.tokensUsed;
 
     this.emitPhase(orchId, agentId, "complete", depth);
     return {
       agentId,
-      content: synthResult.content,
+      content: currentSynthesis,
       tokensUsed: totalTokens,
-      subtasks: subtaskResults,
+      subtasks: allSubtasks,
       phase: "orchestrated",
       durationMs: Date.now() - start,
+      rounds: round,
     };
   }
 
@@ -217,18 +252,44 @@ function buildSynthesizePrompt(
   );
 }
 
+function buildVerifierPrompt(
+  role: string,
+  originalTask: string,
+  currentResult: string,
+  round: number,
+  maxRounds: number,
+): string {
+  return (
+    `You are a quality verifier for ${role}. ` +
+    `Review the following result against the original task and decide if it is complete and high-quality.\n\n` +
+    `ORIGINAL TASK:\n${originalTask}\n\n` +
+    `CURRENT RESULT (Round ${round}/${maxRounds}):\n${currentResult}\n\n` +
+    `Evaluate:\n` +
+    `1. Does the result fully address the original task?\n` +
+    `2. Is the quality sufficient for delivery?\n` +
+    `3. Are there significant gaps or errors?\n\n` +
+    `Respond with ONLY one word: "DONE" if the result is ready, or "REFINE" if another round is needed.`
+  );
+}
+
+function parseVerifierVerdict(raw: string): "done" | "refine" {
+  const normalized = raw.trim().toUpperCase();
+  if (normalized.includes("DONE")) {
+    return "done";
+  }
+  return "refine";
+}
+
 // ── JSON plan parser (robust) ────────────────────────────────────────────
 
 function parseDelegationPlan(raw: string, validAgentIds: string[]): DelegationEntry[] {
   const validSet = new Set(validAgentIds);
   const candidates = [
     () => JSON.parse(raw),
-    // Extract from markdown code fence
     () => {
       const m = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
       return m ? JSON.parse(m[1]) : null;
     },
-    // Find first [...] in the text
     () => {
       const m = raw.match(/\[[\s\S]*\]/);
       return m ? JSON.parse(m[0]) : null;

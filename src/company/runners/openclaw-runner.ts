@@ -23,7 +23,9 @@ export class OpenClawRunner implements CliAgentRunner {
   }
 
   runTask(agentId: string, prompt: string, opts?: RunOpts): ChildProcess {
-    const openclawAgent = opts?.openclawAgentId ?? "main";
+    // Use the provided agent ID or fall back to the ClawDock agent's own ID
+    // (not "main") to prevent session lock collisions during parallel runs.
+    const openclawAgent = opts?.openclawAgentId ?? agentId;
     const fullPrompt = opts?.systemPrompt ? `[Role: ${opts.systemPrompt}]\n\n${prompt}` : prompt;
 
     const args = ["agent", "--local", "--json", "--agent", openclawAgent, "-m", fullPrompt];

@@ -487,8 +487,9 @@ export const companyHandlers: GatewayRequestHandlers = {
         });
         svc.broadcast("company.task.updated", { task: orchTask });
 
+        const maxRounds = svc.profileStore.get().maxOrchestrationRounds ?? 5;
         svc.orchestrator
-          .execute(director.id, content)
+          .execute(director.id, content, { maxRounds })
           .then(async (result) => {
             // Mark task as done upon successful completion
             const updated = await svc.taskStore.update(orchTask.id, {

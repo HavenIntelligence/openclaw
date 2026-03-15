@@ -1007,6 +1007,26 @@ function renderProfile() {
               : html`<p class="cd-profile-section__text">${co.vision}</p>`
           }
         </div>
+
+        <!-- Orchestration Settings -->
+        <div class="cd-profile-section" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#333)">
+          <div class="cd-profile-section__label">Orchestration Settings</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+            <label style="font-size:12px;color:var(--muted-foreground)">Max Rounds</label>
+            <input type="number" min="1" max="10" style="width:60px;padding:4px 8px;border-radius:6px;border:1px solid var(--border,#333);background:var(--bg,#1a1a2e);color:var(--text-strong,#fff);font-size:13px;text-align:center"
+              .value=${String(_realProfile?.maxOrchestrationRounds ?? 5)}
+              @change=${(e: Event) => {
+                const val = parseInt((e.target as HTMLInputElement).value, 10);
+                if (val >= 1 && val <= 10 && _onSaveProfile) {
+                  _onSaveProfile({ maxOrchestrationRounds: val });
+                }
+              }} />
+            <span style="font-size:11px;color:var(--muted-foreground)">
+              How many plan→delegate→verify rounds before forcing final answer (1–10)
+            </span>
+          </div>
+        </div>
+
         <div class="cd-profile-actions">
           ${
             _editing

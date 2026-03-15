@@ -107,6 +107,113 @@ function installHooks() {
   });
 }
 
+/** Keys that identify a "delegation" row (agent + task description). */
+const DELEGATION_AGENT_KEYS = ["agentId", "agent", "assignee", "owner"];
+const DELEGATION_TASK_KEYS = ["subtask", "task", "description", "prompt", "instruction"];
+
+function isDelegationRow(obj: unknown): obj is Record<string, unknown> {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    return false;
+  }
+  const o = obj as Record<string, unknown>;
+  const hasAgent = DELEGATION_AGENT_KEYS.some((k) => typeof o[k] === "string");
+  const hasTask = DELEGATION_TASK_KEYS.some((k) => typeof o[k] === "string");
+  return hasAgent && hasTask;
+}
+
+function getAgentLabel(obj: Record<string, unknown>): string {
+  for (const k of DELEGATION_AGENT_KEYS) {
+    const v = obj[k];
+    if (typeof v === "string") {
+      return v;
+    }
+  }
+  return "—";
+}
+
+function getTaskLabel(obj: Record<string, unknown>): string {
+  for (const k of DELEGATION_TASK_KEYS) {
+    const v = obj[k];
+    if (typeof v === "string") {
+      return v;
+    }
+  }
+  return "—";
+}
+
+/** Convert JSON delegation arrays (e.g. agentId + subtask) into readable markdown. */
+function jsonToDelegationMarkdown(data: unknown): string | null {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  const rows = data.filter(isDelegationRow);
+  if (rows.length === 0) {
+    return null;
+  }
+  const header = "| Agent | Task |";
+  const sep = "| --- | --- |";
+  const body = rows
+    .map((r) => {
+      const agent = getAgentLabel(r).replace(/\|/g, "\\|");
+      const task = getTaskLabel(r).replace(/\n/g, " ").replace(/\|/g, "\\|");
+      return `| ${agent} | ${task} |`;
+    })
+    .join("\n");
+  return "### Delegation plan\n\n" + header + "\n" + sep + "\n" + body;
+}
+
+/** If content is generic JSON array/object, try to render as a readable structure. */
+function jsonToStructuredMarkdown(data: unknown): string | null {
+  if (Array.isArray(data)) {
+    const asDelegation = jsonToDelegationMarkdown(data);
+    if (asDelegation) {
+      return asDelegation;
+    }
+    // Fallback: array of primitives or mixed
+    if (data.length <= 20 && data.every((x) => typeof x === "string" || typeof x === "number")) {
+      const list = data.map((x) => `- ${String(x)}`).join("\n");
+      return "### Items\n\n" + list;
+    }
+  }
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const o = data as Record<string, unknown>;
+    const entries = Object.entries(o).filter(([, v]) => v !== undefined && v !== null);
+    if (
+      entries.length <= 15 &&
+      entries.every(
+        ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
+      )
+    ) {
+      const rows = entries.map(
+        ([k, v]) => `| **${k.replace(/\|/g, "\\|")}** | ${String(v).replace(/\|/g, "\\|")} |`,
+      );
+      return "### Details\n\n| Field | Value |\n| --- | --- |\n" + rows.join("\n");
+    }
+  }
+  return null;
+}
+
+/**
+ * Preprocess execution-log content: if it's JSON (e.g. delegation list), convert
+ * to readable markdown before passing to toSanitizedMarkdownHtml.
+ */
+export function formatExecutionLogContent(content: string): string {
+  const raw = content.trim();
+  if (raw.length < 2 || (!raw.startsWith("[") && !raw.startsWith("{"))) {
+    return content;
+  }
+  try {
+    const data = JSON.parse(raw) as unknown;
+    const md = jsonToDelegationMarkdown(data) ?? jsonToStructuredMarkdown(data);
+    if (md) {
+      return md;
+    }
+  } catch {
+    // Not valid JSON, keep original
+  }
+  return content;
+}
+
 export function toSanitizedMarkdownHtml(markdown: string): string {
   const input = markdown.trim();
   if (!input) {

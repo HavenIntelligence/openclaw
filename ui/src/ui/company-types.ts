@@ -118,5 +118,6 @@ export interface CompanyProfile {
   values?: string[];
   businessModel?: string;
   focusAreas?: string[];
+  maxOrchestrationRounds?: number;
   updatedAt: number;
 }

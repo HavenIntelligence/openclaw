@@ -117,9 +117,12 @@ export class ProcessManager {
     const runId = generateRunId();
     this.setStatus(agentId, "active", { currentTask: prompt });
 
+    // Each ClawDock agent needs its own openclaw agent ID to avoid session lock
+    // contention when running parallel tasks. Fall back to the agentId itself
+    // (not "main") so each gets a separate session directory.
     const mergedOpts: RunOpts = {
       ...opts,
-      openclawAgentId: meta?.agentCli ?? opts?.openclawAgentId,
+      openclawAgentId: meta?.agentCli ?? opts?.openclawAgentId ?? agentId,
       systemPrompt: meta?.systemPrompt ?? opts?.systemPrompt,
     };
 
