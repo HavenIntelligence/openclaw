@@ -17,7 +17,12 @@ const AVATAR_FILES = [
   "aivatar_hex_24.svg",
 ] as const;
 
-const AVATAR_BASE_PATH = "../../../assets/avatars/";
+// Public avatars are served from the Vite publicDir (`ui/public/avatars`).
+// Use BASE_URL so it works both in dev and when the control UI is hosted under a sub-path.
+const baseEnv = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env;
+const base = baseEnv?.BASE_URL || "/";
+const baseTrimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+const AVATAR_BASE_PATH = `${baseTrimmed}/avatars/`;
 
 const AVATAR_URLS = Object.fromEntries(
   AVATAR_FILES.map((filename) => [
