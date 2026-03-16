@@ -27,7 +27,14 @@ async function mountReact(container: Element, client: GatewayClient | null) {
     const { MonitorApp } = monitorModule;
     const React = reactModule.default || reactModule;
 
-    const props = { isDark: true, client };
+    // Read and consume pending mission navigation from company-tasks
+    const win = window as unknown as Record<string, unknown>;
+    const pendingMissionId = (win.__openclawPendingMissionId as string) || null;
+    if (pendingMissionId) {
+      delete win.__openclawPendingMissionId;
+    }
+
+    const props = { isDark: true, client, pendingMissionId };
 
     if (_reactRoot && _mountEl === container) {
       _reactRoot.render(React.createElement(MonitorApp, props));

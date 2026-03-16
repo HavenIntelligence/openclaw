@@ -23,10 +23,13 @@ export interface OrchestrationOpts {
   maxRounds?: number;
   /** Per-agent timeout in ms (default 120 000). */
   timeoutMs?: number;
+  /** Mission ID — groups all tasks from a single user message. Auto-generated if not provided. */
+  missionId?: string;
 }
 
 export interface OrchestrationResult {
   agentId: string;
+  missionId: string;
   content: string;
   tokensUsed: number;
   subtasks: OrchestrationResult[];
@@ -66,6 +69,8 @@ export class Orchestrator {
     const maxDepth = opts?.maxDepth ?? 3;
     const maxRounds = opts?.maxRounds ?? 5;
     const timeoutMs = opts?.timeoutMs ?? 120_000;
+    const missionId =
+      opts?.missionId ?? `mission_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const start = Date.now();
     const orchId = `orch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
@@ -78,6 +83,7 @@ export class Orchestrator {
       this.emitPhase(orchId, agentId, "complete", depth);
       return {
         agentId,
+        missionId,
         content: result.content,
         tokensUsed: result.tokensUsed,
         subtasks: [],
@@ -94,6 +100,26 @@ export class Orchestrator {
     let allSubtasks: OrchestrationResult[] = [];
     let currentSynthesis = "";
     let round = 0;
+
+    // Create a top-level mission task for the orchestrator itself
+    let missionTaskId: string | undefined;
+    if (this.taskStore && depth === 0) {
+      const missionTitle = prompt.slice(0, 100) + (prompt.length > 100 ? "…" : "");
+      const missionTask = await this.taskStore.create({
+        title: missionTitle,
+        description: prompt,
+        status: "in_progress",
+        priority: "high",
+        agentId,
+        assignee: agentId,
+        assignedBy: "human",
+        assignedAt: Date.now(),
+        missionId,
+        project: orchId,
+      });
+      missionTaskId = missionTask.id;
+      this.broadcast("company.task.updated", { task: missionTask });
+    }
 
     const subordinates = reports
       .map((id) => {
@@ -151,6 +177,7 @@ export class Orchestrator {
             reviewedBy: agentId, // assigner reviews by default
             roundCount: 0,
             maxRounds: 3,
+            missionId,
             project: orchId,
           });
           subtaskIds.set(entry.agentId, task.id);
@@ -167,7 +194,12 @@ export class Orchestrator {
         plan.map(async (entry) => {
           const taskId = subtaskIds.get(entry.agentId);
           try {
-            const result = await this.execute(entry.agentId, entry.subtask, opts, depth + 1);
+            const result = await this.execute(
+              entry.agentId,
+              entry.subtask,
+              { ...opts, missionId },
+              depth + 1,
+            );
             // Mark task as done on success
             if (taskId && this.taskStore) {
               const task = this.taskStore.get(taskId);
@@ -201,10 +233,14 @@ export class Orchestrator {
             }
             return result;
           } catch (err) {
-            // Mark task as backlog on failure
+            // Mark task as done (failed) with review note
             if (taskId && this.taskStore) {
               const task = this.taskStore.get(taskId);
-              const updated = await this.taskStore.update(taskId, { status: "backlog" });
+              const errMsg2 = err instanceof Error ? err.message : String(err);
+              const updated = await this.taskStore.update(taskId, {
+                status: "done",
+                reviewNote: `Failed: ${errMsg2.slice(0, 200)}`,
+              });
               if (updated) {
                 this.broadcast("company.task.updated", { task: updated });
                 this.logSystem(
@@ -218,6 +254,7 @@ export class Orchestrator {
             this.logSystem(entry.agentId, orchId, `❌ Subtask failed: ${errMsg}`);
             return {
               agentId: entry.agentId,
+              missionId,
               content: `[FAILED] ${errMsg}`,
               tokensUsed: 0,
               subtasks: [],
@@ -266,9 +303,22 @@ export class Orchestrator {
       }
     }
 
-    this.emitPhase(orchId, agentId, "complete", depth);
+    // Mark mission task as done
+    if (missionTaskId && this.taskStore) {
+      const updated = await this.taskStore.update(missionTaskId, {
+        status: "done",
+        tokensUsed: totalTokens,
+        reviewNote: `Completed in ${round} round(s)`,
+      });
+      if (updated) {
+        this.broadcast("company.task.updated", { task: updated });
+      }
+    }
+
+    this.emitPhase(orchId, agentId, "complete", depth, missionId);
     return {
       agentId,
+      missionId,
       content: currentSynthesis,
       tokensUsed: totalTokens,
       subtasks: allSubtasks,
@@ -285,9 +335,11 @@ export class Orchestrator {
     agentId: string,
     phase: OrchestrationPhase,
     depth: number,
+    missionId?: string,
   ): void {
     this.broadcast("company.orchestration.phase", {
       orchestrationId: orchId,
+      missionId,
       agentId,
       phase,
       depth,

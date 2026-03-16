@@ -409,6 +409,12 @@ export const companyHandlers: GatewayRequestHandlers = {
     if (Array.isArray(params.focusAreas)) {
       profilePartial.focusAreas = params.focusAreas;
     }
+    if (typeof params.maxOrchestrationRounds === "number") {
+      profilePartial.maxOrchestrationRounds = params.maxOrchestrationRounds;
+    }
+    if (typeof params.agentTimeoutMs === "number") {
+      profilePartial.agentTimeoutMs = params.agentTimeoutMs;
+    }
     const updated = await svc.profileStore.set(profilePartial);
     respond(true, updated, undefined);
   },
@@ -620,32 +626,15 @@ export const companyHandlers: GatewayRequestHandlers = {
         respond(true, { ok: true, orchestrating: true, msgId: msg.id }, undefined);
 
         void (async () => {
-          let orchTask: Awaited<ReturnType<(typeof svc.taskStore)["create"]>> | null | undefined;
           try {
-            orchTask = await svc.taskStore.create({
-              title: content.slice(0, 100) + (content.length > 100 ? "…" : ""),
-              description: content,
-              status: "in_progress",
-              priority: "high",
-              agentId: director.id,
-              assignee: director.id,
-              project: "Orchestration",
+            const profile = svc.profileStore.get();
+            const maxRounds = profile.maxOrchestrationRounds ?? 5;
+            const timeoutMs = profile.agentTimeoutMs ?? 120_000;
+            const result = await svc.orchestrator.execute(director.id, content, {
+              maxRounds,
+              timeoutMs,
             });
-            svc.broadcast("company.task.updated", { task: orchTask });
-
-            const maxRounds = svc.profileStore.get().maxOrchestrationRounds ?? 5;
-            const result = await svc.orchestrator.execute(director.id, content, { maxRounds });
             sendFinalCompanyReply(svc, director.id, result.content);
-
-            if (orchTask) {
-              const updated = await svc.taskStore.update(orchTask.id, {
-                status: "done",
-                tokensUsed: result.tokensUsed,
-              });
-              if (updated) {
-                svc.broadcast("company.task.updated", { task: updated });
-              }
-            }
           } catch (err) {
             emitAgentLog(svc, {
               agentId: director.id,
@@ -653,12 +642,6 @@ export const companyHandlers: GatewayRequestHandlers = {
               type: "error",
               content: `Orchestration failed: ${formatErrorMessage(err)}`,
             });
-            if (orchTask) {
-              const updated = await svc.taskStore.update(orchTask.id, { status: "backlog" });
-              if (updated) {
-                svc.broadcast("company.task.updated", { task: updated });
-              }
-            }
           }
         })();
         return;
@@ -703,7 +686,11 @@ export const companyHandlers: GatewayRequestHandlers = {
     }
     const svc = getCompanyService();
     try {
-      const result = await svc.orchestrator.execute(id, prompt, { maxDepth });
+      const timeoutMs2 = svc.profileStore.get().agentTimeoutMs ?? 120_000;
+      const result = await svc.orchestrator.execute(id, prompt, {
+        maxDepth,
+        timeoutMs: timeoutMs2,
+      });
       respond(true, result, undefined);
     } catch (err) {
       respond(false, undefined, {

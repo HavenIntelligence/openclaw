@@ -157,6 +157,8 @@ export interface Task {
   reviewNote?: string; // reviewer comment on review/done
   roundCount?: number; // how many review cycles this task has been through
   maxRounds?: number; // max allowed review rounds (default 3)
+  /** Groups all tasks spawned from a single user message/orchestration run. */
+  missionId?: string;
   project?: string;
   tags?: string[];
   dueAt?: number;
@@ -194,5 +196,7 @@ export interface CompanyProfile {
   focusAreas?: string[];
   /** Max orchestration rounds before forcing final synthesis (default 5). */
   maxOrchestrationRounds?: number;
+  /** Per-agent timeout in ms (default 120000). */
+  agentTimeoutMs?: number;
   updatedAt: number;
 }

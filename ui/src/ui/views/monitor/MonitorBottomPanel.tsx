@@ -35,7 +35,13 @@ import {
   Line,
 } from "recharts";
 import { getMockAgentConfig, getMockAgentTelemetry } from "./mockData";
-import type { Agent, AgentSnapshot, LifecycleEvent, ActivityWindow } from "./types";
+import type {
+  Agent,
+  AgentSnapshot,
+  LifecycleEvent,
+  ActivityWindow,
+  TaskSessionData,
+} from "./types";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
 interface BottomPanelProps {
@@ -47,6 +53,7 @@ interface BottomPanelProps {
   activityWindows: ActivityWindow[];
   currentTime: number;
   onClose: () => void;
+  taskSession: TaskSessionData;
 }
 
 // ── Icon registry (maps string keys from data to lucide components) ─────
@@ -83,9 +90,19 @@ function IconByName({
 // ── Recharts custom Y-axis tick with icon ───────────────────────────────
 
 const TOOL_ICON_MAP: Record<string, string> = {
-  "Web Search": "Globe",
+  // Real data display names
+  Shell: "Terminal",
   "Read File": "FileText",
   "Write File": "Code",
+  "Edit File": "Code",
+  Search: "Globe",
+  "Find Files": "Folder",
+  "Sub-Agent": "Activity",
+  "Web Search": "Globe",
+  "Web Fetch": "Globe",
+  "Spawn Agent": "Activity",
+  Yield: "Activity",
+  // Legacy mock names
   "Execute Cmd": "Terminal",
   "API Call": "Cloud",
   "DB Query": "Database",
@@ -105,10 +122,24 @@ const CustomYAxisTick = ({
   const iconName = TOOL_ICON_MAP[payload.value] || "Circle";
   return (
     <g transform={`translate(${x},${y})`}>
-      <foreignObject x={-90} y={-10} width={90} height={20}>
-        <div className="flex items-center justify-end gap-1.5 pr-2 text-[10px] text-zinc-400 h-full">
+      <foreignObject x={-100} y={-9} width={100} height={18}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: 4,
+            paddingRight: 4,
+            height: "100%",
+            fontSize: 10,
+            color: "#a1a1aa",
+            lineHeight: 1,
+          }}
+        >
           <IconByName name={iconName} size={10} className="flex-shrink-0" />
-          <span className="truncate">{payload.value}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {payload.value}
+          </span>
         </div>
       </foreignObject>
     </g>
@@ -150,6 +181,7 @@ export function MonitorBottomPanel({
   activityWindows,
   currentTime: _currentTime,
   onClose,
+  taskSession,
 }: BottomPanelProps) {
   void _events;
   void _currentTime;
@@ -163,7 +195,28 @@ export function MonitorBottomPanel({
   const activity = activityWindows.find((w) => w.id === selectedActivityId);
 
   const agentConfig = useMemo(() => (agent ? getMockAgentConfig(agent.id) : null), [agent]);
-  const agentTelemetry = useMemo(() => (agent ? getMockAgentTelemetry(agent.id) : null), [agent]);
+  const agentTelemetry = useMemo(() => {
+    if (!agent) {
+      return null;
+    }
+    // Try activity-window-specific telemetry first (e.g. orchestrator phases)
+    if (selectedActivityId) {
+      const windowTelemetry = taskSession.agentTelemetry[selectedActivityId];
+      if (
+        windowTelemetry &&
+        (windowTelemetry.toolUsage.length > 0 ||
+          windowTelemetry.tasks.length > 0 ||
+          windowTelemetry.artifacts.length > 0)
+      ) {
+        return windowTelemetry;
+      }
+    }
+    const real = taskSession.agentTelemetry[agent.id];
+    if (real && (real.toolUsage.length > 0 || real.tasks.length > 0 || real.artifacts.length > 0)) {
+      return real;
+    }
+    return getMockAgentTelemetry(agent.id);
+  }, [agent, taskSession, selectedActivityId]);
 
   // Map capability `value` to `A` for Recharts Radar
   const radarData = useMemo(
@@ -239,165 +292,202 @@ export function MonitorBottomPanel({
                   {agentTelemetry.summary}
                 </div>
               </div>
+            </div>
+            {/* Col 2: Tasks & Completion */}
+            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">TASKS & COMPLETION</div>
                 <div className="space-y-2">
-                  {agentTelemetry.tasks.map((task) => (
-                    <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
-                      {task.completed ? (
-                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
-                      ) : (
-                        <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                      )}
-                      <span>{task.label}</span>
-                    </div>
-                  ))}
+                  {agentTelemetry.tasks.length > 0 ? (
+                    agentTelemetry.tasks.map((task) => (
+                      <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
+                        {task.completed ? (
+                          <CheckCircle2
+                            size={14}
+                            className="text-emerald-500 mt-0.5 flex-shrink-0"
+                          />
+                        ) : (
+                          <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                        )}
+                        <span className="leading-snug">{task.label}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-zinc-600 italic">No tasks detected.</div>
+                  )}
                 </div>
               </div>
             </div>
-            {/* Col 2: Artifacts */}
+            {/* Col 3: Output & Artifacts */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2 flex items-center gap-2">
                   <FileText size={12} /> OUTPUT & ARTIFACTS
                 </div>
                 <div className="space-y-3">
-                  {agentTelemetry.artifacts.map((art) => (
-                    <div
-                      key={art.id}
-                      className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2"
-                    >
-                      <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
-                        <IconByName name={art.icon} size={14} className={art.iconColor} />{" "}
-                        {art.title}
+                  {agentTelemetry.artifacts.length > 0 ? (
+                    agentTelemetry.artifacts.map((art) => (
+                      <div
+                        key={art.id}
+                        className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2"
+                      >
+                        <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
+                          <IconByName name={art.icon} size={14} className={art.iconColor} />{" "}
+                          {art.title}
+                        </div>
+                        <div className="text-xs text-zinc-500 truncate" title={art.description}>
+                          {art.description}
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] font-mono">
+                          {art.additions != null && (
+                            <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
+                              +{art.additions} {art.additionUnit ?? "LoC"}
+                            </span>
+                          )}
+                          {art.deletions != null && (
+                            <span className="text-rose-400 bg-rose-400/10 px-1.5 py-0.5 rounded border border-rose-400/20">
+                              -{art.deletions} edits
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-xs text-zinc-500">{art.description}</div>
-                      <div className="flex items-center gap-3 text-[10px] font-mono">
-                        {art.additions != null && (
-                          <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
-                            +{art.additions} {art.additionUnit ?? "LoC"}
-                          </span>
-                        )}
-                        {art.deletions != null && (
-                          <span className="text-rose-400 bg-rose-400/10 px-1.5 py-0.5 rounded border border-rose-400/20">
-                            -{art.deletions} LoC
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="text-xs text-zinc-600 italic">No file artifacts detected.</div>
+                  )}
                 </div>
               </div>
             </div>
-            {/* Col 3: Tool Usage */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 px-3 border-r border-zinc-800/30">
-              <div className="text-xs text-zinc-500 font-mono mb-1">TOOL USAGE DISTRIBUTION</div>
-              <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[160px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={agentTelemetry.toolUsage}
-                    layout="vertical"
-                    margin={{ top: 5, right: 20, left: 30, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
-                    <XAxis type="number" stroke="#666" fontSize={10} />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      stroke="#888"
-                      fontSize={10}
-                      width={90}
-                      tick={<CustomYAxisTick />}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#18181b",
-                        borderColor: "#3f3f46",
-                        fontSize: "12px",
-                        color: "#e4e4e7",
-                      }}
-                      itemStyle={{ color: "#10b981" }}
-                      cursor={{ fill: "#27272a" }}
-                    />
-                    <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={12} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            {/* Col 4: System Metrics */}
+            {/* Col 4: Tool Usage + System Metrics + Context Window */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3">
-              <div className="flex-1 flex flex-col">
+              <div>
+                <div className="text-xs text-zinc-500 font-mono mb-1">TOOL USAGE DISTRIBUTION</div>
+                <div
+                  className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
+                  style={{ height: Math.max(120, agentTelemetry.toolUsage.length * 28 + 30) }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={agentTelemetry.toolUsage}
+                      layout="vertical"
+                      margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
+                      <XAxis type="number" stroke="#666" fontSize={10} allowDecimals={false} />
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        stroke="#888"
+                        fontSize={10}
+                        width={100}
+                        tick={<CustomYAxisTick />}
+                        interval={0}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#18181b",
+                          borderColor: "#3f3f46",
+                          fontSize: "12px",
+                          color: "#e4e4e7",
+                        }}
+                        itemStyle={{ color: "#10b981" }}
+                        cursor={{ fill: "#27272a" }}
+                      />
+                      <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Cpu size={12} /> SYSTEM MONITORING
                 </div>
-                <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[80px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={agentTelemetry.systemMetrics}
-                      margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                      <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} hide />
-                      <YAxis stroke="#666" fontSize={10} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#18181b",
-                          borderColor: "#3f3f46",
-                          fontSize: "12px",
-                          color: "#e4e4e7",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="cpu"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        dot={false}
-                        name="CPU (%)"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="memory"
-                        stroke="#8b5cf6"
-                        strokeWidth={2}
-                        dot={false}
-                        name="Memory (MB)"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div
+                  className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
+                  style={{ height: 100 }}
+                >
+                  {agentTelemetry.systemMetrics.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={agentTelemetry.systemMetrics}
+                        margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                        <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} hide />
+                        <YAxis stroke="#666" fontSize={10} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#18181b",
+                            borderColor: "#3f3f46",
+                            fontSize: "12px",
+                            color: "#e4e4e7",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="cpu"
+                          stroke="#3b82f6"
+                          strokeWidth={2}
+                          dot={false}
+                          name="CPU (%)"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="memory"
+                          stroke="#8b5cf6"
+                          strokeWidth={2}
+                          dot={false}
+                          name="Memory (MB)"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                      No system metrics available
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="flex-1 flex flex-col">
+              <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Database size={12} /> CONTEXT WINDOW
                 </div>
-                <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[80px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={agentTelemetry.systemMetrics}
-                      margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                      <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} />
-                      <YAxis stroke="#666" fontSize={10} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#18181b",
-                          borderColor: "#3f3f46",
-                          fontSize: "12px",
-                          color: "#e4e4e7",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="context"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        dot={false}
-                        name="Context (kTokens)"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div
+                  className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
+                  style={{ height: 100 }}
+                >
+                  {agentTelemetry.systemMetrics.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={agentTelemetry.systemMetrics}
+                        margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                        <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} />
+                        <YAxis stroke="#666" fontSize={10} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#18181b",
+                            borderColor: "#3f3f46",
+                            fontSize: "12px",
+                            color: "#e4e4e7",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="context"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={false}
+                          name="Context (kTokens)"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                      No context data available
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

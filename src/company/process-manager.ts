@@ -99,17 +99,27 @@ export class ProcessManager {
     const timeoutMs = opts?.timeoutMs ?? 120_000;
 
     return new Promise<TaskResult>((resolve, reject) => {
+      let timedOut = false;
       const timer = setTimeout(() => {
+        timedOut = true;
         // Force-kill on timeout
         const child = this.processes.get(agentId);
         if (child) {
           child.kill("SIGKILL");
         }
-        reject(new Error(`Agent "${agentId}" timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
       void resultPromise.then((r) => {
         clearTimeout(timer);
+        if (timedOut) {
+          // Agent timed out, but may have produced partial output
+          if (r.content) {
+            resolve({ runId, content: r.content, tokensUsed: r.tokensUsed, exitCode: r.exitCode });
+          } else {
+            reject(new Error(`Agent "${agentId}" timed out after ${timeoutMs}ms`));
+          }
+          return;
+        }
         if (r.errorMessage) {
           reject(new Error(r.errorMessage));
           return;

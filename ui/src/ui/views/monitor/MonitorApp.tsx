@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "./monitor.css";
 import { deriveState } from "./derivation";
 import { mockTaskSession, mockTimelineEnd } from "./mockData";
 import { MonitorDashboard } from "./MonitorDashboard";
-import type { TaskSessionData } from "./types";
+import type { TaskSessionData, MissionSummary } from "./types";
 
 export interface MonitorAppProps {
   isDark: boolean;
   client?: { request(method: string, params?: Record<string, unknown>): Promise<unknown> } | null;
+  pendingMissionId?: string | null;
 }
 
 type SessionEntry = {
@@ -88,16 +89,90 @@ async function doFetchSessions(client: {
   }
 }
 
-export function MonitorApp({ isDark, client }: MonitorAppProps) {
+type ViewMode = "sessions" | "missions";
+
+type GatewayClient = {
+  request(method: string, params?: Record<string, unknown>): Promise<unknown>;
+};
+
+async function doFetchMissions(client: GatewayClient): Promise<MissionSummary[]> {
+  try {
+    const raw = (await client.request("monitor.missions.list")) as { missions?: MissionSummary[] };
+    return raw?.missions ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function doFetchMission(
+  client: GatewayClient,
+  missionId: string,
+): Promise<SessionEntry | null> {
+  try {
+    const wire = (await client.request("monitor.mission", { missionId })) as Record<
+      string,
+      unknown
+    > | null;
+    if (!wire) {
+      return null;
+    }
+    return {
+      session: {
+        id: wire.id as string,
+        name: wire.name as string,
+        description: wire.description as string | undefined,
+        startTime: wire.startTime as number,
+        endTime: wire.endTime as number | null,
+        agents: (wire.agents as TaskSessionData["agents"]) ?? [],
+        events: (wire.events as TaskSessionData["events"]) ?? [],
+        annotations: (wire.annotations as TaskSessionData["annotations"]) ?? [],
+        agentConfigs: (wire.agentConfigs as TaskSessionData["agentConfigs"]) ?? {},
+        agentTelemetry: (wire.agentTelemetry as TaskSessionData["agentTelemetry"]) ?? {},
+        metrics: (wire.metrics as TaskSessionData["metrics"]) ?? {
+          avgLatency: "N/A",
+          totalTokens: 0,
+          bottleneckCount: 0,
+        },
+        chatMessages: (wire.chatMessages as TaskSessionData["chatMessages"]) ?? [],
+      },
+      maxTime: (wire.maxTime as number) ?? 250,
+    };
+  } catch (err) {
+    console.error("[monitor] fetch mission error:", err);
+    return null;
+  }
+}
+
+export function MonitorApp(props: MonitorAppProps) {
+  const { isDark, client } = props;
   // Also check window global for cross-framework client
   const resolvedClient =
     client ??
     ((window as Record<string, unknown>).__openclawMonitorClient as MonitorAppProps["client"]);
 
+  const [viewMode, setViewMode] = useState<ViewMode>("missions");
   const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([mockEntry]);
   const [summaries, setSummaries] = useState<SessionSummary[]>(mockSummaries);
   const [selectedSessionId, setSelectedSessionId] = useState<string>(mockTaskSession.id);
   const [dataLoaded, setDataLoaded] = useState(false);
+
+  // Mission state
+  const [missionSummaries, setMissionSummaries] = useState<MissionSummary[]>([]);
+  const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
+  const [missionEntry, setMissionEntry] = useState<SessionEntry | null>(null);
+  const [missionsLoaded, setMissionsLoaded] = useState(false);
+
+  // Pick up pending mission navigation from company-tasks (via prop)
+  const pendingRef = useRef<string | null>(null);
+  useEffect(() => {
+    const pending = props.pendingMissionId;
+    if (pending && pending !== pendingRef.current) {
+      pendingRef.current = pending;
+      setViewMode("missions");
+      setSelectedMissionId(pending);
+      setMissionsLoaded(false); // force reload missions list
+    }
+  }, [props.pendingMissionId]);
 
   useEffect(() => {
     if (dataLoaded) {
@@ -138,14 +213,67 @@ export function MonitorApp({ isDark, client }: MonitorAppProps) {
     return () => clearInterval(interval);
   }, [dataLoaded, resolvedClient]);
 
-  // Current session
-  const currentEntry = useMemo(
-    () =>
+  // Load missions when switching to mission mode
+  useEffect(() => {
+    if (viewMode !== "missions" || missionsLoaded) {
+      return;
+    }
+    const c =
+      resolvedClient ??
+      ((window as Record<string, unknown>).__openclawMonitorClient as MonitorAppProps["client"]);
+    if (!c) {
+      return;
+    }
+    void doFetchMissions(c).then((missions) => {
+      setMissionSummaries(missions);
+      setMissionsLoaded(true);
+      if (missions.length > 0 && !selectedMissionId) {
+        setSelectedMissionId(missions[0].missionId);
+      }
+    });
+  }, [viewMode, missionsLoaded, resolvedClient, selectedMissionId]);
+
+  // Load mission data when selection changes
+  useEffect(() => {
+    if (viewMode !== "missions" || !selectedMissionId) {
+      return;
+    }
+    const c =
+      resolvedClient ??
+      ((window as Record<string, unknown>).__openclawMonitorClient as MonitorAppProps["client"]);
+    if (!c) {
+      return;
+    }
+    void doFetchMission(c, selectedMissionId).then((entry) => {
+      if (entry) {
+        setMissionEntry(entry);
+        setCurrentTime(0);
+        setIsPlaying(true);
+        setSelectedAgentId(null);
+        setHoveredAgentId(null);
+      }
+    });
+  }, [viewMode, selectedMissionId, resolvedClient]);
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    setCurrentTime(0);
+    setIsPlaying(true);
+    setSelectedAgentId(null);
+    setHoveredAgentId(null);
+  }, []);
+
+  // Current session (session mode or mission mode)
+  const currentEntry = useMemo(() => {
+    if (viewMode === "missions" && missionEntry) {
+      return missionEntry;
+    }
+    return (
       sessionEntries.find((e) => e.session.id === selectedSessionId) ??
       sessionEntries[0] ??
-      mockEntry,
-    [sessionEntries, selectedSessionId],
-  );
+      mockEntry
+    );
+  }, [viewMode, missionEntry, sessionEntries, selectedSessionId]);
 
   const session = currentEntry.session;
   const MAX_TIME = currentEntry.maxTime;
@@ -156,13 +284,13 @@ export function MonitorApp({ isDark, client }: MonitorAppProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
 
-  // Reset playback when session changes
+  // Reset playback when session or mission changes
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(true);
     setSelectedAgentId(null);
     setHoveredAgentId(null);
-  }, [selectedSessionId]);
+  }, [selectedSessionId, selectedMissionId]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -204,6 +332,11 @@ export function MonitorApp({ isDark, client }: MonitorAppProps) {
       taskSession={session}
       availableTaskSessions={summaries}
       onSessionChange={setSelectedSessionId}
+      viewMode={viewMode}
+      onViewModeChange={handleViewModeChange}
+      missionSummaries={missionSummaries}
+      selectedMissionId={selectedMissionId}
+      onMissionChange={setSelectedMissionId}
       {...derivedState}
     />
   );

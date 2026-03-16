@@ -19,6 +19,7 @@ import type {
   LineageEdge,
   AgentSnapshot,
   TaskSessionData,
+  MissionSummary,
 } from "./types";
 
 interface DashboardProps {
@@ -40,6 +41,11 @@ interface DashboardProps {
   taskSession: TaskSessionData;
   availableTaskSessions: Pick<TaskSessionData, "id" | "name" | "startTime" | "endTime">[];
   onSessionChange: (id: string) => void;
+  viewMode: "sessions" | "missions";
+  onViewModeChange: (mode: "sessions" | "missions") => void;
+  missionSummaries: MissionSummary[];
+  selectedMissionId: string | null;
+  onMissionChange: (id: string) => void;
 }
 
 // ── Resize constants ────────────────────────────────────────────────────
@@ -250,20 +256,71 @@ export function MonitorDashboard(props: DashboardProps) {
           className="flex h-10 border-b flex-shrink-0 items-center px-3 gap-1.5"
           style={{ borderColor: "var(--border)", background: "var(--card)" }}
         >
-          {/* Task session picker */}
-          <select
-            value={props.taskSession.id}
-            onChange={(e) => props.onSessionChange(e.target.value)}
-            className="bg-transparent text-xs font-medium text-zinc-200 border border-zinc-700/50 rounded px-2 py-1 outline-none cursor-pointer hover:border-zinc-500 transition-colors"
-            style={{ maxWidth: 180, fontFamily: "var(--mono)" }}
-            title="Select task session"
-          >
-            {props.availableTaskSessions.map((s) => (
-              <option key={s.id} value={s.id} style={{ background: "var(--card, #161920)" }}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          {/* View mode toggle — matches topbar-theme-mode pill style */}
+          <div className="topbar-theme-mode" role="group" aria-label="View mode">
+            <button
+              type="button"
+              onClick={() => props.onViewModeChange("sessions")}
+              className={`topbar-theme-mode__btn ${props.viewMode === "sessions" ? "topbar-theme-mode__btn--active" : ""}`}
+              title="Sessions"
+              aria-label="View mode: Sessions"
+              aria-pressed={props.viewMode === "sessions"}
+              style={{ width: "auto", padding: "0 10px", fontSize: 11, fontWeight: 600 }}
+            >
+              Sessions
+            </button>
+            <button
+              type="button"
+              onClick={() => props.onViewModeChange("missions")}
+              className={`topbar-theme-mode__btn ${props.viewMode === "missions" ? "topbar-theme-mode__btn--active" : ""}`}
+              title="Missions"
+              aria-label="View mode: Missions"
+              aria-pressed={props.viewMode === "missions"}
+              style={{ width: "auto", padding: "0 10px", fontSize: 11, fontWeight: 600 }}
+            >
+              Missions
+            </button>
+          </div>
+          {/* Session/Mission picker */}
+          {props.viewMode === "sessions" ? (
+            <select
+              value={props.taskSession.id}
+              onChange={(e) => props.onSessionChange(e.target.value)}
+              className="bg-transparent text-xs font-medium text-zinc-200 border border-zinc-700/50 rounded px-2 py-1 outline-none cursor-pointer hover:border-zinc-500 transition-colors"
+              style={{ maxWidth: 240, fontFamily: "var(--mono)" }}
+              title="Select task session"
+            >
+              {props.availableTaskSessions.map((s) => (
+                <option key={s.id} value={s.id} style={{ background: "var(--card, #161920)" }}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={props.selectedMissionId ?? ""}
+              onChange={(e) => props.onMissionChange(e.target.value)}
+              className="bg-transparent text-xs font-medium text-zinc-200 border border-zinc-700/50 rounded px-2 py-1 outline-none cursor-pointer hover:border-zinc-500 transition-colors"
+              style={{ maxWidth: 340, fontFamily: "var(--mono)" }}
+              title="Select mission"
+            >
+              {props.missionSummaries.map((m) => (
+                <option
+                  key={m.missionId}
+                  value={m.missionId}
+                  style={{ background: "var(--card, #161920)" }}
+                >
+                  {m.missionId} — {m.title.slice(0, 30)}
+                  {m.title.length > 30 ? "…" : ""} ({m.taskCount} tasks)
+                </option>
+              ))}
+              {props.missionSummaries.length === 0 && (
+                <option value="" disabled style={{ background: "var(--card, #161920)" }}>
+                  No missions yet
+                </option>
+              )}
+            </select>
+          )}
           <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
           {/* Playback controls */}
           <button
@@ -596,6 +653,7 @@ export function MonitorDashboard(props: DashboardProps) {
                     props.setSelectedAgentId(null);
                     setSelectedActivityId(null);
                   }}
+                  taskSession={props.taskSession}
                 />
               </div>
             </>

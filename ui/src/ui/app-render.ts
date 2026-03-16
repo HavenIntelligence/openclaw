@@ -2431,6 +2431,13 @@ export function renderApp(state: AppViewState) {
                     }
                     requestHostUpdate?.();
                   },
+                  onNavigateToMission: (missionId) => {
+                    console.log("[app-render] onNavigateToMission:", missionId);
+                    (window as unknown as Record<string, unknown>).__openclawPendingMissionId =
+                      missionId;
+                    state.setTab("companyMonitor");
+                    requestHostUpdate?.();
+                  },
                 }),
               )
             : nothing

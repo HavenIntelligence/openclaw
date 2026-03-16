@@ -29,7 +29,12 @@ function simpleHash(s: string): number {
 /** Public base path for avatars (e.g. /avatars/ in dev, or /control-ui/avatars/ when base path set). */
 export function avatarBasePath(): string {
   const base = typeof import.meta !== "undefined" && import.meta.env?.BASE_URL;
-  return base ? `${base.replace(/\/$/, "")}/avatars/` : "/avatars/";
+  // Relative base (e.g. "./") breaks under nested routes like /company/office,
+  // so only use it when it's an absolute sub-path (e.g. "/control-ui/").
+  if (base && base.startsWith("/") && base !== "/") {
+    return `${base.replace(/\/$/, "")}/avatars/`;
+  }
+  return "/avatars/";
 }
 
 /** Deterministic avatar filename for an agent id. Same id => same avatar in org chart and office. */

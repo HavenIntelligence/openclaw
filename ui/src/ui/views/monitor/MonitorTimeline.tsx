@@ -292,7 +292,12 @@ export function MonitorTimeline({
                 r.timestamp >= latestMergeTs &&
                 r.timestamp - latestMergeTs <= 3,
             );
-            const mergeIconX = resumeEvent ? getX(resumeEvent.timestamp) : getX(latestMergeTs);
+            // Don't render merge lines until the resume event has occurred
+            // (prevents floating arrows when only some subordinates have completed)
+            if (!resumeEvent) {
+              continue;
+            }
+            const mergeIconX = getX(resumeEvent.timestamp);
 
             // Each source: line starts from archive icon center (= archive timestamp, no offset)
             for (const edge of merges) {
@@ -359,8 +364,8 @@ export function MonitorTimeline({
         const agent = agents.find((a) => a.id === window.agentId);
         const lifecycle = agent?.lifecycle || "persistent";
         const y = getAgentY(window.agentId) - 10;
-        // Subagent bars inset on both sides so split/merge arrows connect cleanly
-        const inset = lifecycle === "ephemeral" ? SUBAGENT_BAR_INSET_PX : 0;
+        // Bars inset on left for agents that were spawned/split into (have parentId or ephemeral)
+        const inset = lifecycle === "ephemeral" || agent?.parentId ? SUBAGENT_BAR_INSET_PX : 0;
         const x = getX(window.startTime) + inset;
         const rawWidth =
           ((window.endTime !== null ? window.endTime : currentTime) - window.startTime) * timeScale;
@@ -581,9 +586,9 @@ export function MonitorTimeline({
         .map((event) => {
           const y = getAgentY(event.agentId);
           const eventAgent = agents.find((a) => a.id === event.agentId);
-          const isEphemeral = eventAgent?.lifecycle === "ephemeral";
+          const hasInset = eventAgent?.lifecycle === "ephemeral" || !!eventAgent?.parentId;
           let x = getX(event.timestamp);
-          if (isEphemeral && ["spawn", "start"].includes(event.type)) {
+          if (hasInset && ["spawn", "start"].includes(event.type)) {
             // Start icons align with bar left edge (inset)
             x = getX(event.timestamp) + SUBAGENT_BAR_INSET_PX;
           }

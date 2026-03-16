@@ -127,5 +127,6 @@ export interface CompanyProfile {
   businessModel?: string;
   focusAreas?: string[];
   maxOrchestrationRounds?: number;
+  agentTimeoutMs?: number;
   updatedAt: number;
 }

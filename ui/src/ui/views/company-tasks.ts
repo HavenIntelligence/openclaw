@@ -21,6 +21,7 @@ type Task = {
   reviewNote?: string;
   roundCount: number;
   maxRounds: number;
+  missionId?: string;
   project: string;
   tags: string[];
   createdAt: string;
@@ -327,9 +328,36 @@ let _newTask = {
 let _onCreateTask: CompanyTasksProps["onCreateTask"];
 let _onUpdateTask: CompanyTasksProps["onUpdateTask"];
 let _onDeleteTask: CompanyTasksProps["onDeleteTask"];
+let _onNavigateToMission: CompanyTasksProps["onNavigateToMission"];
+
+function navigateToMission(missionId: string, target: EventTarget | null) {
+  // Try callback first
+  if (_onNavigateToMission) {
+    _onNavigateToMission(missionId);
+    return;
+  }
+  // Direct fallback: set pending mission + find host element to switch tab
+  (window as unknown as Record<string, unknown>).__openclawPendingMissionId = missionId;
+  const el = target instanceof HTMLElement ? target : null;
+  const host = el?.closest("openclaw-app") as
+    | (HTMLElement & { setTab?: (tab: string) => void })
+    | null;
+  if (host?.setTab) {
+    host.setTab("companyMonitor");
+  }
+}
 
 let _dragging: string | null = null;
 let _detailTaskId: string | null = null; // clicked task to show detail panel
+
+/** Trigger a Lit re-render by finding the host element from an event target. */
+function requestHostRender(target: EventTarget | null) {
+  const el = target instanceof HTMLElement ? target : null;
+  const host = el?.closest("openclaw-app");
+  if (host && "requestUpdate" in host) {
+    (host as HTMLElement & { requestUpdate: () => void }).requestUpdate();
+  }
+}
 // Active task list — set on each render from props or demo data.
 let _activeTasks: Task[] = DEMO_TASKS;
 // Active agent list for filter UI — lazily initialized from AGENTS on first render
@@ -416,6 +444,7 @@ function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
     reviewNote: rt.reviewNote,
     roundCount: rt.roundCount ?? 0,
     maxRounds: rt.maxRounds ?? 3,
+    missionId: rt.missionId,
     project: rt.project ?? "Unassigned",
     tags: rt.tags ?? [],
     createdAt: fmtDate(rt.createdAt),
@@ -425,10 +454,23 @@ function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
   };
 }
 
+function isErrorTask(task: Task): boolean {
+  return !!(
+    task.reviewNote &&
+    (task.reviewNote.startsWith("Failed") ||
+      task.reviewNote.startsWith("Error") ||
+      task.reviewNote.startsWith("Crashed") ||
+      task.reviewNote.includes("error") ||
+      task.reviewNote.includes("exception") ||
+      task.reviewNote.includes("timed out"))
+  );
+}
+
 function renderTask(task: Task) {
   const roundLabel = task.roundCount > 0 ? `R${task.roundCount}/${task.maxRounds}` : "";
+  const hasError = isErrorTask(task);
   return html`
-    <div class="cd-kb-task"
+    <div class="cd-kb-task" style="${hasError ? "border-left:3px solid #f43f5e;" : ""}"
       draggable="true"
       @dragstart=${() => {
         _dragging = task.id;
@@ -442,6 +484,7 @@ function renderTask(task: Task) {
           return;
         }
         _detailTaskId = _detailTaskId === task.id ? null : task.id;
+        requestHostRender(e.target);
       }}
     >
       <!-- Priority + Project + Round -->
@@ -454,8 +497,23 @@ function renderTask(task: Task) {
         ${task.dueAt ? html`<span class="cd-kb-due">📅 ${task.dueAt}</span>` : ""}
       </div>
 
+      <!-- Mission -->
+      ${
+        task.missionId
+          ? html`<div class="cd-kb-task__mission" title="Open in Monitor: ${task.missionId}" style="cursor:pointer" @click=${(
+              e: Event,
+            ) => {
+              e.stopPropagation();
+              navigateToMission(task.missionId!, e.target);
+            }}>🎯 ${task.missionId.replace(/^mission_/, "").slice(0, 16)}</div>`
+          : ""
+      }
+
       <!-- Title -->
-      <div class="cd-kb-task__title">${task.title}</div>
+      <div class="cd-kb-task__title" style="${hasError ? "display:flex;align-items:center;gap:6px" : ""}">
+        ${task.title}
+        ${hasError ? html`<span style="display:inline-flex;align-items:center;justify-content:center;background:#f43f5e;color:#fff;font-size:9px;font-weight:700;min-width:16px;height:16px;border-radius:8px;padding:0 4px;flex-shrink:0" title="${task.reviewNote}">!</span>` : ""}
+      </div>
 
       <!-- Description (truncated) -->
       <div class="cd-kb-task__desc">${task.description}</div>
@@ -579,6 +637,7 @@ export type CompanyTasksProps = {
   onUpdateTask?: (id: string, partial: Partial<RealTask>) => void;
   onDeleteTask?: (id: string) => void;
   onAssignTask?: (taskId: string, agentId: string) => void;
+  onNavigateToMission?: (missionId: string) => void;
   /** @deprecated use onCreateTask */
   onCreate?: (params: Omit<RealTask, "id" | "createdAt" | "updatedAt">) => Promise<void>;
 };
@@ -596,6 +655,7 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
   _onCreateTask = props.onCreateTask;
   _onUpdateTask = props.onUpdateTask;
   _onDeleteTask = props.onDeleteTask;
+  _onNavigateToMission = props.onNavigateToMission;
 
   const total = filterTasks(_activeTasks);
   const done = total.filter((t) => t.status === "done").length;
@@ -813,6 +873,7 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
           <div class="cd-task-detail-overlay" @click=${(e: Event) => {
             if ((e.target as HTMLElement).classList.contains("cd-task-detail-overlay")) {
               _detailTaskId = null;
+              requestHostRender(e.target);
             }
           }}>
             <div class="cd-task-detail">
@@ -821,8 +882,9 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                   ${task.priority}
                 </span>
                 <span class="cd-task-detail__title">${task.title}</span>
-                <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
+                <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${(e: Event) => {
                   _detailTaskId = null;
+                  requestHostRender(e.target);
                 }}>
                   ${icons.x}
                 </button>
@@ -895,7 +957,41 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                     : ""
                 }
 
-                <!-- Project + Tokens -->
+                ${
+                  isErrorTask(task)
+                    ? html`
+                  <div style="background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.25);border-radius:8px;padding:10px 12px;margin:4px 0">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                      <span style="color:#f43f5e;font-size:14px">⚠</span>
+                      <span style="color:#f43f5e;font-size:12px;font-weight:600">Abnormal Termination</span>
+                    </div>
+                    <p style="color:#fca5a5;font-size:11px;line-height:1.5;margin:0;white-space:pre-wrap">${task.reviewNote}</p>
+                  </div>
+                `
+                    : ""
+                }
+
+                <!-- Mission + Project + Tokens -->
+                ${
+                  task.missionId
+                    ? html`
+                  <div class="cd-task-detail__field">
+                    <span class="cd-task-detail__label">Mission</span>
+                    <a
+                      class="cd-task-detail__value"
+                      href="javascript:void(0)"
+                      style="color:#60a5fa;font-family:monospace;font-size:11px;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(96,165,250,0.3);text-underline-offset:2px"
+                      title="Open in Monitor"
+                      @click=${(e: Event) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigateToMission(task.missionId!, e.target);
+                      }}
+                    >${task.missionId}</a>
+                  </div>
+                `
+                    : ""
+                }
                 <div class="cd-task-detail__field">
                   <span class="cd-task-detail__label">Project</span>
                   <span class="cd-task-detail__value">${task.project}</span>

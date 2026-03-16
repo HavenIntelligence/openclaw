@@ -23,7 +23,12 @@ export class TaskStore {
     }
   }
 
-  list(filters?: { status?: TaskStatus; assignee?: string; project?: string }): Task[] {
+  list(filters?: {
+    status?: TaskStatus;
+    assignee?: string;
+    project?: string;
+    missionId?: string;
+  }): Task[] {
     let result = this.tasks;
     if (filters?.status) {
       result = result.filter((t) => t.status === filters.status);
@@ -34,7 +39,46 @@ export class TaskStore {
     if (filters?.project) {
       result = result.filter((t) => t.project === filters.project);
     }
+    if (filters?.missionId) {
+      result = result.filter((t) => t.missionId === filters.missionId);
+    }
     return result;
+  }
+
+  /** Return distinct missions with summary info for dropdown selectors. */
+  listMissions(): Array<{
+    missionId: string;
+    title: string;
+    startTime: number;
+    endTime: number | null;
+    agentCount: number;
+    taskCount: number;
+  }> {
+    const grouped = new Map<string, Task[]>();
+    for (const t of this.tasks) {
+      if (!t.missionId) {
+        continue;
+      }
+      const list = grouped.get(t.missionId) ?? [];
+      list.push(t);
+      grouped.set(t.missionId, list);
+    }
+    return [...grouped.entries()]
+      .map(([missionId, tasks]) => {
+        const top = tasks.find((t) => t.assignedBy === "human") ?? tasks[0];
+        const agentIds = new Set(tasks.map((t) => t.agentId).filter(Boolean));
+        const starts = tasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean);
+        const ends = tasks.map((t) => t.endTime).filter((e): e is number => e != null);
+        return {
+          missionId,
+          title: top.title,
+          startTime: starts.length > 0 ? Math.min(...starts) : top.createdAt,
+          endTime: ends.length === tasks.length && ends.length > 0 ? Math.max(...ends) : null,
+          agentCount: agentIds.size,
+          taskCount: tasks.length,
+        };
+      })
+      .toSorted((a, b) => b.startTime - a.startTime);
   }
 
   get(id: string): Task | null {
@@ -107,6 +151,8 @@ export class TaskStore {
   }
 
   private async persist(): Promise<void> {
+    const dir = path.dirname(this.filePath);
+    await fs.mkdir(dir, { recursive: true });
     const tmp = `${this.filePath}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(this.tasks, null, 2), "utf-8");
     await fs.rename(tmp, this.filePath);

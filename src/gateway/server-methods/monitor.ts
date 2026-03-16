@@ -45,6 +45,8 @@ interface MonitorChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  agentId?: string;
+  agentName?: string;
 }
 
 interface MonitorToolUsage {
@@ -99,6 +101,7 @@ interface ParsedMessage {
   stopReason?: string;
   model?: string;
   toolNames?: string[];
+  toolCalls?: { name: string; filePath?: string }[];
 }
 
 interface SubagentSpawn {
@@ -161,12 +164,31 @@ function extractToolNames(content: unknown): string[] {
   for (const block of content) {
     if (block && typeof block === "object" && "type" in block) {
       const b = block as Record<string, unknown>;
-      if (b.type === "tool_use" && typeof b.name === "string") {
+      if ((b.type === "tool_use" || b.type === "toolCall") && typeof b.name === "string") {
         names.push(b.name);
       }
     }
   }
   return names;
+}
+
+function extractToolCalls(content: unknown): { name: string; filePath?: string }[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const calls: { name: string; filePath?: string }[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object" && "type" in block) {
+      const b = block as Record<string, unknown>;
+      if ((b.type === "tool_use" || b.type === "toolCall") && typeof b.name === "string") {
+        // tool_use uses "input", toolCall uses "arguments"
+        const input = (b.input ?? b.arguments) as Record<string, unknown> | undefined;
+        const filePath = (input?.file_path ?? input?.path) as string | undefined;
+        calls.push({ name: b.name, filePath: filePath || undefined });
+      }
+    }
+  }
+  return calls;
 }
 
 /** Extract agentId from "agent:<agentId>:subagent:<uuid>" */
@@ -287,16 +309,19 @@ async function parseJsonlFile(filePath: string): Promise<ParsedSession> {
 
       // ── Standard message parsing ──
       if (["user", "assistant", "toolResult"].includes(role)) {
-        const toolNames = extractToolNames(content);
+        const toolCalls = extractToolCalls(content);
+        const toolNames =
+          toolCalls.length > 0 ? toolCalls.map((tc) => tc.name) : extractToolNames(content);
         messages.push({
           role,
           timestamp,
-          content: contentText.slice(0, 500),
+          content: contentText.slice(0, 1500),
           usage: msg.usage as ParsedMessage["usage"],
           durationMs: msg.durationMs as number | undefined,
           stopReason: msg.stopReason as string | undefined,
           model: msg.model as string | undefined,
           toolNames: toolNames.length > 0 ? toolNames : undefined,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         });
       }
     }
@@ -339,6 +364,49 @@ const TOOL_ICON_MAP: Record<string, string> = {
   sessions_list: "Activity",
   sessions_yield: "Activity",
 };
+
+const TOOL_DISPLAY_MAP: Record<string, string> = {
+  bash: "Shell",
+  read: "Read File",
+  read_file: "Read File",
+  write: "Write File",
+  write_file: "Write File",
+  edit: "Edit File",
+  edit_file: "Edit File",
+  grep: "Search",
+  glob: "Find Files",
+  agent: "Sub-Agent",
+  web_search: "Web Search",
+  web_fetch: "Web Fetch",
+  sessions_spawn: "Spawn Agent",
+  sessions_list: "List Sessions",
+  sessions_yield: "Yield",
+};
+
+function derivePlatforms(
+  toolCounts: Map<string, number>,
+): { name: string; icon: string; iconColor: string }[] {
+  const platforms: { name: string; icon: string; iconColor: string }[] = [];
+  const has = (...names: string[]) => names.some((n) => toolCounts.has(n));
+
+  if (has("bash")) {
+    platforms.push({ name: "Terminal", icon: "Terminal", iconColor: "text-zinc-400" });
+  }
+  if (has("read", "write", "edit", "read_file", "write_file", "edit_file", "grep", "glob")) {
+    platforms.push({ name: "IDE / Editor", icon: "Code", iconColor: "text-blue-400" });
+  }
+  if (has("web_search", "web_fetch")) {
+    platforms.push({ name: "Browser", icon: "Globe", iconColor: "text-emerald-400" });
+  }
+  if (has("agent", "sessions_spawn")) {
+    platforms.push({ name: "Agent System", icon: "Activity", iconColor: "text-purple-400" });
+  }
+  if (platforms.length === 0) {
+    platforms.push({ name: "Terminal", icon: "Terminal", iconColor: "text-zinc-400" });
+  }
+
+  return platforms;
+}
 
 function buildTaskSession(
   parsed: ParsedSession & {
@@ -571,19 +639,78 @@ function buildTaskSession(
     }
   }
 
+  // ── Derive platforms from tools used ──
+  const platforms = derivePlatforms(toolCounts);
+
+  // ── Merge tool counts using display names ──
+  const displayToolCounts = new Map<string, { icon: string; count: number }>();
+  for (const [name, count] of toolCounts) {
+    const displayName = TOOL_DISPLAY_MAP[name] || name;
+    const icon = TOOL_ICON_MAP[name] || "Terminal";
+    const existing = displayToolCounts.get(displayName);
+    if (existing) {
+      existing.count += count;
+    } else {
+      displayToolCounts.set(displayName, { icon, count });
+    }
+  }
+  const toolUsage = [...displayToolCounts.entries()]
+    .toSorted((a, b) => b[1].count - a[1].count)
+    .slice(0, 10)
+    .map(([name, { icon, count }]) => ({ name, icon, count }));
+
+  // ── Build tasks from user messages ──
+  const tasks = messages
+    .filter((m) => m.role === "user" && m.content)
+    .slice(0, 10)
+    .map((m, i) => {
+      const label = m.content.length > 80 ? m.content.slice(0, 77) + "..." : m.content;
+      const nextAssistant = messages.find(
+        (nm) => nm.role === "assistant" && nm.timestamp > m.timestamp && nm.stopReason !== "error",
+      );
+      return { id: `t${i}`, label, completed: !!nextAssistant };
+    });
+
+  // ── Build artifacts from write/edit tool calls ──
+  const artifactMap = new Map<string, { writes: number; edits: number }>();
+  for (const msg of messages) {
+    if (!msg.toolCalls) {
+      continue;
+    }
+    for (const tc of msg.toolCalls) {
+      if (!tc.filePath) {
+        continue;
+      }
+      const lower = tc.name.toLowerCase();
+      if (lower === "write" || lower === "write_file") {
+        const entry = artifactMap.get(tc.filePath) ?? { writes: 0, edits: 0 };
+        entry.writes++;
+        artifactMap.set(tc.filePath, entry);
+      } else if (lower === "edit" || lower === "edit_file") {
+        const entry = artifactMap.get(tc.filePath) ?? { writes: 0, edits: 0 };
+        entry.edits++;
+        artifactMap.set(tc.filePath, entry);
+      }
+    }
+  }
+  const artifacts = [...artifactMap.entries()].slice(0, 10).map(([filePath, counts], i) => ({
+    id: `art-${i}`,
+    title: filePath.split("/").pop() ?? filePath,
+    description: filePath,
+    icon: counts.writes > 0 ? "Code" : "FileText",
+    iconColor: counts.writes > 0 ? "text-emerald-400" : "text-blue-400",
+    additions: counts.writes > 0 ? counts.writes : undefined,
+    deletions: counts.edits > 0 ? counts.edits : undefined,
+    additionUnit: counts.writes > 0 ? "writes" : undefined,
+  }));
+
   const firstUser = messages.find((m) => m.role === "user");
   agentTelemetry[orchestratorLaneId] = {
-    platforms: [{ name: "Terminal", icon: "Terminal", iconColor: "text-zinc-400" }],
+    platforms,
     summary: firstUser?.content?.slice(0, 200) || "No summary",
-    tasks: [],
-    artifacts: [],
-    toolUsage: [...toolCounts.entries()]
-      .toSorted((a, b) => b[1] - a[1])
-      .map(([name, count]) => ({
-        name,
-        icon: TOOL_ICON_MAP[name] || "Terminal",
-        count,
-      })),
+    tasks,
+    artifacts,
+    toolUsage,
     systemMetrics: [],
   };
 
@@ -607,15 +734,36 @@ function buildTaskSession(
   const chatMessages: MonitorChatMessage[] = [];
   let msgSeq = 0;
   for (const msg of messages) {
-    if ((msg.role === "user" || msg.role === "assistant") && msg.content) {
-      if (chatMessages.length >= 50) {
-        break;
-      }
+    if (chatMessages.length >= 100) {
+      break;
+    }
+
+    if (msg.role === "user" && msg.content) {
       chatMessages.push({
         id: `msg-${++msgSeq}`,
-        role: msg.role,
-        content: msg.content.slice(0, 500),
+        role: "user",
+        content: msg.content.slice(0, 1500),
       });
+    } else if (msg.role === "assistant") {
+      const text = msg.content?.trim();
+      if (text) {
+        chatMessages.push({
+          id: `msg-${++msgSeq}`,
+          role: "assistant",
+          content: text.slice(0, 1500),
+          agentId: orchestratorLaneId,
+          agentName: parsed.agentName,
+        });
+      } else if (msg.toolNames?.length) {
+        const names = msg.toolNames.map((n) => TOOL_DISPLAY_MAP[n.toLowerCase()] || n);
+        chatMessages.push({
+          id: `msg-${++msgSeq}`,
+          role: "assistant",
+          content: `[${names.join(", ")}]`,
+          agentId: orchestratorLaneId,
+          agentName: parsed.agentName,
+        });
+      }
     }
   }
 
@@ -745,6 +893,466 @@ async function discoverTaskSessions(opts?: {
   return { sessions: taskSessions, list: summaries };
 }
 
+// ── Mission-based session builder ────────────────────────────────────────
+
+async function buildMissionSession(missionId: string): Promise<MonitorTaskSession | null> {
+  // Lazy import to avoid circular dependency at module load time
+  const { getCompanyService } = await import("../../company/company-service.js");
+
+  let svc: ReturnType<typeof getCompanyService>;
+  try {
+    svc = getCompanyService();
+  } catch {
+    return null;
+  }
+
+  const tasks = svc.taskStore.list({ missionId });
+  if (tasks.length === 0) {
+    return null;
+  }
+
+  // Find orchestrator task (assignedBy=human) and subtasks
+  const orchTask = tasks.find((t) => t.assignedBy === "human") ?? tasks[0];
+  const subtasks = tasks.filter((t) => t.id !== orchTask.id);
+
+  // Global time range
+  const allStarts = tasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean);
+  const allEnds = tasks.map((t) => t.endTime).filter((e): e is number => e != null);
+  if (allStarts.length === 0) {
+    return null;
+  }
+
+  const globalStart = Math.min(...allStarts);
+  const globalEnd = allEnds.length > 0 ? Math.max(...allEnds) : Date.now();
+  const durationSec = Math.ceil((globalEnd - globalStart) / 1000);
+  const offsetSec = (ts: number) => Math.max(0, Math.floor((ts - globalStart) / 1000));
+
+  // Build agent lanes
+  const agents: MonitorAgent[] = [];
+  const events: MonitorEvent[] = [];
+  let seq = 0;
+  const ev = (
+    agentId: string,
+    timestamp: number,
+    type: string,
+    opts?: { targetId?: string; details?: string },
+  ) => {
+    events.push({ id: `e${++seq}`, agentId, timestamp, type, ...opts });
+  };
+
+  // Orchestrator lane
+  const orchAgentId = orchTask.agentId ?? orchTask.assignee ?? "orchestrator";
+  const orchMeta = svc.registry.getMeta(orchAgentId);
+  agents.push({
+    id: orchAgentId,
+    name: orchMeta?.id ?? orchAgentId,
+    role: orchMeta?.role ?? "Orchestrator",
+    domain: orchAgentId,
+    skills: [],
+    lifecycle: "persistent",
+  });
+
+  const orchStartEventId = `e${seq + 1}`;
+  ev(orchAgentId, 0, "start");
+  let orchResumeEventId: string | null = null;
+  let orchPauseTs: number | null = null;
+  let orchResumeTs: number | null = null;
+
+  // Collect unique subordinate agent IDs
+  const subAgentIds = [
+    ...new Set(subtasks.map((t) => t.agentId ?? t.assignee).filter(Boolean)),
+  ] as string[];
+
+  // Subordinate lanes + events
+  for (const subId of subAgentIds) {
+    const meta = svc.registry.getMeta(subId);
+    agents.push({
+      id: subId,
+      name: meta?.id ?? subId,
+      role: meta?.role ?? "Agent",
+      parentId: orchAgentId,
+      domain: subId,
+      skills: [],
+      lifecycle: "persistent",
+    });
+
+    // Events from tasks: split → spawn → start → (error?) → merge → archive
+    // Same pattern as session mode. All subordinates merge (even failed ones)
+    // so the renderer can find the collector anchor near the resume event.
+    const agentTasks = subtasks.filter((t) => (t.agentId ?? t.assignee) === subId);
+    for (const task of agentTasks) {
+      const spawnOffset = offsetSec(task.startTime ?? task.createdAt);
+      ev(orchAgentId, spawnOffset, "split", { targetId: subId });
+      ev(subId, spawnOffset, "spawn");
+      ev(subId, spawnOffset + 1, "start");
+
+      if (task.endTime) {
+        const completeOffset = offsetSec(task.endTime);
+        const isFailed = task.reviewNote?.startsWith("Failed");
+        if (isFailed) {
+          // Error icon first, then merge (results still flow back to orchestrator)
+          // No archive — so error status is preserved as the final icon
+          ev(subId, completeOffset, "error", { details: task.reviewNote ?? "Failed" });
+          ev(subId, completeOffset, "merge", { targetId: orchAgentId });
+        } else {
+          ev(subId, completeOffset, "merge", { targetId: orchAgentId });
+          ev(subId, completeOffset, "archive");
+        }
+      }
+    }
+  }
+
+  // Orchestrator pause when spawning, resume when last subordinate completes
+  if (subtasks.length > 0) {
+    const delegateStart = Math.min(
+      ...subtasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean),
+    );
+    const subEndTimes = subtasks.map((t) => t.endTime).filter((e): e is number => e != null);
+    const delegateEnd = subEndTimes.length > 0 ? Math.max(...subEndTimes) : null;
+
+    if (delegateEnd) {
+      const pauseOffset = offsetSec(delegateStart) + 1;
+      const resumeOffset = offsetSec(delegateEnd) + 1;
+      if (resumeOffset > pauseOffset + 2) {
+        orchPauseTs = globalStart + pauseOffset * 1000;
+        orchResumeTs = globalStart + resumeOffset * 1000;
+        ev(orchAgentId, pauseOffset, "pause", { details: "Waiting for subordinates" });
+        orchResumeEventId = `e${seq + 1}`;
+        ev(orchAgentId, resumeOffset, "resume");
+      }
+    }
+  }
+
+  // Orchestrator end
+  if (orchTask.endTime) {
+    ev(orchAgentId, offsetSec(orchTask.endTime), "archive");
+  }
+
+  // Build telemetry + chat from agent JSONL sessions (best-effort)
+  const agentTelemetry: MonitorTaskSession["agentTelemetry"] = {};
+  const agentConfigs: MonitorTaskSession["agentConfigs"] = {};
+  let orchRawMessages: ParsedMessage[] = [];
+  const _missionDuration = globalEnd - globalStart;
+  void _missionDuration;
+
+  // Collect chat messages from all agents for merging
+  const allAgentMsgs: {
+    agentId: string;
+    agentName: string;
+    timestamp: number;
+    role: "user" | "assistant";
+    content: string;
+  }[] = [];
+
+  for (const agent of agents) {
+    agentTelemetry[agent.id] = {
+      platforms: [],
+      summary: "",
+      tasks: [],
+      artifacts: [],
+      toolUsage: [],
+      systemMetrics: [],
+    };
+    agentConfigs[agent.id] = {};
+
+    // Try to load session JSONL for richer telemetry + chat
+    try {
+      const storePath = resolveDefaultSessionStorePath(agent.id);
+      const store = loadSessionStore(storePath);
+      // Collect all session files for this agent
+      const sessionFiles: string[] = [];
+      for (const [, entry] of Object.entries(store)) {
+        const e = entry as Record<string, unknown>;
+        if (!e.sessionFile) {
+          continue;
+        }
+        const rawFile = e.sessionFile as string;
+        const resolved = path.isAbsolute(rawFile)
+          ? rawFile
+          : path.join(resolveSessionTranscriptsDirForAgent(agent.id), rawFile);
+        sessionFiles.push(resolved);
+      }
+
+      // Parse all sessions and filter messages within mission time window
+      let bestParsed: ParsedSession | null = null;
+      let bestOverlap = 0;
+      for (const sf of sessionFiles) {
+        try {
+          const p = await parseJsonlFile(sf);
+          // Count messages within mission time window (with 60s buffer)
+          const overlap = p.messages.filter(
+            (m) => m.timestamp >= globalStart - 60_000 && m.timestamp <= globalEnd + 60_000,
+          ).length;
+          if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            bestParsed = p;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (bestParsed && bestOverlap > 0) {
+        const parsed = bestParsed;
+        // Only use messages within mission time window
+        const missionMessages = parsed.messages.filter(
+          (m) => m.timestamp >= globalStart - 60_000 && m.timestamp <= globalEnd + 60_000,
+        );
+        // Save orchestrator raw messages for phase splitting
+        if (agent.id === orchAgentId) {
+          orchRawMessages = missionMessages;
+        }
+        const toolCounts = new Map<string, number>();
+        let totalTokens = 0;
+
+        for (const msg of missionMessages) {
+          totalTokens += msg.usage?.totalTokens ?? 0;
+          for (const tool of msg.toolNames ?? []) {
+            const lower = tool.toLowerCase();
+            toolCounts.set(lower, (toolCounts.get(lower) ?? 0) + 1);
+          }
+
+          // Collect chat messages
+          if (msg.role === "user" && msg.content?.trim()) {
+            allAgentMsgs.push({
+              agentId: agent.id,
+              agentName: agent.name,
+              timestamp: msg.timestamp,
+              role: "user",
+              content: msg.content,
+            });
+          } else if (msg.role === "assistant") {
+            const text = msg.content?.trim();
+            if (text) {
+              allAgentMsgs.push({
+                agentId: agent.id,
+                agentName: agent.name,
+                timestamp: msg.timestamp,
+                role: "assistant",
+                content: text,
+              });
+            } else if (msg.toolNames?.length) {
+              const names = msg.toolNames.map((n) => TOOL_DISPLAY_MAP[n.toLowerCase()] || n);
+              allAgentMsgs.push({
+                agentId: agent.id,
+                agentName: agent.name,
+                timestamp: msg.timestamp,
+                role: "assistant",
+                content: `[${names.join(", ")}]`,
+              });
+            }
+          }
+        }
+
+        // Telemetry: platforms
+        agentTelemetry[agent.id].platforms = derivePlatforms(toolCounts);
+
+        // Telemetry: tool usage with display names
+        const displayCounts = new Map<string, { icon: string; count: number }>();
+        for (const [name, count] of toolCounts) {
+          const displayName = TOOL_DISPLAY_MAP[name] || name;
+          const icon = TOOL_ICON_MAP[name] || "Terminal";
+          const existing = displayCounts.get(displayName);
+          if (existing) {
+            existing.count += count;
+          } else {
+            displayCounts.set(displayName, { icon, count });
+          }
+        }
+        agentTelemetry[agent.id].toolUsage = [...displayCounts.entries()]
+          .toSorted((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([name, { icon, count }]) => ({ name, icon, count }));
+
+        // Telemetry: artifacts from file operations
+        const artifactMap = new Map<string, { writes: number; edits: number }>();
+        for (const msg of missionMessages) {
+          if (!msg.toolCalls) {
+            continue;
+          }
+          for (const tc of msg.toolCalls) {
+            if (!tc.filePath) {
+              continue;
+            }
+            const lower = tc.name.toLowerCase();
+            if (lower === "write" || lower === "write_file") {
+              const entry = artifactMap.get(tc.filePath) ?? { writes: 0, edits: 0 };
+              entry.writes++;
+              artifactMap.set(tc.filePath, entry);
+            } else if (lower === "edit" || lower === "edit_file") {
+              const entry = artifactMap.get(tc.filePath) ?? { writes: 0, edits: 0 };
+              entry.edits++;
+              artifactMap.set(tc.filePath, entry);
+            }
+          }
+        }
+        agentTelemetry[agent.id].artifacts = [...artifactMap.entries()]
+          .slice(0, 10)
+          .map(([filePath, counts], i) => ({
+            id: `art-${i}`,
+            title: filePath.split("/").pop() ?? filePath,
+            description: filePath,
+            icon: counts.writes > 0 ? "Code" : "FileText",
+            iconColor: counts.writes > 0 ? "text-emerald-400" : "text-blue-400",
+            additions: counts.writes > 0 ? counts.writes : undefined,
+            deletions: counts.edits > 0 ? counts.edits : undefined,
+            additionUnit: counts.writes > 0 ? "writes" : undefined,
+          }));
+
+        // Telemetry: tasks from user messages
+        const userMsgs = parsed.messages.filter((m) => m.role === "user" && m.content);
+        agentTelemetry[agent.id].tasks = userMsgs.slice(0, 10).map((m, i) => {
+          const label = m.content.length > 80 ? m.content.slice(0, 77) + "..." : m.content;
+          const nextOk = parsed.messages.find(
+            (nm) =>
+              nm.role === "assistant" && nm.timestamp > m.timestamp && nm.stopReason !== "error",
+          );
+          return { id: `t${i}`, label, completed: !!nextOk };
+        });
+
+        agentTelemetry[agent.id].summary =
+          `${totalTokens.toLocaleString()} tokens, ${missionMessages.length} messages`;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Split orchestrator telemetry into per-activity-window entries
+  // so that planning phase and synthesis phase show different data
+  if (orchPauseTs && orchResumeTs && orchResumeEventId && orchRawMessages.length > 0) {
+    const buildPhaseTelemetry = (msgs: ParsedMessage[]) => {
+      const tc = new Map<string, number>();
+      let tokens = 0;
+      for (const m of msgs) {
+        tokens += m.usage?.totalTokens ?? 0;
+        for (const t of m.toolNames ?? []) {
+          const l = t.toLowerCase();
+          tc.set(l, (tc.get(l) ?? 0) + 1);
+        }
+      }
+      const dc = new Map<string, { icon: string; count: number }>();
+      for (const [name, count] of tc) {
+        const dn = TOOL_DISPLAY_MAP[name] || name;
+        const icon = TOOL_ICON_MAP[name] || "Terminal";
+        const ex = dc.get(dn);
+        if (ex) {
+          ex.count += count;
+        } else {
+          dc.set(dn, { icon, count });
+        }
+      }
+      const am = new Map<string, { writes: number; edits: number }>();
+      for (const m of msgs) {
+        if (!m.toolCalls) {
+          continue;
+        }
+        for (const call of m.toolCalls) {
+          if (!call.filePath) {
+            continue;
+          }
+          const ln = call.name.toLowerCase();
+          if (ln === "write" || ln === "write_file") {
+            const e = am.get(call.filePath) ?? { writes: 0, edits: 0 };
+            e.writes++;
+            am.set(call.filePath, e);
+          } else if (ln === "edit" || ln === "edit_file") {
+            const e = am.get(call.filePath) ?? { writes: 0, edits: 0 };
+            e.edits++;
+            am.set(call.filePath, e);
+          }
+        }
+      }
+      return {
+        platforms: derivePlatforms(tc),
+        summary: `${tokens.toLocaleString()} tokens, ${msgs.length} messages`,
+        tasks: [] as { id: string; label: string; completed: boolean }[],
+        artifacts: [...am.entries()].slice(0, 10).map(([fp, c], i) => ({
+          id: `art-${i}`,
+          title: fp.split("/").pop() ?? fp,
+          description: fp,
+          icon: c.writes > 0 ? "Code" : "FileText",
+          iconColor: c.writes > 0 ? "text-emerald-400" : "text-blue-400",
+          additions: c.writes > 0 ? c.writes : undefined,
+          deletions: c.edits > 0 ? c.edits : undefined,
+          additionUnit: c.writes > 0 ? "writes" : undefined,
+        })),
+        toolUsage: [...dc.entries()]
+          .toSorted((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([name, { icon, count }]) => ({ name, icon, count })),
+        systemMetrics: [] as { time: string; cpu: number; memory: number; context: number }[],
+      };
+    };
+
+    const planMsgs = orchRawMessages.filter((m) => m.timestamp < orchPauseTs);
+    const synthMsgs = orchRawMessages.filter((m) => m.timestamp >= orchResumeTs);
+
+    agentTelemetry[`w_${orchStartEventId}`] = buildPhaseTelemetry(planMsgs);
+    agentTelemetry[`w_${orchResumeEventId}`] = buildPhaseTelemetry(synthMsgs);
+  }
+
+  // ── Merge chat messages from all agents, sorted chronologically ──
+  // Only include messages from persistent agents (skip ephemeral subagents)
+  const persistentIds = new Set(
+    agents
+      .filter((a) => a.lifecycle === "persistent" || a.lifecycle === "contract")
+      .map((a) => a.id),
+  );
+  const filteredMsgs = allAgentMsgs.filter(
+    (m) => m.role === "user" || persistentIds.has(m.agentId),
+  );
+  filteredMsgs.sort((a, b) => a.timestamp - b.timestamp);
+
+  const chatMessages: MonitorChatMessage[] = [];
+  // Lead with mission description
+  chatMessages.push({
+    id: "msg_mission",
+    role: "user",
+    content: orchTask.description ?? orchTask.title,
+  });
+
+  let msgSeq = 0;
+  for (const chat of filteredMsgs) {
+    if (chatMessages.length >= 200) {
+      break;
+    }
+    if (!chat.content) {
+      continue;
+    }
+    chatMessages.push({
+      id: `msg-${++msgSeq}`,
+      role: chat.role,
+      content: chat.content.slice(0, 1500),
+      agentId: chat.role === "assistant" ? chat.agentId : undefined,
+      agentName: chat.role === "assistant" ? chat.agentName : undefined,
+    });
+  }
+
+  // Total tokens
+  const totalTokens = tasks.reduce((sum, t) => sum + (t.tokensUsed ?? 0), 0);
+
+  return {
+    id: missionId,
+    name: orchTask.title,
+    description: orchTask.description,
+    startTime: 0,
+    endTime: durationSec,
+    maxTime: durationSec,
+    agents,
+    events,
+    annotations: [],
+    agentConfigs,
+    agentTelemetry,
+    metrics: {
+      avgLatency: "–",
+      totalTokens,
+      bottleneckCount: events.filter((e) => e.type === "error").length,
+    },
+    chatMessages,
+  };
+}
+
 // ── Gateway handlers ────────────────────────────────────────────────────
 
 export const monitorHandlers: GatewayRequestHandlers = {
@@ -781,6 +1389,50 @@ export const monitorHandlers: GatewayRequestHandlers = {
       respond(false, undefined, {
         code: -1,
         message: `monitor.session failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  },
+
+  "monitor.missions.list": async ({ respond }) => {
+    try {
+      const { getCompanyService } = await import("../../company/company-service.js");
+      const svc = getCompanyService();
+      const missions = svc.taskStore.listMissions();
+      respond(true, { missions });
+    } catch (err) {
+      respond(false, undefined, {
+        code: -1,
+        message: `monitor.missions.list failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  },
+
+  "monitor.mission": async ({ respond, params }) => {
+    try {
+      const missionId = params?.missionId as string | undefined;
+      if (!missionId) {
+        respond(false, undefined, { code: -1, message: "missionId required" });
+        return;
+      }
+      const session = await buildMissionSession(missionId);
+      if (!session) {
+        respond(false, undefined, { code: -1, message: `mission not found: ${missionId}` });
+        return;
+      }
+      // Debug: log events
+      console.log(
+        `[monitor.mission] ${missionId}: ${session.events.length} events, ${session.agents.length} agents`,
+      );
+      for (const e of [...session.events].toSorted((a, b) => a.timestamp - b.timestamp)) {
+        console.log(
+          `  T+${e.timestamp} ${e.agentId} ${e.type}${e.targetId ? " ->" + e.targetId : ""}`,
+        );
+      }
+      respond(true, session);
+    } catch (err) {
+      respond(false, undefined, {
+        code: -1,
+        message: `monitor.mission failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   },

@@ -131,6 +131,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  agentId?: string;
+  agentName?: string;
 }
 
 /** Per-agent config/capability data. */
@@ -149,6 +151,16 @@ export interface AgentTelemetry {
   artifacts: ArtifactEntry[];
   toolUsage: ToolUsageEntry[];
   systemMetrics: SystemMetricPoint[];
+}
+
+/** Summary of a mission for dropdown selection. */
+export interface MissionSummary {
+  missionId: string;
+  title: string;
+  startTime: number;
+  endTime: number | null;
+  agentCount: number;
+  taskCount: number;
 }
 
 /** A task session spans multiple agents working on one task. */
