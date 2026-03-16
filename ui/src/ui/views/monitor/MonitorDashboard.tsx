@@ -198,6 +198,11 @@ export function MonitorDashboard(props: DashboardProps) {
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(maxTime > 300 ? "min" : "s");
 
+  // Reset local activity selection when session/mission changes
+  useEffect(() => {
+    setSelectedActivityId(null);
+  }, [props.taskSession]);
+
   // Resizable panels
   const left = useResizable("x", LEFT_DEFAULT, LEFT_MIN);
   const right = useResizable("x", RIGHT_DEFAULT, RIGHT_MIN, true);
