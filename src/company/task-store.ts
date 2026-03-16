@@ -153,7 +153,9 @@ export class TaskStore {
   private async persist(): Promise<void> {
     const dir = path.dirname(this.filePath);
     await fs.mkdir(dir, { recursive: true });
-    const tmp = `${this.filePath}.tmp`;
+    // Use a unique temp file per write to avoid cross-request races where multiple
+    // concurrent persists try to rename the same `.tmp` file.
+    const tmp = `${this.filePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await fs.writeFile(tmp, JSON.stringify(this.tasks, null, 2), "utf-8");
     await fs.rename(tmp, this.filePath);
   }
