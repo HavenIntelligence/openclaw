@@ -1387,16 +1387,16 @@ function renderProfile() {
           </div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <label style="font-size:12px;color:var(--muted-foreground)">Agent Timeout</label>
-            <input type="number" min="30" max="600" style="width:60px;padding:4px 8px;border-radius:6px;border:1px solid var(--border,#333);background:var(--bg,#1a1a2e);color:var(--text-strong,#fff);font-size:13px;text-align:center"
-              .value=${String(Math.round((_realProfile?.agentTimeoutMs ?? 600000) / 1000))}
+            <input type="number" min="30" max="1800" style="width:60px;padding:4px 8px;border-radius:6px;border:1px solid var(--border,#333);background:var(--bg,#1a1a2e);color:var(--text-strong,#fff);font-size:13px;text-align:center"
+              .value=${String(Math.round((_realProfile?.agentTimeoutMs ?? 1800000) / 1000))}
               @change=${(e: Event) => {
                 const val = parseInt((e.target as HTMLInputElement).value, 10);
-                if (val >= 30 && val <= 600 && _onSaveProfile) {
+                if (val >= 30 && val <= 1800 && _onSaveProfile) {
                   _onSaveProfile({ agentTimeoutMs: val * 1000 });
                 }
               }} />
             <span style="font-size:11px;color:var(--muted-foreground)">
-              seconds — per-agent timeout before force-kill (30–600s)
+              seconds — per-agent timeout before force-kill (30–1800s)
             </span>
           </div>
         </div>

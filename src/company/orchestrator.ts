@@ -21,7 +21,7 @@ export interface OrchestrationOpts {
   maxDepth?: number;
   /** Max orchestration rounds before forcing final synthesis (default 5). */
   maxRounds?: number;
-  /** Per-agent timeout in ms (default 600 000). */
+  /** Per-agent timeout in ms (default 1 800 000 = 30min). */
   timeoutMs?: number;
   /** Mission ID — groups all tasks from a single user message. Auto-generated if not provided. */
   missionId?: string;
@@ -68,7 +68,7 @@ export class Orchestrator {
   ): Promise<OrchestrationResult> {
     const maxDepth = opts?.maxDepth ?? 3;
     const maxRounds = opts?.maxRounds ?? 5;
-    const timeoutMs = opts?.timeoutMs ?? 600_000;
+    const timeoutMs = opts?.timeoutMs ?? 1_800_000;
     const missionId =
       opts?.missionId ?? `mission_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const start = Date.now();

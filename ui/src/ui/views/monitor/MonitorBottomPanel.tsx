@@ -33,10 +33,7 @@ import {
   LineChart,
   Line,
 } from "recharts";
-
 // ── Deferred chart container (replaces ResponsiveContainer) ─────────────
-// Measures its own size via ResizeObserver, only renders children once
-// dimensions are known. Avoids Recharts width/height=-1 errors.
 function ChartBox({
   children,
   className,
@@ -48,7 +45,6 @@ function ChartBox({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-
   useEffect(() => {
     const el = ref.current;
     if (!el) {
@@ -65,20 +61,21 @@ function ChartBox({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
   return (
     <div ref={ref} className={className} style={style}>
       {size ? children(size.w, size.h) : null}
     </div>
   );
 }
-import { getMockAgentConfig, getMockAgentTelemetry } from "./mockData";
+
 import type {
   Agent,
   AgentSnapshot,
   LifecycleEvent,
   ActivityWindow,
   TaskSessionData,
+  AgentRuntimeConfig,
+  AgentTelemetry,
 } from "./types";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
@@ -93,6 +90,22 @@ interface BottomPanelProps {
   onClose: () => void;
   taskSession: TaskSessionData;
 }
+
+const EMPTY_AGENT_CONFIG: AgentRuntimeConfig = {
+  capabilities: [],
+  serviceAccess: [],
+  fileAccess: [],
+  toolPermissions: [],
+};
+
+const EMPTY_AGENT_TELEMETRY: AgentTelemetry = {
+  platforms: [],
+  summary: "No telemetry recorded for this window yet.",
+  tasks: [],
+  artifacts: [],
+  toolUsage: [],
+  systemMetrics: [],
+};
 
 // ── Icon registry (maps string keys from data to lucide components) ─────
 
@@ -236,16 +249,7 @@ export function MonitorBottomPanel({
     if (!agent) {
       return null;
     }
-    // Prefer real config from backend, fall back to mock
-    const real = taskSession.agentConfigs[agent.id];
-    if (
-      real &&
-      "capabilities" in real &&
-      Array.isArray((real as Record<string, unknown>).capabilities)
-    ) {
-      return real;
-    }
-    return getMockAgentConfig(agent.id);
+    return taskSession.agentConfigs[agent.id] ?? EMPTY_AGENT_CONFIG;
   }, [agent, taskSession]);
   const agentTelemetry = useMemo(() => {
     if (!agent) {
@@ -258,12 +262,7 @@ export function MonitorBottomPanel({
         return windowTelemetry;
       }
     }
-    // Try agent-level telemetry
-    const real = taskSession.agentTelemetry[agent.id];
-    if (real) {
-      return real;
-    }
-    return getMockAgentTelemetry(agent.id);
+    return taskSession.agentTelemetry[agent.id] ?? EMPTY_AGENT_TELEMETRY;
   }, [agent, taskSession, selectedActivityId]);
 
   // Map capability `value` to `A` for Recharts Radar
@@ -348,10 +347,7 @@ export function MonitorBottomPanel({
                 <div className="space-y-2">
                   {agentTelemetry.tasks.length > 0 ? (
                     agentTelemetry.tasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className="group flex items-start gap-2 text-sm text-zinc-300 min-w-0 cursor-default"
-                      >
+                      <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
                         {task.completed ? (
                           <CheckCircle2
                             size={14}
@@ -360,9 +356,7 @@ export function MonitorBottomPanel({
                         ) : (
                           <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
                         )}
-                        <span className="leading-snug overflow-hidden text-ellipsis whitespace-nowrap group-hover:whitespace-normal group-hover:overflow-visible group-hover:text-ellipsis-none">
-                          {task.label}
-                        </span>
+                        <span className="leading-snug">{task.label}</span>
                       </div>
                     ))
                   ) : (
@@ -415,145 +409,151 @@ export function MonitorBottomPanel({
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1">TOOL USAGE DISTRIBUTION</div>
-                <ChartBox
+                <div
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: Math.max(120, agentTelemetry.toolUsage.length * 28 + 30) }}
                 >
-                  {(w, h) => (
-                    <BarChart
-                      width={w}
-                      height={h}
-                      data={agentTelemetry.toolUsage}
-                      layout="vertical"
-                      margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
-                      <XAxis
-                        type="number"
-                        stroke="#666"
-                        fontSize={10}
-                        allowDecimals={false}
-                        domain={[0, (max: number) => Math.max(max, 1)]}
-                      />
-                      <YAxis
-                        dataKey="name"
-                        type="category"
-                        stroke="#888"
-                        fontSize={10}
-                        width={100}
-                        tick={<CustomYAxisTick />}
-                        interval={0}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#18181b",
-                          borderColor: "#3f3f46",
-                          fontSize: "12px",
-                          color: "#e4e4e7",
-                        }}
-                        itemStyle={{ color: "#10b981" }}
-                        cursor={{ fill: "#27272a" }}
-                      />
-                      <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
-                    </BarChart>
-                  )}
-                </ChartBox>
+                  <ChartBox className="w-full h-full">
+                    {(w, h) => (
+                      <BarChart
+                        width={w}
+                        height={h}
+                        data={agentTelemetry.toolUsage}
+                        layout="vertical"
+                        margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          stroke="#666"
+                          fontSize={10}
+                          allowDecimals={false}
+                          domain={[0, (max: number) => Math.max(max, 1)]}
+                        />
+                        <YAxis
+                          dataKey="name"
+                          type="category"
+                          stroke="#888"
+                          fontSize={10}
+                          width={100}
+                          tick={<CustomYAxisTick />}
+                          interval={0}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#18181b",
+                            borderColor: "#3f3f46",
+                            fontSize: "12px",
+                            color: "#e4e4e7",
+                          }}
+                          itemStyle={{ color: "#10b981" }}
+                          cursor={{ fill: "#27272a" }}
+                        />
+                        <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
+                      </BarChart>
+                    )}
+                  </ChartBox>
+                </div>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Cpu size={12} /> SYSTEM MONITORING
                 </div>
-                <ChartBox
+                <div
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: 100 }}
                 >
-                  {(w, h) =>
-                    agentTelemetry.systemMetrics.length > 0 ? (
-                      <LineChart
-                        width={w}
-                        height={h}
-                        data={agentTelemetry.systemMetrics}
-                        margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                        <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} hide />
-                        <YAxis stroke="#666" fontSize={10} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#18181b",
-                            borderColor: "#3f3f46",
-                            fontSize: "12px",
-                            color: "#e4e4e7",
-                          }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="cpu"
-                          stroke="#3b82f6"
-                          strokeWidth={2}
-                          dot={false}
-                          name="CPU (%)"
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="memory"
-                          stroke="#8b5cf6"
-                          strokeWidth={2}
-                          dot={false}
-                          name="Memory (MB)"
-                        />
-                      </LineChart>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
-                        No system metrics available
-                      </div>
-                    )
-                  }
-                </ChartBox>
+                  {agentTelemetry.systemMetrics.length > 0 ? (
+                    <ChartBox className="w-full h-full">
+                      {(w, h) => (
+                        <LineChart
+                          width={w}
+                          height={h}
+                          data={agentTelemetry.systemMetrics}
+                          margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                          <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} hide />
+                          <YAxis stroke="#666" fontSize={10} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#18181b",
+                              borderColor: "#3f3f46",
+                              fontSize: "12px",
+                              color: "#e4e4e7",
+                            }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="cpu"
+                            stroke="#3b82f6"
+                            strokeWidth={2}
+                            dot={false}
+                            name="CPU (%)"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="memory"
+                            stroke="#8b5cf6"
+                            strokeWidth={2}
+                            dot={false}
+                            name="Memory (MB)"
+                          />
+                        </LineChart>
+                      )}
+                    </ChartBox>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                      No system metrics available
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Database size={12} /> CONTEXT WINDOW
                 </div>
-                <ChartBox
+                <div
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: 100 }}
                 >
-                  {(w, h) =>
-                    agentTelemetry.systemMetrics.length > 0 ? (
-                      <LineChart
-                        width={w}
-                        height={h}
-                        data={agentTelemetry.systemMetrics}
-                        margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                        <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} />
-                        <YAxis stroke="#666" fontSize={10} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "#18181b",
-                            borderColor: "#3f3f46",
-                            fontSize: "12px",
-                            color: "#e4e4e7",
-                          }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="context"
-                          stroke="#10b981"
-                          strokeWidth={2}
-                          dot={false}
-                          name="Context (kTokens)"
-                        />
-                      </LineChart>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
-                        No context data available
-                      </div>
-                    )
-                  }
-                </ChartBox>
+                  {agentTelemetry.systemMetrics.length > 0 ? (
+                    <ChartBox className="w-full h-full">
+                      {(w, h) => (
+                        <LineChart
+                          width={w}
+                          height={h}
+                          data={agentTelemetry.systemMetrics}
+                          margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                          <XAxis dataKey="time" stroke="#666" fontSize={10} tickMargin={5} />
+                          <YAxis stroke="#666" fontSize={10} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#18181b",
+                              borderColor: "#3f3f46",
+                              fontSize: "12px",
+                              color: "#e4e4e7",
+                            }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="context"
+                            stroke="#10b981"
+                            strokeWidth={2}
+                            dot={false}
+                            name="Context (kTokens)"
+                          />
+                        </LineChart>
+                      )}
+                    </ChartBox>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                      No context data available
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -667,38 +667,40 @@ export function MonitorBottomPanel({
               <div className="text-xs text-zinc-500 font-mono mb-2 w-full text-left">
                 AGENT CAPABILITIES
               </div>
-              <ChartBox className="w-full h-64 bg-zinc-800/20 rounded-lg border border-zinc-800/50">
-                {(w, h) => (
-                  <RadarChart
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="70%"
-                    data={radarData}
-                    width={w}
-                    height={h}
-                  >
-                    <PolarGrid stroke="#3f3f46" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fill: "#a1a1aa", fontSize: 10 }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                    <Radar
-                      name="Capability"
-                      dataKey="A"
-                      stroke="#10b981"
-                      fill="#10b981"
-                      fillOpacity={0.4}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#18181b",
-                        borderColor: "#3f3f46",
-                        fontSize: "12px",
-                        color: "#e4e4e7",
-                      }}
-                      itemStyle={{ color: "#10b981" }}
-                    />
-                  </RadarChart>
-                )}
-              </ChartBox>
+              <div className="w-full h-64 bg-zinc-800/20 rounded-lg border border-zinc-800/50 flex items-center justify-center">
+                <ChartBox className="w-full h-full">
+                  {(w, h) => (
+                    <RadarChart
+                      width={w}
+                      height={h}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius="70%"
+                      data={radarData}
+                    >
+                      <PolarGrid stroke="#3f3f46" />
+                      <PolarAngleAxis dataKey="subject" tick={{ fill: "#a1a1aa", fontSize: 10 }} />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                      <Radar
+                        name="Capability"
+                        dataKey="A"
+                        stroke="#10b981"
+                        fill="#10b981"
+                        fillOpacity={0.4}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#18181b",
+                          borderColor: "#3f3f46",
+                          fontSize: "12px",
+                          color: "#e4e4e7",
+                        }}
+                        itemStyle={{ color: "#10b981" }}
+                      />
+                    </RadarChart>
+                  )}
+                </ChartBox>
+              </div>
             </div>
             {/* Col 4: Skills & Tools */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3">

@@ -49,6 +49,12 @@ function buildRealAgentConfig(agentId: string): MonitorAgentRuntimeConfig | null
   try {
     const cfg = loadConfig();
     const agentCfg = resolveAgentConfig(cfg, agentId);
+    console.log(
+      `[monitor] buildRealAgentConfig("${agentId}"):`,
+      agentCfg ? "found" : "NOT FOUND",
+      "agents in config:",
+      (cfg.agents?.list ?? []).map((a: { id?: string }) => a?.id).join(", "),
+    );
 
     const tools = agentCfg?.tools;
     const exec = tools?.exec;
