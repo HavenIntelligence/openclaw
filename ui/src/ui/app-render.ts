@@ -2015,6 +2015,13 @@ export function renderApp(state: AppViewState) {
                     state.companyTeams = state.companyTeams.filter((t) => t.id !== id);
                     requestHostUpdate?.();
                   },
+                  onNavigateToMission: (missionId) => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("mission", missionId);
+                    window.history.pushState({}, "", url.toString());
+                    state.setTab("companyMonitor");
+                    requestHostUpdate?.();
+                  },
                 }),
               )
             : nothing
@@ -2432,9 +2439,9 @@ export function renderApp(state: AppViewState) {
                     requestHostUpdate?.();
                   },
                   onNavigateToMission: (missionId) => {
-                    console.log("[app-render] onNavigateToMission:", missionId);
-                    (window as unknown as Record<string, unknown>).__openclawPendingMissionId =
-                      missionId;
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("mission", missionId);
+                    window.history.pushState({}, "", url.toString());
                     state.setTab("companyMonitor");
                     requestHostUpdate?.();
                   },

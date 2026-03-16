@@ -2,7 +2,7 @@
 
 import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
-import type { ClawDockAgent } from "../company-types.ts";
+import type { ClawDockAgent, Task } from "../company-types.ts";
 import { renderCompanyOverview, type CompanyOverviewProps } from "./company-overview.ts";
 
 function createAgent(overrides: Partial<ClawDockAgent> & Pick<ClawDockAgent, "id">): ClawDockAgent {
@@ -70,6 +70,16 @@ function openChatsTab(container: HTMLElement, props: CompanyOverviewProps) {
     textarea.dispatchEvent(new Event("input"));
     render(renderCompanyOverview(props), container);
   }
+}
+
+function openTasksTab(container: HTMLElement, props: CompanyOverviewProps) {
+  render(renderCompanyOverview(props), container);
+  const tasksButton = Array.from(
+    container.querySelectorAll<HTMLButtonElement>(".cd-subnav__btn"),
+  ).find((button) => button.textContent?.includes("Tasks"));
+  expect(tasksButton).toBeTruthy();
+  tasksButton?.click();
+  render(renderCompanyOverview(props), container);
 }
 
 function flushTasks() {
@@ -176,5 +186,41 @@ describe("company overview chats compose", () => {
       container.querySelector<HTMLSelectElement>('select[aria-label="Chat target"]')?.value,
     ).toBe("engineering");
     expect(container.textContent).toContain("gateway closed");
+  });
+});
+
+describe("company overview tasks mission navigation", () => {
+  it("forwards mission clicks through the explicit navigation callback", () => {
+    const container = document.createElement("div");
+    const onNavigateToMission = vi.fn();
+    const tasks = [
+      {
+        id: "task-1",
+        title: "Investigate monitor jump",
+        description: "Debug the mission navigation path",
+        status: "in_progress",
+        priority: "high",
+        assignee: "engineering",
+        assignedBy: "human",
+        reviewedBy: "orchestrator",
+        roundCount: 0,
+        maxRounds: 3,
+        project: "Platform",
+        tags: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        missionId: "mission_debug_123",
+      } as Task & { missionId: string },
+    ];
+    const props = createProps({ tasks, onNavigateToMission });
+
+    openTasksTab(container, props);
+
+    const missionChip = container.querySelector<HTMLElement>(".cd-kb-task__mission");
+    expect(missionChip).not.toBeNull();
+
+    missionChip?.click();
+
+    expect(onNavigateToMission).toHaveBeenCalledWith("mission_debug_123");
   });
 });

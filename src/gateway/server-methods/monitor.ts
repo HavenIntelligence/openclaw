@@ -11,6 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { resolveAgentConfig } from "../../agents/agent-scope.js";
+import { loadConfig } from "../../config/io.js";
 import { resolveStateDir } from "../../config/paths.js";
 import {
   resolveDefaultSessionStorePath,
@@ -18,6 +20,131 @@ import {
 } from "../../config/sessions/paths.js";
 import { loadSessionStore } from "../../config/sessions/store.js";
 import type { GatewayRequestHandlers } from "./types.js";
+
+// ── Build real AgentRuntimeConfig from openclaw.json + agent-meta ───────
+
+interface MonitorAgentRuntimeConfig {
+  capabilities: { subject: string; value: number }[];
+  serviceAccess: {
+    name: string;
+    description: string;
+    icon: string;
+    iconColor: string;
+    enabled: boolean;
+  }[];
+  fileAccess: {
+    path: string;
+    isFolder: boolean;
+    indent: number;
+    access: "rw" | "readonly" | "none";
+  }[];
+  toolPermissions: {
+    name: string;
+    icon: string;
+    level: "allowed" | "ask" | "denied";
+  }[];
+}
+
+function buildRealAgentConfig(agentId: string): MonitorAgentRuntimeConfig | null {
+  try {
+    const cfg = loadConfig();
+    const agentCfg = resolveAgentConfig(cfg, agentId);
+
+    const tools = agentCfg?.tools;
+    const exec = tools?.exec;
+    const fs = tools?.fs;
+    const profile = tools?.profile ?? "full";
+    const allowList = tools?.allow ?? [];
+    const denyList = tools?.deny ?? [];
+
+    // ── Tool Permissions (from exec config) ──
+    const execSecurity = exec?.security ?? "deny";
+    const execAsk = exec?.ask ?? "on-miss";
+    const shellLevel: "allowed" | "ask" | "denied" =
+      execSecurity === "full"
+        ? "allowed"
+        : execSecurity === "allowlist"
+          ? execAsk === "off"
+            ? "allowed"
+            : "ask"
+          : "denied";
+
+    const hasWebSearch = !denyList.includes("web_search");
+    const hasWebFetch = !denyList.includes("web_fetch");
+    const hasDbQuery = !denyList.includes("database_query");
+
+    const toolPermissions = [
+      { name: "Shell Execution", icon: "Terminal", level: shellLevel },
+      {
+        name: "Web Browsing",
+        icon: "Globe",
+        level: hasWebSearch || hasWebFetch ? "allowed" : "denied",
+      },
+      {
+        name: "Database Query",
+        icon: "Database",
+        level: hasDbQuery ? "ask" : "denied",
+      },
+    ];
+
+    // ── Service Access (from tools allow/deny) ──
+    const serviceAccess = [
+      {
+        name: "Internal APIs",
+        description: "Agent-to-agent messaging and task delegation",
+        icon: "Server",
+        iconColor: "text-emerald-400",
+        enabled: profile === "full" || allowList.includes("sessions_spawn"),
+      },
+      {
+        name: "External Web",
+        description: hasWebSearch
+          ? "Search + fetch enabled"
+          : hasWebFetch
+            ? "Fetch only"
+            : "Disabled",
+        icon: "Cloud",
+        iconColor: "text-amber-400",
+        enabled: hasWebSearch || hasWebFetch,
+      },
+    ];
+
+    // ── File Access (from workspace + fs config) ──
+    const workspace = agentCfg?.workspace;
+    const workspaceOnly = fs?.workspaceOnly ?? false;
+    const fileAccess = workspace
+      ? [
+          {
+            path: workspace.replace(/^.*\//, "") + "/",
+            isFolder: true,
+            indent: 0,
+            access: "rw" as const,
+          },
+          ...(workspaceOnly
+            ? [{ path: "(other paths)", isFolder: false, indent: 0, access: "none" as const }]
+            : [{ path: "(system-wide)", isFolder: false, indent: 0, access: "readonly" as const }]),
+        ]
+      : [{ path: "(default workspace)", isFolder: true, indent: 0, access: "rw" as const }];
+
+    // ── Capabilities (derived from profile + model) ──
+    const model = typeof agentCfg?.model === "string" ? agentCfg.model : "";
+    const isHighEnd = model.includes("opus") || model.includes("sonnet");
+    const isCoding = profile === "coding" || profile === "full";
+    const base = isHighEnd ? 80 : 60;
+
+    const capabilities = [
+      { subject: "Reasoning", value: Math.min(100, base + (isHighEnd ? 10 : 0)) },
+      { subject: "Coding", value: Math.min(100, base + (isCoding ? 15 : -10)) },
+      { subject: "Communication", value: Math.min(100, base + 5) },
+      { subject: "Data Analysis", value: Math.min(100, base - 5) },
+      { subject: "Planning", value: Math.min(100, base + (isHighEnd ? 10 : 0)) },
+    ];
+
+    return { capabilities, serviceAccess, fileAccess, toolPermissions };
+  } catch {
+    return null;
+  }
+}
 
 // ── Wire types ──────────────────────────────────────────────────────────
 
@@ -731,19 +858,26 @@ function buildTaskSession(
   }
 
   // ── Chat messages ──
+  // Only the first user message is the actual human request;
+  // subsequent "user" messages are system prompts, tool results, or orchestrator injections.
   const chatMessages: MonitorChatMessage[] = [];
   let msgSeq = 0;
+  let seenFirstUser = false;
   for (const msg of messages) {
     if (chatMessages.length >= 100) {
       break;
     }
 
     if (msg.role === "user" && msg.content) {
-      chatMessages.push({
-        id: `msg-${++msgSeq}`,
-        role: "user",
-        content: msg.content.slice(0, 1500),
-      });
+      if (!seenFirstUser) {
+        seenFirstUser = true;
+        chatMessages.push({
+          id: `msg-${++msgSeq}`,
+          role: "user",
+          content: msg.content.slice(0, 1500),
+        });
+      }
+      // Skip subsequent user messages (system prompts / tool results)
     } else if (msg.role === "assistant") {
       const text = msg.content?.trim();
       if (text) {
@@ -778,7 +912,11 @@ function buildTaskSession(
     agents,
     events,
     annotations: [],
-    agentConfigs: {},
+    agentConfigs: Object.fromEntries(
+      agents
+        .map((a) => [a.id, buildRealAgentConfig(a.domain ?? a.id)])
+        .filter(([, cfg]) => cfg != null),
+    ),
     agentTelemetry,
     metrics: { avgLatency, totalTokens, bottleneckCount: errorCount },
     chatMessages,
@@ -1032,6 +1170,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
   const agentTelemetry: MonitorTaskSession["agentTelemetry"] = {};
   const agentConfigs: MonitorTaskSession["agentConfigs"] = {};
   let orchRawMessages: ParsedMessage[] = [];
+  const agentParsedSessions = new Map<string, ParsedSession>();
   const _missionDuration = globalEnd - globalStart;
   void _missionDuration;
 
@@ -1053,7 +1192,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       toolUsage: [],
       systemMetrics: [],
     };
-    agentConfigs[agent.id] = {};
+    agentConfigs[agent.id] = buildRealAgentConfig(agent.id) ?? {};
 
     // Try to load session JSONL for richer telemetry + chat
     try {
@@ -1098,6 +1237,8 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
         const missionMessages = parsed.messages.filter(
           (m) => m.timestamp >= globalStart - 60_000 && m.timestamp <= globalEnd + 60_000,
         );
+        // Save parsed session for subagent extraction
+        agentParsedSessions.set(agent.id, parsed);
         // Save orchestrator raw messages for phase splitting
         if (agent.id === orchAgentId) {
           orchRawMessages = missionMessages;
@@ -1112,16 +1253,10 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
             toolCounts.set(lower, (toolCounts.get(lower) ?? 0) + 1);
           }
 
-          // Collect chat messages
-          if (msg.role === "user" && msg.content?.trim()) {
-            allAgentMsgs.push({
-              agentId: agent.id,
-              agentName: agent.name,
-              timestamp: msg.timestamp,
-              role: "user",
-              content: msg.content,
-            });
-          } else if (msg.role === "assistant") {
+          // Collect chat messages — only assistant messages from agent sessions.
+          // User-role messages are system prompts / orchestrator injections, not human input.
+          // The actual human request is already added as the mission description.
+          if (msg.role === "assistant") {
             const text = msg.content?.trim();
             if (text) {
               allAgentMsgs.push({
@@ -1290,6 +1425,154 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
 
     agentTelemetry[`w_${orchStartEventId}`] = buildPhaseTelemetry(planMsgs);
     agentTelemetry[`w_${orchResumeEventId}`] = buildPhaseTelemetry(synthMsgs);
+  }
+
+  // ── Add ephemeral subagent lanes from session JSONL ──
+  for (const [parentAgentId, parsed] of agentParsedSessions) {
+    const missionSpawns = parsed.subagentSpawns.filter(
+      (s) => s.spawnTimestamp >= globalStart - 60_000 && s.spawnTimestamp <= globalEnd + 60_000,
+    );
+    if (missionSpawns.length === 0) {
+      continue;
+    }
+
+    const spawnCountByAgent = new Map<string, number>();
+    for (const spawn of missionSpawns) {
+      const count = (spawnCountByAgent.get(spawn.agentId) || 0) + 1;
+      spawnCountByAgent.set(spawn.agentId, count);
+
+      const uuid = spawn.childSessionKey.split(":").pop()?.slice(0, 8) || String(count);
+      const laneId = `sub-${parentAgentId}-${spawn.agentId}-${uuid}`;
+
+      agents.push({
+        id: laneId,
+        name: `${spawn.agentId} #${count}`,
+        role: "Subagent Session",
+        parentId: parentAgentId,
+        domain: spawn.agentId,
+        skills: [],
+        lifecycle: "ephemeral",
+      });
+
+      const spawnOffset = offsetSec(spawn.spawnTimestamp);
+      ev(parentAgentId, spawnOffset, "split", { targetId: laneId });
+      ev(laneId, spawnOffset, "spawn");
+      ev(laneId, spawnOffset + 1, "start");
+
+      if (spawn.completeTimestamp) {
+        const completeOffset = offsetSec(spawn.completeTimestamp);
+        ev(laneId, completeOffset, "merge", { targetId: parentAgentId });
+        ev(laneId, completeOffset, "archive");
+      }
+
+      // Try to load subagent's own session JSONL for real telemetry
+      const duration = spawn.completeTimestamp
+        ? Math.round((spawn.completeTimestamp - spawn.spawnTimestamp) / 1000)
+        : 0;
+      let subTelemetry: MonitorTaskSession["agentTelemetry"][string] = {
+        platforms: [],
+        summary: spawn.task?.slice(0, 100) || `${spawn.agentId} subagent (${duration}s)`,
+        tasks: [],
+        artifacts: [],
+        toolUsage: [],
+        systemMetrics: [],
+      };
+
+      try {
+        // Subagent sessions are stored under the agent's directory with childSessionKey as store key
+        const subAgentDir = spawn.agentId;
+        const subStorePath = resolveDefaultSessionStorePath(subAgentDir);
+        const subStore = loadSessionStore(subStorePath);
+        const subEntry = subStore[spawn.childSessionKey] as Record<string, unknown> | undefined;
+        if (subEntry?.sessionFile) {
+          const rawFile = subEntry.sessionFile as string;
+          const subFile = path.isAbsolute(rawFile)
+            ? rawFile
+            : path.join(resolveSessionTranscriptsDirForAgent(subAgentDir), rawFile);
+          const subParsed = await parseJsonlFile(subFile);
+
+          const tc = new Map<string, number>();
+          let tokens = 0;
+          for (const m of subParsed.messages) {
+            tokens += m.usage?.totalTokens ?? 0;
+            for (const t of m.toolNames ?? []) {
+              const l = t.toLowerCase();
+              tc.set(l, (tc.get(l) ?? 0) + 1);
+            }
+          }
+          const dc = new Map<string, { icon: string; count: number }>();
+          for (const [name, count] of tc) {
+            const dn = TOOL_DISPLAY_MAP[name] || name;
+            const icon = TOOL_ICON_MAP[name] || "Terminal";
+            const ex = dc.get(dn);
+            if (ex) {
+              ex.count += count;
+            } else {
+              dc.set(dn, { icon, count });
+            }
+          }
+          const am = new Map<string, { writes: number; edits: number }>();
+          for (const m of subParsed.messages) {
+            if (!m.toolCalls) {
+              continue;
+            }
+            for (const call of m.toolCalls) {
+              if (!call.filePath) {
+                continue;
+              }
+              const ln = call.name.toLowerCase();
+              if (ln === "write" || ln === "write_file") {
+                const e = am.get(call.filePath) ?? { writes: 0, edits: 0 };
+                e.writes++;
+                am.set(call.filePath, e);
+              } else if (ln === "edit" || ln === "edit_file") {
+                const e = am.get(call.filePath) ?? { writes: 0, edits: 0 };
+                e.edits++;
+                am.set(call.filePath, e);
+              }
+            }
+          }
+
+          subTelemetry = {
+            platforms: derivePlatforms(tc),
+            summary: `${tokens.toLocaleString()} tokens, ${subParsed.messages.length} msgs, ${duration}s`,
+            tasks: subParsed.messages
+              .filter((m) => m.role === "user" && m.content)
+              .slice(0, 5)
+              .map((m, i) => ({
+                id: `t${i}`,
+                label: m.content.length > 80 ? m.content.slice(0, 77) + "..." : m.content,
+                completed: !!subParsed.messages.find(
+                  (nm) =>
+                    nm.role === "assistant" &&
+                    nm.timestamp > m.timestamp &&
+                    nm.stopReason !== "error",
+                ),
+              })),
+            artifacts: [...am.entries()].slice(0, 10).map(([fp, c], i) => ({
+              id: `art-${i}`,
+              title: fp.split("/").pop() ?? fp,
+              description: fp,
+              icon: c.writes > 0 ? "Code" : "FileText",
+              iconColor: c.writes > 0 ? "text-emerald-400" : "text-blue-400",
+              additions: c.writes > 0 ? c.writes : undefined,
+              deletions: c.edits > 0 ? c.edits : undefined,
+              additionUnit: c.writes > 0 ? "writes" : undefined,
+            })),
+            toolUsage: [...dc.entries()]
+              .toSorted((a, b) => b[1].count - a[1].count)
+              .slice(0, 10)
+              .map(([name, { icon, count }]) => ({ name, icon, count })),
+            systemMetrics: [],
+          };
+        }
+      } catch {
+        // best-effort — keep minimal telemetry
+      }
+
+      agentTelemetry[laneId] = subTelemetry;
+      agentConfigs[laneId] = {};
+    }
   }
 
   // ── Merge chat messages from all agents, sorted chronologically ──

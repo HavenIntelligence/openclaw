@@ -330,20 +330,39 @@ let _onUpdateTask: CompanyTasksProps["onUpdateTask"];
 let _onDeleteTask: CompanyTasksProps["onDeleteTask"];
 let _onNavigateToMission: CompanyTasksProps["onNavigateToMission"];
 
-function navigateToMission(missionId: string, target: EventTarget | null) {
-  // Try callback first
-  if (_onNavigateToMission) {
-    _onNavigateToMission(missionId);
-    return;
+function findOpenClawHost(target: EventTarget | null) {
+  let node: Node | null = target instanceof Node ? target : null;
+  while (node) {
+    if (node instanceof HTMLElement && node.tagName.toLowerCase() === "openclaw-app") {
+      return node as HTMLElement & {
+        setTab?: (tab: string) => void;
+        requestUpdate?: () => void;
+      };
+    }
+    if (node.parentNode) {
+      node = node.parentNode;
+      continue;
+    }
+    const root = node.getRootNode?.();
+    if (root instanceof ShadowRoot) {
+      node = root.host;
+      continue;
+    }
+    node = null;
   }
-  // Direct fallback: set pending mission + find host element to switch tab
-  (window as unknown as Record<string, unknown>).__openclawPendingMissionId = missionId;
-  const el = target instanceof HTMLElement ? target : null;
-  const host = el?.closest("openclaw-app") as
-    | (HTMLElement & { setTab?: (tab: string) => void })
-    | null;
-  if (host?.setTab) {
-    host.setTab("companyMonitor");
+  return document.querySelector("openclaw-app");
+}
+
+function navigateToMission(missionId: string, _target: EventTarget | null) {
+  // Put mission ID in URL query param (no page reload), then switch tab.
+  // MonitorApp reads ?mission= on mount. company-monitor.ts resets React root
+  // on tab switch (old DOM detached), so useEffect([]) always fires fresh.
+  const url = new URL(window.location.href);
+  url.searchParams.set("mission", missionId);
+  window.history.pushState({}, "", url.toString());
+  const app = document.querySelector("openclaw-app");
+  if (app?.setTab) {
+    app.setTab("companyMonitor");
   }
 }
 
@@ -352,10 +371,9 @@ let _detailTaskId: string | null = null; // clicked task to show detail panel
 
 /** Trigger a Lit re-render by finding the host element from an event target. */
 function requestHostRender(target: EventTarget | null) {
-  const el = target instanceof HTMLElement ? target : null;
-  const host = el?.closest("openclaw-app");
-  if (host && "requestUpdate" in host) {
-    (host as HTMLElement & { requestUpdate: () => void }).requestUpdate();
+  const host = findOpenClawHost(target);
+  if (host?.requestUpdate) {
+    host.requestUpdate();
   }
 }
 // Active task list — set on each render from props or demo data.

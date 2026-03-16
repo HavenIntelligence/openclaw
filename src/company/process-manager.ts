@@ -96,7 +96,7 @@ export class ProcessManager {
     opts?: RunOpts & { timeoutMs?: number },
   ): Promise<TaskResult> {
     const { runId, resultPromise } = this.spawnTask(agentId, prompt, opts);
-    const timeoutMs = opts?.timeoutMs ?? 120_000;
+    const timeoutMs = opts?.timeoutMs ?? 600_000;
 
     return new Promise<TaskResult>((resolve, reject) => {
       let timedOut = false;

@@ -17,14 +17,13 @@ import {
   Server,
   Cloud,
 } from "lucide-react";
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useRef, useEffect } from "react";
 import {
   Radar,
   RadarChart,
   PolarGrid,
   PolarAngleAxis,
   PolarRadiusAxis,
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -34,6 +33,45 @@ import {
   LineChart,
   Line,
 } from "recharts";
+
+// ── Deferred chart container (replaces ResponsiveContainer) ─────────────
+// Measures its own size via ResizeObserver, only renders children once
+// dimensions are known. Avoids Recharts width/height=-1 errors.
+function ChartBox({
+  children,
+  className,
+  style,
+}: {
+  children: (width: number, height: number) => React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (width > 0 && height > 0) {
+        setSize({ w: Math.floor(width), h: Math.floor(height) });
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className={className} style={style}>
+      {size ? children(size.w, size.h) : null}
+    </div>
+  );
+}
 import { getMockAgentConfig, getMockAgentTelemetry } from "./mockData";
 import type {
   Agent,
@@ -194,7 +232,21 @@ export function MonitorBottomPanel({
   void _snap;
   const activity = activityWindows.find((w) => w.id === selectedActivityId);
 
-  const agentConfig = useMemo(() => (agent ? getMockAgentConfig(agent.id) : null), [agent]);
+  const agentConfig = useMemo(() => {
+    if (!agent) {
+      return null;
+    }
+    // Prefer real config from backend, fall back to mock
+    const real = taskSession.agentConfigs[agent.id];
+    if (
+      real &&
+      "capabilities" in real &&
+      Array.isArray((real as Record<string, unknown>).capabilities)
+    ) {
+      return real;
+    }
+    return getMockAgentConfig(agent.id);
+  }, [agent, taskSession]);
   const agentTelemetry = useMemo(() => {
     if (!agent) {
       return null;
@@ -202,17 +254,13 @@ export function MonitorBottomPanel({
     // Try activity-window-specific telemetry first (e.g. orchestrator phases)
     if (selectedActivityId) {
       const windowTelemetry = taskSession.agentTelemetry[selectedActivityId];
-      if (
-        windowTelemetry &&
-        (windowTelemetry.toolUsage.length > 0 ||
-          windowTelemetry.tasks.length > 0 ||
-          windowTelemetry.artifacts.length > 0)
-      ) {
+      if (windowTelemetry) {
         return windowTelemetry;
       }
     }
+    // Try agent-level telemetry
     const real = taskSession.agentTelemetry[agent.id];
-    if (real && (real.toolUsage.length > 0 || real.tasks.length > 0 || real.artifacts.length > 0)) {
+    if (real) {
       return real;
     }
     return getMockAgentTelemetry(agent.id);
@@ -300,7 +348,10 @@ export function MonitorBottomPanel({
                 <div className="space-y-2">
                   {agentTelemetry.tasks.length > 0 ? (
                     agentTelemetry.tasks.map((task) => (
-                      <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
+                      <div
+                        key={task.id}
+                        className="group flex items-start gap-2 text-sm text-zinc-300 min-w-0 cursor-default"
+                      >
                         {task.completed ? (
                           <CheckCircle2
                             size={14}
@@ -309,7 +360,9 @@ export function MonitorBottomPanel({
                         ) : (
                           <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
                         )}
-                        <span className="leading-snug">{task.label}</span>
+                        <span className="leading-snug overflow-hidden text-ellipsis whitespace-nowrap group-hover:whitespace-normal group-hover:overflow-visible group-hover:text-ellipsis-none">
+                          {task.label}
+                        </span>
                       </div>
                     ))
                   ) : (
@@ -362,12 +415,14 @@ export function MonitorBottomPanel({
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1">TOOL USAGE DISTRIBUTION</div>
-                <div
+                <ChartBox
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: Math.max(120, agentTelemetry.toolUsage.length * 28 + 30) }}
                 >
-                  <ResponsiveContainer width="100%" height="100%">
+                  {(w, h) => (
                     <BarChart
+                      width={w}
+                      height={h}
                       data={agentTelemetry.toolUsage}
                       layout="vertical"
                       margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
@@ -401,20 +456,22 @@ export function MonitorBottomPanel({
                       />
                       <Bar dataKey="count" fill="#10b981" radius={[0, 4, 4, 0]} barSize={14} />
                     </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                  )}
+                </ChartBox>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Cpu size={12} /> SYSTEM MONITORING
                 </div>
-                <div
+                <ChartBox
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: 100 }}
                 >
-                  {agentTelemetry.systemMetrics.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                  {(w, h) =>
+                    agentTelemetry.systemMetrics.length > 0 ? (
                       <LineChart
+                        width={w}
+                        height={h}
                         data={agentTelemetry.systemMetrics}
                         margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
                       >
@@ -446,25 +503,27 @@ export function MonitorBottomPanel({
                           name="Memory (MB)"
                         />
                       </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
-                      No system metrics available
-                    </div>
-                  )}
-                </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                        No system metrics available
+                      </div>
+                    )
+                  }
+                </ChartBox>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1 flex items-center gap-2">
                   <Database size={12} /> CONTEXT WINDOW
                 </div>
-                <div
+                <ChartBox
                   className="w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50"
                   style={{ height: 100 }}
                 >
-                  {agentTelemetry.systemMetrics.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
+                  {(w, h) =>
+                    agentTelemetry.systemMetrics.length > 0 ? (
                       <LineChart
+                        width={w}
+                        height={h}
                         data={agentTelemetry.systemMetrics}
                         margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
                       >
@@ -488,13 +547,13 @@ export function MonitorBottomPanel({
                           name="Context (kTokens)"
                         />
                       </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
-                      No context data available
-                    </div>
-                  )}
-                </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-xs text-zinc-600 italic">
+                        No context data available
+                      </div>
+                    )
+                  }
+                </ChartBox>
               </div>
             </div>
           </div>
@@ -608,9 +667,16 @@ export function MonitorBottomPanel({
               <div className="text-xs text-zinc-500 font-mono mb-2 w-full text-left">
                 AGENT CAPABILITIES
               </div>
-              <div className="w-full h-64 bg-zinc-800/20 rounded-lg border border-zinc-800/50 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+              <ChartBox className="w-full h-64 bg-zinc-800/20 rounded-lg border border-zinc-800/50">
+                {(w, h) => (
+                  <RadarChart
+                    cx="50%"
+                    cy="50%"
+                    outerRadius="70%"
+                    data={radarData}
+                    width={w}
+                    height={h}
+                  >
                     <PolarGrid stroke="#3f3f46" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: "#a1a1aa", fontSize: 10 }} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -631,8 +697,8 @@ export function MonitorBottomPanel({
                       itemStyle={{ color: "#10b981" }}
                     />
                   </RadarChart>
-                </ResponsiveContainer>
-              </div>
+                )}
+              </ChartBox>
             </div>
             {/* Col 4: Skills & Tools */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3">

@@ -640,7 +640,7 @@ export const companyHandlers: GatewayRequestHandlers = {
           try {
             const profile = svc.profileStore.get();
             const maxRounds = profile.maxOrchestrationRounds ?? 5;
-            const timeoutMs = profile.agentTimeoutMs ?? 120_000;
+            const timeoutMs = profile.agentTimeoutMs ?? 600_000;
             const result = await svc.orchestrator.execute(director.id, content, {
               maxRounds,
               timeoutMs,
@@ -697,7 +697,7 @@ export const companyHandlers: GatewayRequestHandlers = {
     }
     const svc = getCompanyService();
     try {
-      const timeoutMs2 = svc.profileStore.get().agentTimeoutMs ?? 120_000;
+      const timeoutMs2 = svc.profileStore.get().agentTimeoutMs ?? 600_000;
       const result = await svc.orchestrator.execute(id, prompt, {
         maxDepth,
         timeoutMs: timeoutMs2,

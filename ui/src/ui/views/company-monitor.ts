@@ -27,14 +27,14 @@ async function mountReact(container: Element, client: GatewayClient | null) {
     const { MonitorApp } = monitorModule;
     const React = reactModule.default || reactModule;
 
-    // Read and consume pending mission navigation from company-tasks
-    const win = window as unknown as Record<string, unknown>;
-    const pendingMissionId = (win.__openclawPendingMissionId as string) || null;
-    if (pendingMissionId) {
-      delete win.__openclawPendingMissionId;
-    }
-
-    const props = { isDark: true, client, pendingMissionId };
+    // Use ?mission= param as React key: when it changes, React destroys
+    // the old MonitorApp instance and creates a new one (re-runs useEffect([])),
+    // WITHOUT unmounting the React root or clearing the DOM container.
+    // If ?mission= in URL, use a unique key to force React to remount MonitorApp.
+    // This re-runs useEffect([]) without destroying the DOM container.
+    const missionParam = new URLSearchParams(window.location.search).get("mission");
+    const key = missionParam ? `m-${Date.now()}` : undefined;
+    const props = { isDark: true, client, key };
 
     if (_reactRoot && _mountEl === container) {
       _reactRoot.render(React.createElement(MonitorApp, props));
@@ -99,15 +99,24 @@ function scheduleMountOnce(client: GatewayClient | null) {
 
 export function renderCompanyMonitor(props: CompanyMonitorProps) {
   const client = props.client ?? null;
-  // Always update the global client ref so React can access it
   setMonitorClient(client);
-  // Also expose on window for cross-framework access
   (window as unknown as Record<string, unknown>).__openclawMonitorClient = client;
-  // If already mounted and client changed, re-render with new client
-  if (_reactRoot && _mountEl && client !== _lastClient) {
-    _lastClient = client;
-    void mountReact(_mountEl, client);
+
+  // If mount element was removed from DOM (tab switch), reset
+  if (_mountEl && !_mountEl.isConnected) {
+    _reactRoot = null;
+    _mountEl = null;
+  }
+
+  // Re-render if client changed or ?mission= param present, otherwise schedule mount
+  const hasMissionParam = new URLSearchParams(window.location.search).has("mission");
+  if (_reactRoot && _mountEl) {
+    if (client !== _lastClient || hasMissionParam) {
+      _lastClient = client;
+      void mountReact(_mountEl, client);
+    }
   } else {
+    _mountScheduled = false;
     scheduleMountOnce(client);
   }
 
@@ -115,25 +124,13 @@ export function renderCompanyMonitor(props: CompanyMonitorProps) {
     <style>
       .content:has(#monitor-react-root) {
         padding: 0 !important;
-        padding-top: 6px !important;
         overflow: hidden !important;
+        position: relative !important;
       }
       .content:has(#monitor-react-root) > .content-header {
         display: none !important;
       }
-      .content:has(#monitor-react-root) > #monitor-react-root {
-        margin-top: 0 !important;
-      }
     </style>
-    <div
-      style="
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        position: relative;
-        background: var(--bg, #0e1015);
-      "
-      id="monitor-react-root"
-    ></div>
+    <div style="display: contents" id="monitor-react-root"></div>
   `;
 }

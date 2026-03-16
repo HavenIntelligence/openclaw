@@ -51,7 +51,7 @@ interface DashboardProps {
 // ── Resize constants ────────────────────────────────────────────────────
 const LEFT_DEFAULT = 256;
 const LEFT_MIN = 120;
-const RIGHT_DEFAULT = 360;
+const RIGHT_DEFAULT = 420;
 const RIGHT_MIN = 200;
 const BOTTOM_DEFAULT = 280;
 const BOTTOM_MIN = 100;
@@ -188,20 +188,30 @@ function formatTimeCompact(seconds: number, unit: TimeUnit): string {
 export function MonitorDashboard(props: DashboardProps) {
   const { currentTime, setCurrentTime, isPlaying, setIsPlaying, agents, snapshots, maxTime } =
     props;
+  const hasSelectedMissionOption =
+    props.selectedMissionId != null &&
+    props.missionSummaries.some((mission) => mission.missionId === props.selectedMissionId);
 
   const leftHeadersRef = useRef<HTMLDivElement>(null);
   const topAxisRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const hasAutoFaded = useRef(false);
-  const [timeScale, setTimeScale] = useState(maxTime > 300 ? 2 : 6);
+  const [timeScale, setTimeScale] = useState(4);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [timeUnit, setTimeUnit] = useState<TimeUnit>(maxTime > 300 ? "min" : "s");
 
-  // Reset local activity selection when session/mission changes
+  // Reset activity selection when mission/session changes (use stable ID, not object ref)
   useEffect(() => {
     setSelectedActivityId(null);
-  }, [props.taskSession]);
+    hasAutoFaded.current = false;
+  }, [props.taskSession.id]);
+
+  // Adjust time scale/unit when maxTime changes
+  useEffect(() => {
+    setTimeScale(maxTime > 300 ? 2 : 6);
+    setTimeUnit(maxTime > 300 ? "min" : "s");
+  }, [maxTime]);
 
   // Resizable panels
   const left = useResizable("x", LEFT_DEFAULT, LEFT_MIN);
@@ -251,6 +261,18 @@ export function MonitorDashboard(props: DashboardProps) {
 
   // Whether bottom panel has content to show
   const hasBottomContent = !!(props.selectedAgentId || selectedActivityId);
+  console.log(
+    "[dashboard] hasBottomContent:",
+    hasBottomContent,
+    "agentId:",
+    props.selectedAgentId,
+    "activityId:",
+    selectedActivityId,
+    "bottom.collapsed:",
+    bottom.collapsed,
+    "bottom.size:",
+    bottom.size,
+  );
 
   return (
     <div className="flex h-full w-full bg-[#0a0a0a] text-zinc-300 font-sans overflow-hidden selection:bg-emerald-500/30">
@@ -309,6 +331,14 @@ export function MonitorDashboard(props: DashboardProps) {
               style={{ maxWidth: 340, fontFamily: "var(--mono)" }}
               title="Select mission"
             >
+              {!hasSelectedMissionOption && props.selectedMissionId && (
+                <option
+                  value={props.selectedMissionId}
+                  style={{ background: "var(--card, #161920)" }}
+                >
+                  {props.selectedMissionId} - Loading...
+                </option>
+              )}
               {props.missionSummaries.map((m) => (
                 <option
                   key={m.missionId}
@@ -561,6 +591,7 @@ export function MonitorDashboard(props: DashboardProps) {
                           style={{ top: 16 + index * 64, height: 64 }}
                           onClick={(e) => {
                             e.stopPropagation();
+                            console.log("[dashboard] agent click:", agent.id, agent.name);
                             props.setSelectedAgentId(agent.id);
                             setSelectedActivityId(null);
                             const agentWindows = props.activityWindows
@@ -633,6 +664,7 @@ export function MonitorDashboard(props: DashboardProps) {
                   timeScale={timeScale}
                   selectedActivityId={selectedActivityId}
                   onActivityClick={(activityId, agentId) => {
+                    console.log("[dashboard] activity click:", activityId, "agent:", agentId);
                     setSelectedActivityId(activityId);
                     props.setSelectedAgentId(agentId);
                   }}

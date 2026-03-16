@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import {
   Play,
   Pause,
@@ -13,8 +14,17 @@ import {
   Zap,
   MessageSquare,
 } from "lucide-react";
+import { marked } from "marked";
 import React, { useState, useRef } from "react";
 import type { Agent, LifecycleEvent, AgentSnapshot, TaskSessionData } from "./types";
+
+// Configure marked for compact inline rendering
+marked.setOptions({ breaks: true, gfm: true });
+
+function renderMarkdown(text: string): string {
+  const html = marked.parse(text, { async: false });
+  return DOMPurify.sanitize(html);
+}
 
 // ── Agent avatar colors (deterministic by name) ──────────────────────────
 const AGENT_COLORS = [
@@ -264,9 +274,10 @@ export function MonitorRightPanel({
                       {msg.content}
                     </div>
                   ) : (
-                    <div className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap bg-zinc-700/25 px-3 py-2 rounded-2xl rounded-tl-sm border border-zinc-600/25">
-                      {msg.content}
-                    </div>
+                    <div
+                      className="monitor-chat-md text-sm text-zinc-200 leading-relaxed bg-zinc-700/25 px-3 py-2 rounded-2xl rounded-tl-sm border border-zinc-600/25"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                    />
                   )}
                 </div>
               </div>
