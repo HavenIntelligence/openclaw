@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "./monitor.css";
 import { deriveState } from "./derivation";
-import { mockTaskSession, mockTimelineEnd } from "./mockData";
 import { MonitorDashboard } from "./MonitorDashboard";
 import type { TaskSessionData, MissionSummary } from "./types";
 
@@ -23,19 +22,20 @@ type SessionSummary = {
   endTime: number | null;
 };
 
-const mockEntry: SessionEntry = {
-  session: mockTaskSession,
-  maxTime: mockTimelineEnd,
+const EMPTY_TASK_SESSION: TaskSessionData = {
+  id: "empty",
+  name: "",
+  description: undefined,
+  startTime: 0,
+  endTime: null,
+  agents: [],
+  events: [],
+  annotations: [],
+  agentConfigs: {},
+  agentTelemetry: {},
+  metrics: { avgLatency: "–", totalTokens: 0, bottleneckCount: 0 },
+  chatMessages: [],
 };
-
-const mockSummaries: SessionSummary[] = [
-  {
-    id: mockTaskSession.id,
-    name: mockTaskSession.name,
-    startTime: mockTaskSession.startTime,
-    endTime: mockTaskSession.endTime,
-  },
-];
 
 // Inline fetch to avoid cross-module resolution issues
 async function doFetchSessions(client: {
@@ -60,28 +60,26 @@ async function doFetchSessions(client: {
       }>;
       list?: SessionSummary[];
     };
-    if (!raw?.sessions?.length) {
-      return null;
-    }
+    const sessions = (raw?.sessions ?? []).map((wire) => ({
+      session: {
+        id: wire.id,
+        name: wire.name,
+        description: wire.description,
+        startTime: wire.startTime,
+        endTime: wire.endTime,
+        agents: wire.agents ?? [],
+        events: wire.events ?? [],
+        annotations: wire.annotations ?? [],
+        agentConfigs: wire.agentConfigs ?? {},
+        agentTelemetry: wire.agentTelemetry ?? {},
+        metrics: wire.metrics ?? { avgLatency: "N/A", totalTokens: 0, bottleneckCount: 0 },
+        chatMessages: wire.chatMessages ?? [],
+      },
+      maxTime: wire.maxTime ?? 250,
+    }));
     return {
-      sessions: raw.sessions.map((wire) => ({
-        session: {
-          id: wire.id,
-          name: wire.name,
-          description: wire.description,
-          startTime: wire.startTime,
-          endTime: wire.endTime,
-          agents: wire.agents ?? [],
-          events: wire.events ?? [],
-          annotations: wire.annotations ?? [],
-          agentConfigs: wire.agentConfigs ?? {},
-          agentTelemetry: wire.agentTelemetry ?? {},
-          metrics: wire.metrics ?? { avgLatency: "N/A", totalTokens: 0, bottleneckCount: 0 },
-          chatMessages: wire.chatMessages ?? [],
-        },
-        maxTime: wire.maxTime ?? 250,
-      })),
-      list: raw.list ?? [],
+      sessions,
+      list: raw?.list ?? [],
     };
   } catch (err) {
     console.error("[monitor] fetch error:", err);
@@ -151,10 +149,11 @@ export function MonitorApp(props: MonitorAppProps) {
     ((window as Record<string, unknown>).__openclawMonitorClient as MonitorAppProps["client"]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("missions");
-  const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([mockEntry]);
-  const [summaries, setSummaries] = useState<SessionSummary[]>(mockSummaries);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>(mockTaskSession.id);
+  const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([]);
+  const [summaries, setSummaries] = useState<SessionSummary[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   // Mission state
   const [missionSummaries, setMissionSummaries] = useState<MissionSummary[]>([]);
@@ -188,17 +187,18 @@ export function MonitorApp(props: MonitorAppProps) {
         console.log("[monitor] No gateway client yet, will retry...");
         return false;
       }
-      console.log("[monitor] Gateway client found, fetching sessions...");
       const result = await doFetchSessions(c);
-      if (result && result.sessions.length > 0) {
-        setSessionEntries(result.sessions);
-        setSummaries(result.list);
-        setSelectedSessionId(result.sessions[0].session.id);
+      if (!result) {
+        return false;
+      }
+      setSessionsLoaded(true);
+      setSessionEntries(result.sessions);
+      setSummaries(result.list);
+      if (result.sessions.length > 0) {
+        setSelectedSessionId((prev) => prev ?? result.sessions[0].session.id);
         setDataLoaded(true);
-        console.log("[monitor] Loaded", result.sessions.length, "real sessions");
         return true;
       }
-      console.log("[monitor] No sessions returned, using mock data");
       return false;
     };
 
@@ -212,6 +212,21 @@ export function MonitorApp(props: MonitorAppProps) {
     }, 2000);
     return () => clearInterval(interval);
   }, [dataLoaded, resolvedClient]);
+
+  useEffect(() => {
+    if (sessionEntries.length === 0) {
+      if (selectedSessionId !== null) {
+        setSelectedSessionId(null);
+      }
+      return;
+    }
+    if (
+      !selectedSessionId ||
+      !sessionEntries.some((entry) => entry.session.id === selectedSessionId)
+    ) {
+      setSelectedSessionId(sessionEntries[0].session.id);
+    }
+  }, [sessionEntries, selectedSessionId]);
 
   // Load missions when switching to mission mode
   useEffect(() => {
@@ -264,19 +279,25 @@ export function MonitorApp(props: MonitorAppProps) {
   }, []);
 
   // Current session (session mode or mission mode)
-  const currentEntry = useMemo(() => {
-    if (viewMode === "missions" && missionEntry) {
+  const baseEntry = useMemo(() => {
+    if (viewMode === "missions") {
       return missionEntry;
     }
-    return (
-      sessionEntries.find((e) => e.session.id === selectedSessionId) ??
-      sessionEntries[0] ??
-      mockEntry
-    );
+    if (sessionEntries.length === 0) {
+      return null;
+    }
+    if (selectedSessionId) {
+      return (
+        sessionEntries.find((entry) => entry.session.id === selectedSessionId) ?? sessionEntries[0]
+      );
+    }
+    return sessionEntries[0];
   }, [viewMode, missionEntry, sessionEntries, selectedSessionId]);
 
-  const session = currentEntry.session;
-  const MAX_TIME = currentEntry.maxTime;
+  const activeEntry = baseEntry ?? null;
+  const session = activeEntry?.session ?? null;
+  const MAX_TIME = session ? activeEntry.maxTime : 1;
+  const safeSession = session ?? EMPTY_TASK_SESSION;
 
   // Playback state
   const [currentTime, setCurrentTime] = useState(0);
@@ -293,7 +314,14 @@ export function MonitorApp(props: MonitorAppProps) {
   }, [selectedSessionId, selectedMissionId]);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (!session) {
+      setCurrentTime(0);
+      setIsPlaying(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (!isPlaying || !session || MAX_TIME <= 0) {
       return;
     }
     const tickMs = MAX_TIME > 600 ? 10 : MAX_TIME > 120 ? 50 : 100;
@@ -308,36 +336,66 @@ export function MonitorApp(props: MonitorAppProps) {
       });
     }, tickMs);
     return () => clearInterval(timer);
-  }, [isPlaying, MAX_TIME]);
+  }, [isPlaying, MAX_TIME, session]);
 
-  const derivedState = useMemo(
-    () => deriveState(session.agents, session.events, currentTime),
-    [session, currentTime],
-  );
+  const derivedState = useMemo(() => {
+    if (!session) {
+      return { snapshots: [], activityWindows: [], lineageEdges: [] };
+    }
+    return deriveState(session.agents, session.events, currentTime);
+  }, [session, currentTime]);
+
+  const showEmptyHint =
+    viewMode === "missions"
+      ? missionsLoaded && !baseEntry
+      : sessionsLoaded && sessionEntries.length === 0;
+  const emptyTitle = viewMode === "missions" ? "No missions yet" : "No sessions yet";
+  const emptyHintMessage =
+    viewMode === "missions" ? (
+      <>
+        Missions will appear after orchestrations emit delegation plans. Send a task from Company
+        Tasks or trigger <code>openclaw clawdock orchestrate</code> to capture one.
+      </>
+    ) : (
+      <>
+        Run <code>openclaw clawdock orchestrate</code> or send a message in Talk to Company to start
+        a session.
+      </>
+    );
 
   return (
-    <MonitorDashboard
-      currentTime={currentTime}
-      setCurrentTime={setCurrentTime}
-      isPlaying={isPlaying}
-      setIsPlaying={setIsPlaying}
-      selectedAgentId={selectedAgentId}
-      setSelectedAgentId={setSelectedAgentId}
-      hoveredAgentId={hoveredAgentId}
-      setHoveredAgentId={setHoveredAgentId}
-      agents={session.agents}
-      events={session.events}
-      maxTime={MAX_TIME}
-      isDark={isDark}
-      taskSession={session}
-      availableTaskSessions={summaries}
-      onSessionChange={setSelectedSessionId}
-      viewMode={viewMode}
-      onViewModeChange={handleViewModeChange}
-      missionSummaries={missionSummaries}
-      selectedMissionId={selectedMissionId}
-      onMissionChange={setSelectedMissionId}
-      {...derivedState}
-    />
+    <div className="monitor-shell">
+      <MonitorDashboard
+        currentTime={currentTime}
+        setCurrentTime={setCurrentTime}
+        isPlaying={isPlaying}
+        setIsPlaying={setIsPlaying}
+        selectedAgentId={selectedAgentId}
+        setSelectedAgentId={setSelectedAgentId}
+        hoveredAgentId={hoveredAgentId}
+        setHoveredAgentId={setHoveredAgentId}
+        agents={safeSession.agents}
+        events={safeSession.events}
+        maxTime={MAX_TIME}
+        isDark={isDark}
+        taskSession={safeSession}
+        availableTaskSessions={summaries}
+        onSessionChange={setSelectedSessionId}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        missionSummaries={missionSummaries}
+        selectedMissionId={selectedMissionId}
+        onMissionChange={setSelectedMissionId}
+        {...derivedState}
+      />
+      {showEmptyHint && (
+        <div className="monitor-empty-overlay" aria-live="polite">
+          <div className="monitor-empty-card">
+            <h3>{emptyTitle}</h3>
+            <p>{emptyHintMessage}</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

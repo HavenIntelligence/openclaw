@@ -152,6 +152,58 @@
   background-color: color-mix(in srgb, var(--monitor-hover) 50%, transparent) !important;
 }
 
+/* ── Empty-state overlay ───────────────────────────────────────────────── */
+#monitor-react-root .monitor-shell {
+  position: relative;
+  height: 100%;
+}
+
+#monitor-react-root .monitor-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 24px;
+}
+
+#monitor-react-root .monitor-empty-card {
+  max-width: 420px;
+  background: color-mix(in srgb, var(--monitor-card) 85%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--monitor-border) 80%, transparent);
+  border-radius: 16px;
+  padding: 24px 28px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  text-align: center;
+  pointer-events: auto;
+}
+
+#monitor-react-root .monitor-empty-card h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--monitor-text-strong);
+}
+
+#monitor-react-root .monitor-empty-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--monitor-muted);
+}
+
+#monitor-react-root .monitor-empty-card code {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--monitor-indigo) 15%, transparent);
+  color: var(--monitor-text-strong);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 /* ── Emerald → --ok ── */
 #monitor-react-root .text-emerald-300 {
   color: var(--monitor-ok) !important;

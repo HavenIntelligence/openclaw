@@ -208,6 +208,7 @@ export class Orchestrator {
                 status: "review",
                 tokensUsed: result.tokensUsed,
                 roundCount: curRound,
+                reviewNote: result.content.slice(0, 400).replace(/\s+/g, " ").trim() || undefined,
               });
               if (updated) {
                 this.broadcast("company.task.updated", { task: updated });
@@ -216,19 +217,6 @@ export class Orchestrator {
                   orchId,
                   `[TASK_REVIEW] ${entry.agentId} completed round ${curRound}: ${task?.title ?? taskId}`,
                 );
-                // Auto-approve to done for now (assigner reviews during synthesis)
-                const approved = await this.taskStore.update(taskId, {
-                  status: "done",
-                  reviewNote: "Auto-approved after orchestration synthesis",
-                });
-                if (approved) {
-                  this.broadcast("company.task.updated", { task: approved });
-                  this.logSystem(
-                    entry.agentId,
-                    orchId,
-                    `[TASK_DONE] ${agentId} reviewed and approved: ${task?.title ?? taskId}`,
-                  );
-                }
               }
             }
             return result;
@@ -313,6 +301,18 @@ export class Orchestrator {
       if (updated) {
         this.broadcast("company.task.updated", { task: updated });
       }
+    }
+
+    const trimmedFinal = currentSynthesis.trim();
+    if (trimmedFinal) {
+      const finalEntry = this.logStore.append({
+        agentId,
+        runId: orchId,
+        type: "output",
+        content: trimmedFinal,
+        tokensUsed: totalTokens,
+      });
+      this.broadcast("company.agent.log", { agentId, runId: orchId, entry: finalEntry });
     }
 
     this.emitPhase(orchId, agentId, "complete", depth, missionId);

@@ -17,6 +17,15 @@ const AVATAR_FILES = [
   "aivatar_hex_24.svg",
 ] as const;
 
+const AVATAR_BASE_PATH = "../../../assets/avatars/";
+
+const AVATAR_URLS = Object.fromEntries(
+  AVATAR_FILES.map((filename) => [
+    filename,
+    new URL(`${AVATAR_BASE_PATH}${filename}`, import.meta.url).href,
+  ]),
+) as Record<(typeof AVATAR_FILES)[number], string>;
+
 function simpleHash(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
@@ -26,24 +35,20 @@ function simpleHash(s: string): number {
   return Math.abs(h);
 }
 
-/** Public base path for avatars (e.g. /avatars/ in dev, or /control-ui/avatars/ when base path set). */
-export function avatarBasePath(): string {
-  const base = typeof import.meta !== "undefined" && import.meta.env?.BASE_URL;
-  // Relative base (e.g. "./") breaks under nested routes like /company/office,
-  // so only use it when it's an absolute sub-path (e.g. "/control-ui/").
-  if (base && base.startsWith("/") && base !== "/") {
-    return `${base.replace(/\/$/, "")}/avatars/`;
-  }
-  return "/avatars/";
-}
-
 /** Deterministic avatar filename for an agent id. Same id => same avatar in org chart and office. */
 export function getAvatarFilenameForAgent(agentId: string): string {
   const idx = simpleHash(agentId) % AVATAR_FILES.length;
   return AVATAR_FILES[idx];
 }
 
+export function getAvatarVariantForAgent(agentId: string): { url: string; hue: number } {
+  const filename = getAvatarFilenameForAgent(agentId);
+  const url = AVATAR_URLS[filename];
+  const hue = simpleHash(`${agentId}-variant`) % 360;
+  return { url, hue };
+}
+
 /** Full URL for an avatar filename (for use in img src or SVG image href). */
 export function getAvatarUrlForAgent(agentId: string): string {
-  return `${avatarBasePath()}${getAvatarFilenameForAgent(agentId)}`;
+  return getAvatarVariantForAgent(agentId).url;
 }

@@ -2317,6 +2317,10 @@ export function renderApp(state: AppViewState) {
                     await deleteAgent(state, agentId);
                     requestHostUpdate?.();
                   },
+                  onUpdateAgent: async (agentId, params) => {
+                    await updateAgent(state, agentId, params);
+                    requestHostUpdate?.();
+                  },
                 });
               })
             : nothing

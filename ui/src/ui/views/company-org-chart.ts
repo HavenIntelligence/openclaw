@@ -1,5 +1,5 @@
 import { html, svg } from "lit";
-import { getAvatarUrlForAgent } from "../company-avatars.ts";
+import { getAvatarVariantForAgent } from "../company-avatars.ts";
 import type { ClawDockAgent } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
@@ -20,6 +20,190 @@ type OrgNode = {
   x?: number;
   y?: number;
 };
+
+type OrgAgentUpdatePayload = {
+  role?: string;
+  team?: string;
+  emoji?: string;
+  color?: string;
+  runtime?: string;
+  description?: string;
+  agentCli?: string;
+  systemPrompt?: string;
+  reportTo?: string | null;
+};
+
+type OrgExportAgent = {
+  id: string;
+  name?: string;
+  role?: string;
+  team?: string;
+  emoji?: string;
+  color?: string;
+  runtime?: string;
+  description?: string;
+  agentCli?: string;
+  systemPrompt?: string;
+  reportTo?: string | null;
+};
+
+function serializeAgents(agents: ClawDockAgent[]): OrgExportAgent[] {
+  return agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    role: agent.role,
+    team: agent.team,
+    emoji: agent.emoji,
+    color: agent.color,
+    runtime: agent.runtime,
+    description: agent.description,
+    agentCli: agent.agentCli,
+    systemPrompt: agent.systemPrompt,
+    reportTo: agent.reportTo ?? null,
+  }));
+}
+
+function downloadOrgChartJson(agents: ClawDockAgent[]): void {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    agents: serializeAgents(agents),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const filename = `clawdock-org-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function parseOrgImportPayload(payload: unknown): OrgExportAgent[] {
+  if (Array.isArray(payload)) {
+    return payload as OrgExportAgent[];
+  }
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as Record<string, unknown>).agents)
+  ) {
+    return ((payload as Record<string, unknown>).agents ?? []) as OrgExportAgent[];
+  }
+  return [];
+}
+
+async function importOrgChartFromFile(params: {
+  file: File;
+  existingAgents: ClawDockAgent[];
+  onCreate?: CompanyOrgChartProps["onCreateAgent"];
+  onUpdate?: CompanyOrgChartProps["onUpdateAgent"];
+}): Promise<void> {
+  if (!params.onCreate && !params.onUpdate) {
+    window.alert("Import is unavailable in read-only mode.");
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await params.file.text());
+  } catch {
+    window.alert("Could not parse JSON file.");
+    return;
+  }
+  const entries = parseOrgImportPayload(parsed).filter(
+    (entry) => entry && typeof entry === "object" && typeof entry.id === "string",
+  );
+  if (entries.length === 0) {
+    window.alert("No agents were found in the selected file.");
+    return;
+  }
+  const existing = new Map(params.existingAgents.map((agent) => [agent.id, agent]));
+  let created = 0;
+  let updated = 0;
+  for (const entry of entries) {
+    const id = entry.id.trim();
+    if (!id) {
+      continue;
+    }
+    let normalizedReportTo: string | null | undefined;
+    if (entry.reportTo === undefined) {
+      normalizedReportTo = undefined;
+    } else if (entry.reportTo === null) {
+      normalizedReportTo = null;
+    } else if (typeof entry.reportTo === "string") {
+      normalizedReportTo = entry.reportTo.trim() || null;
+    } else {
+      normalizedReportTo = null;
+    }
+    const normalized: OrgExportAgent = {
+      ...entry,
+      id,
+      name: entry.name?.trim(),
+      role: entry.role?.trim(),
+      team: entry.team?.trim(),
+      emoji: entry.emoji?.trim(),
+      color: entry.color?.trim(),
+      runtime: entry.runtime?.trim(),
+      description: entry.description?.trim(),
+      agentCli: entry.agentCli?.trim(),
+      systemPrompt: entry.systemPrompt?.trim(),
+      reportTo: normalizedReportTo,
+    };
+    const updatePayload: OrgAgentUpdatePayload = {};
+    if (normalized.role) {
+      updatePayload.role = normalized.role;
+    }
+    if (normalized.team) {
+      updatePayload.team = normalized.team;
+    }
+    if (normalized.emoji) {
+      updatePayload.emoji = normalized.emoji;
+    }
+    if (normalized.color) {
+      updatePayload.color = normalized.color;
+    }
+    if (normalized.runtime) {
+      updatePayload.runtime = normalized.runtime;
+    }
+    if (normalized.description) {
+      updatePayload.description = normalized.description;
+    }
+    if (normalized.agentCli !== undefined) {
+      updatePayload.agentCli = normalized.agentCli;
+    }
+    if (normalized.systemPrompt !== undefined) {
+      updatePayload.systemPrompt = normalized.systemPrompt;
+    }
+    if (normalized.reportTo !== undefined) {
+      updatePayload.reportTo = normalized.reportTo;
+    }
+    if (existing.has(id)) {
+      if (params.onUpdate && Object.keys(updatePayload).length > 0) {
+        await params.onUpdate(id, updatePayload);
+        updated += 1;
+      }
+      continue;
+    }
+    if (params.onCreate) {
+      await params.onCreate({
+        id,
+        name: normalized.name || id,
+        role: normalized.role,
+        team: normalized.team,
+        emoji: normalized.emoji,
+        color: normalized.color,
+        runtime: normalized.runtime,
+        description: normalized.description,
+        agentCli: normalized.agentCli,
+        systemPrompt: normalized.systemPrompt,
+        reportTo: normalized.reportTo ?? null,
+      });
+      created += 1;
+    }
+  }
+  window.alert(`Import complete — ${updated} updated, ${created} created.`);
+}
 
 // ── Demo data ─────────────────────────────────────────────────────────────────
 const ORG_TREE: OrgNode = {
@@ -463,6 +647,8 @@ const QUICK_ROLES: OrgNode[] = [
 let _idCounter = 200;
 let _onCreateAgent: CompanyOrgChartProps["onCreateAgent"];
 let _onDeleteAgent: CompanyOrgChartProps["onDeleteAgent"];
+let _onUpdateAgent: CompanyOrgChartProps["onUpdateAgent"];
+const ORG_IMPORT_INPUT_ID = "cd-oc-import-file";
 
 // ── Node SVG renderer ─────────────────────────────────────────────────────────
 function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
@@ -475,6 +661,7 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
   const hasTools = (n.toolCount ?? 0) > 0;
   const hasCrons = (n.cronCount ?? 0) > 0;
   const desc = n.description ? truncate(n.description, 30) : "";
+  const avatar = getAvatarVariantForAgent(n.id);
 
   // Build chip list
   type Chip = { text: string; color: string; bg: string };
@@ -594,7 +781,15 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
         stroke-width="1.5"
       />
       <g clip-path="url(#cd-oc-avatar-clip)">
-        <image href="${getAvatarUrlForAgent(n.id)}" x="11" y="25" width="34" height="34" preserveAspectRatio="xMidYMid slice" />
+        <image
+          href="${avatar.url}"
+          x="11"
+          y="25"
+          width="34"
+          height="34"
+          preserveAspectRatio="xMidYMid slice"
+          style="filter:hue-rotate(${avatar.hue}deg) saturate(1.08);"
+        />
       </g>
 
       <!-- Status dot -->
@@ -667,9 +862,15 @@ export type CompanyOrgChartProps = {
     role?: string;
     team?: string;
     emoji?: string;
+    color?: string;
+    runtime?: string;
+    description?: string;
+    agentCli?: string;
+    systemPrompt?: string;
     reportTo?: string | null;
   }) => void | Promise<void>;
   onDeleteAgent?: (agentId: string) => void | Promise<void>;
+  onUpdateAgent?: (agentId: string, params: OrgAgentUpdatePayload) => void | Promise<void>;
 };
 
 let _organizationRunning = false;
@@ -677,6 +878,7 @@ let _organizationRunning = false;
 export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
   _onCreateAgent = props.onCreateAgent;
   _onDeleteAgent = props.onDeleteAgent;
+  _onUpdateAgent = props.onUpdateAgent;
   _organizationRunning = props.organizationRunning ?? false;
   const hasRealAgents = props.agents && props.agents.length > 0;
   // Update active tree from real agents each render
@@ -715,6 +917,7 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
       : rawH;
 
   const selected = nodes.find((n) => n.id === _selectedId) ?? null;
+  const selectedAvatar = selected ? getAvatarVariantForAgent(selected.id) : null;
 
   // Build set of node IDs connected to selected (for edge highlight)
   const connectedIds = new Set<string>();
@@ -926,6 +1129,48 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
 
           <div class="cd-oc-float-toolbar__sep"></div>
 
+          <button
+            class="cd-oc-float-btn"
+            @click=${() => {
+              downloadOrgChartJson(props.agents ?? []);
+            }}
+            title="Export current org structure as JSON"
+          >
+            ${icons.download} Export JSON
+          </button>
+          <button
+            class="cd-oc-float-btn cd-oc-float-btn--ghost"
+            @click=${() => {
+              const input = document.getElementById(ORG_IMPORT_INPUT_ID) as HTMLInputElement | null;
+              input?.click();
+            }}
+            title="Import agents from JSON"
+          >
+            ${icons.upload} Import JSON
+          </button>
+          <input
+            id=${ORG_IMPORT_INPUT_ID}
+            type="file"
+            accept="application/json"
+            class="cd-oc-import-input"
+            @change=${(event: Event) => {
+              const input = event.currentTarget as HTMLInputElement;
+              const file = input.files?.[0];
+              if (!file) {
+                return;
+              }
+              void importOrgChartFromFile({
+                file,
+                existingAgents: props.agents ?? [],
+                onCreate: _onCreateAgent,
+                onUpdate: _onUpdateAgent,
+              });
+              input.value = "";
+            }}
+          />
+
+          <div class="cd-oc-float-toolbar__sep"></div>
+
           <!-- Layout toggle (Teams / Hierarchy) -->
           <div class="cd-oc-layout-toggle">
             <button
@@ -1043,7 +1288,18 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
           ? html`
         <div class="cd-oc-detail-float" style="--accent-c:${selected.color}">
           <div class="cd-oc-detail-float__header">
-            <img class="cd-oc-detail__avatar" src="${getAvatarUrlForAgent(selected.id)}" alt="" width="36" height="36" />
+            ${
+              selectedAvatar
+                ? html`<img
+                    class="cd-oc-detail__avatar"
+                    src="${selectedAvatar.url}"
+                    alt=""
+                    width="36"
+                    height="36"
+                    style="filter:hue-rotate(${selectedAvatar.hue}deg) saturate(1.05);"
+                  />`
+                : ""
+            }
             <div style="flex:1;min-width:0">
               <div class="cd-oc-detail__name">${selected.name}</div>
               <div class="cd-oc-detail__role" style="color:${selected.color}">${selected.role}</div>

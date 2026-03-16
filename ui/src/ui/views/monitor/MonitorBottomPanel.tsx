@@ -34,13 +34,14 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { getMockAgentConfig, getMockAgentTelemetry } from "./mockData";
 import type {
   Agent,
   AgentSnapshot,
   LifecycleEvent,
   ActivityWindow,
   TaskSessionData,
+  AgentRuntimeConfig,
+  AgentTelemetry,
 } from "./types";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
@@ -55,6 +56,22 @@ interface BottomPanelProps {
   onClose: () => void;
   taskSession: TaskSessionData;
 }
+
+const EMPTY_AGENT_CONFIG: AgentRuntimeConfig = {
+  capabilities: [],
+  serviceAccess: [],
+  fileAccess: [],
+  toolPermissions: [],
+};
+
+const EMPTY_AGENT_TELEMETRY: AgentTelemetry = {
+  platforms: [],
+  summary: "No telemetry recorded for this window yet.",
+  tasks: [],
+  artifacts: [],
+  toolUsage: [],
+  systemMetrics: [],
+};
 
 // ── Icon registry (maps string keys from data to lucide components) ─────
 
@@ -194,7 +211,12 @@ export function MonitorBottomPanel({
   void _snap;
   const activity = activityWindows.find((w) => w.id === selectedActivityId);
 
-  const agentConfig = useMemo(() => (agent ? getMockAgentConfig(agent.id) : null), [agent]);
+  const agentConfig = useMemo(() => {
+    if (!agent) {
+      return null;
+    }
+    return taskSession.agentConfigs[agent.id] ?? EMPTY_AGENT_CONFIG;
+  }, [agent, taskSession]);
   const agentTelemetry = useMemo(() => {
     if (!agent) {
       return null;
@@ -202,20 +224,11 @@ export function MonitorBottomPanel({
     // Try activity-window-specific telemetry first (e.g. orchestrator phases)
     if (selectedActivityId) {
       const windowTelemetry = taskSession.agentTelemetry[selectedActivityId];
-      if (
-        windowTelemetry &&
-        (windowTelemetry.toolUsage.length > 0 ||
-          windowTelemetry.tasks.length > 0 ||
-          windowTelemetry.artifacts.length > 0)
-      ) {
+      if (windowTelemetry) {
         return windowTelemetry;
       }
     }
-    const real = taskSession.agentTelemetry[agent.id];
-    if (real && (real.toolUsage.length > 0 || real.tasks.length > 0 || real.artifacts.length > 0)) {
-      return real;
-    }
-    return getMockAgentTelemetry(agent.id);
+    return taskSession.agentTelemetry[agent.id] ?? EMPTY_AGENT_TELEMETRY;
   }, [agent, taskSession, selectedActivityId]);
 
   // Map capability `value` to `A` for Recharts Radar

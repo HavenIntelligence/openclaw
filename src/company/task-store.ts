@@ -2,6 +2,46 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Task, TaskPriority, TaskStatus } from "./types.js";
 
+const DONE_ALIASES = new Set(["done", "complete", "completed", "finished", "verified", "approved"]);
+const REVIEW_ALIASES = new Set([
+  "review",
+  "verify",
+  "verifying",
+  "verification",
+  "qa",
+  "quality_check",
+]);
+const IN_PROGRESS_ALIASES = new Set(["in_progress", "progress", "processing", "working", "wip"]);
+
+function normalizeStatus(value: string | undefined): TaskStatus {
+  if (!value) {
+    return "backlog";
+  }
+  const normalized = value.toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "backlog") {
+    return "backlog";
+  }
+  if (normalized === "in_progress") {
+    return "in_progress";
+  }
+  if (normalized === "review" || normalized === "verify") {
+    return "review";
+  }
+  if (normalized === "done") {
+    return "done";
+  }
+  if (DONE_ALIASES.has(normalized)) {
+    return "done";
+  }
+  if (REVIEW_ALIASES.has(normalized)) {
+    return "review";
+  }
+  if (IN_PROGRESS_ALIASES.has(normalized)) {
+    return "in_progress";
+  }
+  return "backlog";
+}
+
 function generateId(): string {
   return `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -17,7 +57,12 @@ export class TaskStore {
   async load(): Promise<void> {
     try {
       const raw = await fs.readFile(this.filePath, "utf-8");
-      this.tasks = JSON.parse(raw) as Task[];
+      const parsed = JSON.parse(raw) as Task[];
+      this.tasks = parsed.map((task) => ({
+        ...task,
+        status: normalizeStatus((task as { status?: string }).status),
+        assignee: task.assignee ?? task.agentId,
+      }));
     } catch {
       this.tasks = [];
     }
@@ -30,8 +75,9 @@ export class TaskStore {
     missionId?: string;
   }): Task[] {
     let result = this.tasks;
-    if (filters?.status) {
-      result = result.filter((t) => t.status === filters.status);
+    const statusFilter = filters?.status ? normalizeStatus(filters.status) : undefined;
+    if (statusFilter) {
+      result = result.filter((t) => normalizeStatus(t.status) === statusFilter);
     }
     if (filters?.assignee) {
       result = result.filter((t) => t.assignee === filters.assignee);
@@ -89,7 +135,7 @@ export class TaskStore {
     params: Omit<Task, "id" | "createdAt" | "updatedAt"> & { status?: TaskStatus },
   ): Promise<Task> {
     const now = Date.now();
-    const status = params.status ?? "backlog";
+    const status = normalizeStatus(params.status);
     const task: Task = {
       ...params,
       status,
@@ -111,9 +157,12 @@ export class TaskStore {
     }
     const now = Date.now();
     const prev = this.tasks[idx];
+    const nextStatus =
+      partial.status !== undefined ? normalizeStatus(partial.status as string) : prev.status;
     const next: Task = {
       ...prev,
       ...partial,
+      status: nextStatus,
       id,
       createdAt: prev.createdAt,
       updatedAt: now,
@@ -122,13 +171,14 @@ export class TaskStore {
       next.agentId = partial.agentId ?? partial.assignee;
     }
     if (
-      partial.status === "in_progress" &&
+      partial.status !== undefined &&
+      nextStatus === "in_progress" &&
       prev.status !== "in_progress" &&
       next.startTime == null
     ) {
       next.startTime = now;
     }
-    if (partial.status === "done" && next.endTime == null) {
+    if (partial.status !== undefined && nextStatus === "done" && next.endTime == null) {
       next.endTime = now;
     }
     this.tasks[idx] = next;
