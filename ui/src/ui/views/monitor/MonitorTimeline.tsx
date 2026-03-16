@@ -3,6 +3,8 @@ import {
   AlertCircle,
   Archive,
   GitBranch,
+  GitFork,
+  GitMerge,
   RotateCcw,
   Sparkles,
   Zap,
@@ -33,6 +35,7 @@ interface TimelineProps {
 const LANE_HEIGHT = 64;
 const PADDING_TOP = 16;
 const PADDING_LEFT = 16;
+const SUBAGENT_BAR_INSET_PX = 10;
 
 export function MonitorTimeline({
   currentTime,
@@ -149,109 +152,206 @@ export function MonitorTimeline({
         className="absolute inset-0 pointer-events-none overflow-visible"
         style={{ width: "100%", height: "100%" }}
       >
-        {lineageEdges.map((edge) => {
-          const y1 = getAgentY(edge.sourceId);
-          const y2 = getAgentY(edge.targetId);
-          const x1 = getX(edge.timestamp);
-          let targetX = x1,
-            sourceX = x1;
-          const sourcePastWindows = activityWindows.filter(
-            (w) => w.agentId === edge.sourceId && w.startTime <= edge.timestamp,
-          );
-          if (sourcePastWindows.length > 0) {
-            const lastWindow = sourcePastWindows.reduce((prev, current) =>
-              prev.startTime > current.startTime ? prev : current,
-            );
-            const endTime = lastWindow.endTime !== null ? lastWindow.endTime : currentTime;
-            if (endTime < edge.timestamp) {
-              sourceX = getX(endTime);
+        {(() => {
+          // SUBAGENT_BAR_INSET_PX defined at module level
+          const elements: React.ReactNode[] = [];
+
+          // Classify edges
+          const splitEdges: typeof lineageEdges = [];
+          const mergeEdges: typeof lineageEdges = [];
+          const otherEdges: typeof lineageEdges = [];
+          for (const edge of lineageEdges) {
+            if (edge.type === "split") {
+              splitEdges.push(edge);
+            } else if (edge.type === "merge") {
+              mergeEdges.push(edge);
+            } else {
+              otherEdges.push(edge);
             }
           }
-          if (["split", "handoff", "merge"].includes(edge.type)) {
-            const pastEvents = events
-              .filter((e) => e.agentId === edge.targetId && e.timestamp <= edge.timestamp)
-              .toSorted((a, b) => b.timestamp - a.timestamp);
-            const lastStateEvent = pastEvents.find((e) =>
-              ["spawn", "start", "resume", "pause", "error", "archive"].includes(e.type),
+
+          // ── SPLIT: group by sourceId + timestamp → one icon per batch ──
+          const splitBatches = new Map<string, typeof lineageEdges>();
+          for (const edge of splitEdges) {
+            const key = `${edge.sourceId}@${edge.timestamp}`;
+            const batch = splitBatches.get(key) || [];
+            batch.push(edge);
+            splitBatches.set(key, batch);
+          }
+
+          for (const [, batch] of splitBatches) {
+            const sourceId = batch[0].sourceId;
+            const ts = batch[0].timestamp;
+            const sourceY = getAgentY(sourceId);
+            // If Split & Wait, anchor lines at the pause position (bar end)
+            const followingPause = events.find(
+              (e) =>
+                e.agentId === sourceId &&
+                e.type === "pause" &&
+                e.timestamp > ts &&
+                e.timestamp <= ts + 2,
             );
-            const isActive =
-              lastStateEvent &&
-              (lastStateEvent.type === "start" || lastStateEvent.type === "resume");
-            if (!isActive) {
-              const nextStartEvent = events.find(
+            const anchorX = followingPause ? getX(followingPause.timestamp) : getX(ts);
+            const targetYs = batch.map((e) => getAgentY(e.targetId));
+            const maxY = Math.max(...targetYs);
+
+            // Vertical trunk from source down to span all targets
+            elements.push(
+              <g key={`split-trunk-${sourceId}-${ts}`} style={{ opacity: 0.5 }}>
+                <path
+                  d={`M ${anchorX} ${sourceY} L ${anchorX} ${maxY}`}
+                  stroke="#7c3aed"
+                  strokeWidth={1.5}
+                  fill="none"
+                />
+              </g>,
+            );
+
+            // Horizontal branches to each target → point at activity bar start (with visual offset)
+            for (const edge of batch) {
+              const targetY = getAgentY(edge.targetId);
+              // Find target's start timestamp to calculate bar position
+              const targetStart = events.find(
                 (e) =>
                   e.agentId === edge.targetId &&
-                  (e.type === "start" || e.type === "resume") &&
+                  e.type === "start" &&
                   e.timestamp >= edge.timestamp,
               );
-              if (nextStartEvent) {
-                targetX = getX(nextStartEvent.timestamp);
-              }
+              const barStartX =
+                (targetStart ? getX(targetStart.timestamp) : getX(edge.timestamp)) +
+                SUBAGENT_BAR_INSET_PX;
+              elements.push(
+                <g key={edge.id} style={{ opacity: 0.5 }}>
+                  <path
+                    d={`M ${anchorX} ${targetY} L ${barStartX - 5} ${targetY}`}
+                    stroke="#7c3aed"
+                    strokeWidth={1.5}
+                    fill="none"
+                  />
+                  <polygon
+                    points={`${barStartX - 5},${targetY - 3} ${barStartX},${targetY} ${barStartX - 5},${targetY + 3}`}
+                    fill="#7c3aed"
+                  />
+                </g>,
+              );
             }
+
+            // The combined icon is rendered via the event markers section below (skip SVG icon here)
+            // We suppress individual split event icons and render one combined icon instead
           }
-          const currentX = getX(currentTime);
-          const drawX2 = Math.min(targetX, currentX);
-          const isHighlighted = hasHighlight
-            ? highlightSet.has(edge.sourceId) && highlightSet.has(edge.targetId)
-            : true;
-          let opacity = hasHighlight ? (isHighlighted ? 1 : 0.1) : 0.4;
-          let strokeWidth = isHighlighted ? 2 : 1;
-          if (selectedActivityId) {
-            const sourceWin = getWindowForAgentAtTime(edge.sourceId, edge.timestamp, true);
-            const targetWin = getWindowForAgentAtTime(edge.targetId, edge.timestamp, false);
-            const isConnectedToSelected =
-              sourceWin?.id === selectedActivityId || targetWin?.id === selectedActivityId;
-            opacity = isConnectedToSelected ? 1 : 0.1;
-            strokeWidth = isConnectedToSelected ? 2 : 1;
-          }
-          const strokeColor = edge.type === "handoff" ? "#3b82f6" : "#52525b";
-          const isDown = y2 > y1;
-          const hasDelay = sourceX < x1;
-          const delayPathD = hasDelay ? `M ${sourceX} ${y1} L ${x1} ${y1}` : "";
-          let mainPathD = `M ${x1} ${y1}`;
-          let arrowPoints = "";
-          if (targetX > x1) {
-            if (drawX2 > x1) {
-              const lineEndX = Math.max(x1, drawX2 - 6);
-              mainPathD += ` L ${x1} ${y2} L ${lineEndX} ${y2}`;
-              arrowPoints = `${drawX2 - 6},${y2 - 4} ${drawX2},${y2} ${drawX2 - 6},${y2 + 4}`;
-            } else {
-              mainPathD += ` L ${x1} ${y2}`;
-            }
-          } else {
+
+          // ── OTHER edges (handoff, backtrack) ──
+          for (const edge of otherEdges) {
+            const y1 = getAgentY(edge.sourceId);
+            const y2 = getAgentY(edge.targetId);
+            const x1 = getX(edge.timestamp);
+            const strokeColor = edge.type === "handoff" ? "#3b82f6" : "#52525b";
+            const isDown = y2 > y1;
+            let pathD = `M ${x1} ${y1}`;
             if (isDown) {
-              mainPathD += ` L ${x1} ${y2 - 6}`;
-              arrowPoints = `${x1 - 4},${y2 - 6} ${x1 + 4},${y2 - 6} ${x1},${y2}`;
+              pathD += ` L ${x1} ${y2 - 6}`;
             } else {
-              mainPathD += ` L ${x1} ${y2 + 6}`;
-              arrowPoints = `${x1 - 4},${y2 + 6} ${x1 + 4},${y2 + 6} ${x1},${y2}`;
+              pathD += ` L ${x1} ${y2 + 6}`;
+            }
+            elements.push(
+              <g key={edge.id} style={{ opacity: 0.4 }}>
+                <path d={pathD} stroke={strokeColor} strokeWidth={1} fill="none" />
+              </g>,
+            );
+          }
+
+          // ── MERGE: group by spawn batch, not by targetId ──
+          // Find the spawn batch each merge belongs to by matching sourceId to split edges
+          const sourceToSpawnTs = new Map<string, number>();
+          for (const edge of splitEdges) {
+            if (edge.targetId) {
+              sourceToSpawnTs.set(edge.targetId, edge.timestamp);
             }
           }
-          return (
-            <g key={edge.id} style={{ opacity, transition: "opacity 0.2s ease" }}>
-              {hasDelay && (
+
+          // Group merges by their spawn batch timestamp + targetId
+          const mergeBatches = new Map<string, typeof lineageEdges>();
+          for (const edge of mergeEdges) {
+            const spawnTs = sourceToSpawnTs.get(edge.sourceId) ?? edge.timestamp;
+            const batchKey = `${edge.targetId}@${spawnTs}`;
+            const batch = mergeBatches.get(batchKey) || [];
+            batch.push(edge);
+            mergeBatches.set(batchKey, batch);
+          }
+
+          for (const [batchKey, merges] of mergeBatches) {
+            const targetId = batchKey.split("@")[0];
+            const targetY = getAgentY(targetId);
+
+            // Find the Merge&Resume icon X on the orchestrator (= resume event timestamp)
+            const latestMergeTs = Math.max(...merges.map((e) => e.timestamp));
+            const resumeEvent = events.find(
+              (r) =>
+                r.agentId === targetId &&
+                r.type === "resume" &&
+                r.timestamp >= latestMergeTs &&
+                r.timestamp - latestMergeTs <= 3,
+            );
+            const mergeIconX = resumeEvent ? getX(resumeEvent.timestamp) : getX(latestMergeTs);
+
+            // Each source: line starts from archive icon center (= archive timestamp, no offset)
+            for (const edge of merges) {
+              const sourceY = getAgentY(edge.sourceId);
+              // Archive is 1s after merge; use the archive event's timestamp for icon alignment
+              const archiveEvent = events.find(
+                (a) =>
+                  a.agentId === edge.sourceId &&
+                  a.type === "archive" &&
+                  a.timestamp >= edge.timestamp &&
+                  a.timestamp - edge.timestamp <= 2,
+              );
+              const sourceX = archiveEvent ? getX(archiveEvent.timestamp) : getX(edge.timestamp);
+
+              // Horizontal line from archive icon center to merge icon X
+              elements.push(
+                <g key={edge.id} style={{ opacity: 0.3 }}>
+                  <path
+                    d={`M ${sourceX} ${sourceY} L ${mergeIconX} ${sourceY}`}
+                    stroke="#52525b"
+                    strokeWidth={1.5}
+                    fill="none"
+                  />
+                </g>,
+              );
+            }
+
+            // Vertical collector at mergeIconX + arrow up to Merge&Resume icon
+            const allSourceYs = merges.map((e) => getAgentY(e.sourceId));
+            const minSourceY = Math.min(...allSourceYs);
+            const maxSourceY = Math.max(...allSourceYs);
+            elements.push(
+              <g key={`merge-batch-${batchKey}`} style={{ opacity: 0.4 }}>
+                {minSourceY !== maxSourceY && (
+                  <path
+                    d={`M ${mergeIconX} ${minSourceY} L ${mergeIconX} ${maxSourceY}`}
+                    stroke="#52525b"
+                    strokeWidth={1.5}
+                    fill="none"
+                  />
+                )}
                 <path
-                  d={delayPathD}
-                  stroke={strokeColor}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray="4 4"
+                  d={`M ${mergeIconX} ${minSourceY} L ${mergeIconX} ${targetY + 6}`}
+                  stroke="#52525b"
+                  strokeWidth={1.5}
                   fill="none"
-                  opacity={0.5}
                 />
-              )}
-              <path
-                d={mainPathD}
-                stroke={strokeColor}
-                strokeWidth={strokeWidth}
-                strokeDasharray={edge.type === "handoff" ? "4 4" : "none"}
-                fill="none"
-              />
-              <circle cx={sourceX} cy={y1} r={3} fill={strokeColor} />
-              {hasDelay && <circle cx={x1} cy={y1} r={2} fill={strokeColor} opacity={0.5} />}
-              {arrowPoints && <polygon points={arrowPoints} fill={strokeColor} />}
-            </g>
-          );
-        })}
+                <polygon
+                  points={`${mergeIconX - 4},${targetY + 6} ${mergeIconX + 4},${targetY + 6} ${mergeIconX},${targetY}`}
+                  fill="#52525b"
+                />
+              </g>,
+            );
+          }
+
+          // ── SPLIT+WAIT combined icons (rendered as HTML overlay, not SVG) ──
+          // These replace individual split/pause event markers at the same timestamp
+          return elements;
+        })()}
       </svg>
 
       {/* Activity Windows */}
@@ -259,13 +359,19 @@ export function MonitorTimeline({
         const agent = agents.find((a) => a.id === window.agentId);
         const lifecycle = agent?.lifecycle || "persistent";
         const y = getAgentY(window.agentId) - 10;
-        const x = getX(window.startTime);
-        const width =
+        // Subagent bars inset on both sides so split/merge arrows connect cleanly
+        const inset = lifecycle === "ephemeral" ? SUBAGENT_BAR_INSET_PX : 0;
+        const x = getX(window.startTime) + inset;
+        const rawWidth =
           ((window.endTime !== null ? window.endTime : currentTime) - window.startTime) * timeScale;
-        const isHighlighted = hasHighlight ? highlightSet.has(window.agentId) : true;
-        let opacity = hasHighlight ? (isHighlighted ? 1 : 0.2) : 1;
+        const width = rawWidth - inset;
+        let opacity = 1;
         if (selectedActivityId) {
+          // When an activity is selected, only highlight connected windows
           opacity = connectedWindows.has(window.id) ? 1 : 0.1;
+        } else if (hasHighlight) {
+          // When hovering/selecting an agent, highlight its lineage
+          opacity = highlightSet.has(window.agentId) ? 1 : 0.2;
         }
         let colorClass = "bg-emerald-500/20 border-emerald-500/50 hover:bg-emerald-500/40";
         if (lifecycle === "ephemeral") {
@@ -303,12 +409,185 @@ export function MonitorTimeline({
         );
       })}
 
-      {/* Event Markers */}
+      {/* Split+Wait and Merge+Resume combined icons */}
+      {(() => {
+        // Detect split batches and their wait status
+        const splitEvents = events.filter((e) => e.type === "split" && e.timestamp <= currentTime);
+        const batchKeys = new Set<string>();
+        const batches: {
+          sourceId: string;
+          timestamp: number;
+          iconTimestamp: number;
+          count: number;
+          isWait: boolean;
+        }[] = [];
+        for (const e of splitEvents) {
+          const key = `${e.agentId}@${e.timestamp}`;
+          if (batchKeys.has(key)) {
+            continue;
+          }
+          batchKeys.add(key);
+          const count = splitEvents.filter(
+            (s) => s.agentId === e.agentId && s.timestamp === e.timestamp,
+          ).length;
+          // Check if a pause follows immediately (= Split & Wait)
+          const followingPause = events.find(
+            (p) =>
+              p.agentId === e.agentId &&
+              p.type === "pause" &&
+              p.timestamp > e.timestamp &&
+              p.timestamp <= e.timestamp + 2,
+          );
+          const isWait = !!followingPause;
+          // If wait, place icon at the pause position (= bar end); otherwise at split position
+          const iconTimestamp = isWait && followingPause ? followingPause.timestamp : e.timestamp;
+          batches.push({
+            sourceId: e.agentId,
+            timestamp: e.timestamp,
+            iconTimestamp,
+            count,
+            isWait,
+          });
+        }
+        // Detect merge batches by matching to spawn batches
+        const mergeEvents = events.filter((e) => e.type === "merge" && e.timestamp <= currentTime);
+        const splitByTarget = new Map<string, number>(); // targetId (subagent) → spawn timestamp
+        for (const e of events) {
+          if (e.type === "split" && e.targetId) {
+            splitByTarget.set(e.targetId, e.timestamp);
+          }
+        }
+        // Group merges by spawn batch
+        const mergeBatchMap = new Map<
+          string,
+          { targetId: string; resumeTimestamp: number; count: number }
+        >();
+        for (const e of mergeEvents) {
+          const spawnTs = splitByTarget.get(e.agentId) ?? 0;
+          const key = `${e.targetId}@${spawnTs}`;
+          const existing = mergeBatchMap.get(key);
+          if (existing) {
+            existing.count++;
+            existing.resumeTimestamp = Math.max(existing.resumeTimestamp, e.timestamp);
+          } else {
+            mergeBatchMap.set(key, {
+              targetId: e.targetId!,
+              count: 1,
+              resumeTimestamp: e.timestamp,
+            });
+          }
+        }
+        const mergeBatches = [...mergeBatchMap.entries()].map(([key, v]) => ({
+          key,
+          targetId: v.targetId,
+          resumeTimestamp: v.resumeTimestamp,
+          count: v.count,
+          // Check if a resume follows the last merge in this batch
+          hasResume: events.some(
+            (r) =>
+              r.agentId === v.targetId &&
+              r.type === "resume" &&
+              r.timestamp >= v.resumeTimestamp &&
+              r.timestamp <= v.resumeTimestamp + 3,
+          ),
+        }));
+
+        const splitIcons = batches.map((batch) => {
+          const x = getX(batch.iconTimestamp);
+          const y = getAgentY(batch.sourceId);
+          const Icon = batch.isWait ? GitFork : GitBranch;
+          const colorClass = "text-purple-400 border-purple-400/50 bg-purple-950";
+          const label = batch.isWait ? `Split & Wait (×${batch.count})` : `Split (×${batch.count})`;
+          return (
+            <div
+              key={`split-icon-${batch.sourceId}-${batch.timestamp}`}
+              className={`absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border flex items-center justify-center z-40 ${colorClass}`}
+              style={{ left: x, top: y }}
+              title={label}
+            >
+              <Icon size={10} strokeWidth={3} />
+            </div>
+          );
+        });
+
+        const mergeIcons = mergeBatches
+          .filter((b) => b.hasResume)
+          .map((batch) => {
+            // Place icon at the resume position on the orchestrator bar
+            const resumeEvent = events.find(
+              (r) =>
+                r.agentId === batch.targetId &&
+                r.type === "resume" &&
+                r.timestamp >= batch.resumeTimestamp &&
+                r.timestamp <= batch.resumeTimestamp + 3,
+            );
+            const x = resumeEvent ? getX(resumeEvent.timestamp) : getX(batch.resumeTimestamp);
+            const y = getAgentY(batch.targetId);
+            return (
+              <div
+                key={`merge-icon-${batch.key}`}
+                className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border flex items-center justify-center z-40 text-emerald-400 border-emerald-400/50 bg-emerald-950"
+                style={{ left: x, top: y }}
+                title={`Merge & Resume (×${batch.count})`}
+              >
+                <GitMerge size={10} strokeWidth={3} />
+              </div>
+            );
+          });
+
+        return [...splitIcons, ...mergeIcons];
+      })()}
+
+      {/* Event Markers (excluding split/merge combined icons handled above) */}
       {events
         .filter((e) => e.timestamp <= currentTime)
+        .filter((e) => {
+          // Skip split events (rendered as combined split icons above)
+          if (e.type === "split") {
+            return false;
+          }
+          // Skip merge events (rendered as combined merge icons above)
+          if (e.type === "merge") {
+            return false;
+          }
+          // Skip pause events that immediately follow a split (part of split+wait)
+          if (e.type === "pause") {
+            const hasSplitBefore = events.some(
+              (s) =>
+                s.type === "split" &&
+                s.agentId === e.agentId &&
+                s.timestamp < e.timestamp &&
+                e.timestamp - s.timestamp <= 2,
+            );
+            if (hasSplitBefore) {
+              return false;
+            }
+          }
+          // Skip resume events that immediately follow a merge (part of merge+resume)
+          if (e.type === "resume") {
+            const hasMergeBefore = events.some(
+              (m) =>
+                m.type === "merge" &&
+                m.targetId === e.agentId &&
+                e.timestamp >= m.timestamp &&
+                e.timestamp - m.timestamp <= 3,
+            );
+            if (hasMergeBefore) {
+              return false;
+            }
+          }
+          return true;
+        })
         .map((event) => {
           const y = getAgentY(event.agentId);
-          const x = getX(event.timestamp);
+          const eventAgent = agents.find((a) => a.id === event.agentId);
+          const isEphemeral = eventAgent?.lifecycle === "ephemeral";
+          let x = getX(event.timestamp);
+          if (isEphemeral && ["spawn", "start"].includes(event.type)) {
+            // Start icons align with bar left edge (inset)
+            x = getX(event.timestamp) + SUBAGENT_BAR_INSET_PX;
+          }
+          // End icons (archive/pause/error) stay at original timestamp = bar right edge (no inset)
           const isHighlighted = hasHighlight ? highlightSet.has(event.agentId) : true;
           let opacity = hasHighlight ? (isHighlighted ? 1 : 0.2) : 1;
           if (selectedActivityId) {
@@ -356,7 +635,13 @@ export function MonitorTimeline({
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedAgentId(event.agentId);
+                  // Find the activity window this event belongs to → show Runtime Inspection
+                  const eventWin = getWindowForAgentAtTime(event.agentId, event.timestamp, true);
+                  if (eventWin && onActivityClick) {
+                    onActivityClick(eventWin.id, event.agentId);
+                  } else {
+                    setSelectedAgentId(event.agentId);
+                  }
                 }}
               >
                 <Icon size={10} strokeWidth={3} />

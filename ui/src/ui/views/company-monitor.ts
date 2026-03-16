@@ -1,15 +1,21 @@
 import { html } from "lit";
+import { setMonitorClient } from "./monitor/monitorApi";
+
+type GatewayClient = {
+  request(method: string, params?: Record<string, unknown>): Promise<unknown>;
+};
 
 export type CompanyMonitorProps = {
   requestUpdate?: () => void;
+  client?: GatewayClient | null;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _reactRoot: { render: (el: unknown) => void; unmount: () => void } | null = null;
 let _mountEl: Element | null = null;
 let _mountScheduled = false;
+let _lastClient: GatewayClient | null = null;
 
-async function mountReact(container: Element) {
+async function mountReact(container: Element, client: GatewayClient | null) {
   try {
     const [reactDomClient, monitorModule, reactModule] = await Promise.all([
       import("react-dom/client"),
@@ -21,8 +27,10 @@ async function mountReact(container: Element) {
     const { MonitorApp } = monitorModule;
     const React = reactModule.default || reactModule;
 
+    const props = { isDark: true, client };
+
     if (_reactRoot && _mountEl === container) {
-      _reactRoot.render(React.createElement(MonitorApp, { isDark: true }));
+      _reactRoot.render(React.createElement(MonitorApp, props));
       return;
     }
 
@@ -37,7 +45,7 @@ async function mountReact(container: Element) {
 
     _mountEl = container;
     _reactRoot = createRoot(container);
-    _reactRoot.render(React.createElement(MonitorApp, { isDark: true }));
+    _reactRoot.render(React.createElement(MonitorApp, props));
   } catch (err) {
     console.error("[company-monitor] Failed to mount React app:", err);
     container.innerHTML =
@@ -45,7 +53,8 @@ async function mountReact(container: Element) {
   }
 }
 
-function scheduleMountOnce() {
+function scheduleMountOnce(client: GatewayClient | null) {
+  _lastClient = client;
   if (_mountScheduled) {
     return;
   }
@@ -55,7 +64,7 @@ function scheduleMountOnce() {
     const el = document.querySelector("#monitor-react-root");
     if (el) {
       _mountScheduled = false;
-      void mountReact(el);
+      void mountReact(el, _lastClient);
       return true;
     }
     return false;
@@ -81,13 +90,25 @@ function scheduleMountOnce() {
   requestAnimationFrame(poll);
 }
 
-export function renderCompanyMonitor(_props: CompanyMonitorProps) {
-  scheduleMountOnce();
+export function renderCompanyMonitor(props: CompanyMonitorProps) {
+  const client = props.client ?? null;
+  // Always update the global client ref so React can access it
+  setMonitorClient(client);
+  // Also expose on window for cross-framework access
+  (window as unknown as Record<string, unknown>).__openclawMonitorClient = client;
+  // If already mounted and client changed, re-render with new client
+  if (_reactRoot && _mountEl && client !== _lastClient) {
+    _lastClient = client;
+    void mountReact(_mountEl, client);
+  } else {
+    scheduleMountOnce(client);
+  }
 
   return html`
     <style>
       .content:has(#monitor-react-root) {
         padding: 0 !important;
+        padding-top: 6px !important;
         overflow: hidden !important;
       }
       .content:has(#monitor-react-root) > .content-header {

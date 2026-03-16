@@ -31,6 +31,18 @@ export interface LifecycleEvent {
   details?: string;
 }
 
+export interface Annotation {
+  id: string;
+  timestamp: number;
+  agentId?: string;
+  type: "bottleneck" | "decision" | "dispatch" | "insight";
+  title: string;
+  description: string;
+  placement?: "top" | "bottom";
+}
+
+// ── UI-derived types (computed by derivation.ts, not from backend) ───────
+
 export interface ActivityWindow {
   id: string;
   agentId: string;
@@ -51,12 +63,114 @@ export interface AgentSnapshot extends Agent {
   lastEvent?: LifecycleEvent;
 }
 
-export interface Annotation {
+// ── Backend data types ──────────────────────────────────────────────────
+
+export interface AgentCapability {
+  subject: string;
+  value: number; // 0–100
+}
+
+export interface ToolUsageEntry {
+  name: string;
+  icon: string;
+  count: number;
+}
+
+export interface SystemMetricPoint {
+  time: string;
+  cpu: number;
+  memory: number;
+  context: number;
+}
+
+export interface ArtifactEntry {
   id: string;
-  timestamp: number;
-  agentId?: string;
-  type: "bottleneck" | "decision" | "dispatch" | "insight";
   title: string;
   description: string;
-  placement?: "top" | "bottom";
+  icon: string;
+  iconColor: string;
+  additions?: number;
+  deletions?: number;
+  additionUnit?: string;
+}
+
+export interface TaskEntry {
+  id: string;
+  label: string;
+  completed: boolean;
+}
+
+export interface PlatformEntry {
+  name: string;
+  icon: string;
+  iconColor: string;
+}
+
+export interface ServiceAccessEntry {
+  name: string;
+  description: string;
+  icon: string;
+  iconColor: string;
+  enabled: boolean;
+}
+
+export interface FileAccessEntry {
+  path: string;
+  isFolder: boolean;
+  indent: number;
+  access: "rw" | "readonly" | "none";
+}
+
+export interface ToolPermission {
+  name: string;
+  icon: string;
+  level: "allowed" | "ask" | "denied";
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Per-agent config/capability data. */
+export interface AgentRuntimeConfig {
+  capabilities: AgentCapability[];
+  serviceAccess: ServiceAccessEntry[];
+  fileAccess: FileAccessEntry[];
+  toolPermissions: ToolPermission[];
+}
+
+/** Per-agent runtime telemetry (aggregated across all activity windows). */
+export interface AgentTelemetry {
+  platforms: PlatformEntry[];
+  summary: string;
+  tasks: TaskEntry[];
+  artifacts: ArtifactEntry[];
+  toolUsage: ToolUsageEntry[];
+  systemMetrics: SystemMetricPoint[];
+}
+
+/** A task session spans multiple agents working on one task. */
+export interface TaskSessionData {
+  id: string;
+  name: string;
+  description?: string;
+  startTime: number;
+  endTime: number | null;
+
+  agents: Agent[];
+  events: LifecycleEvent[];
+  annotations: Annotation[];
+
+  agentConfigs: Record<string, AgentRuntimeConfig>;
+  agentTelemetry: Record<string, AgentTelemetry>;
+
+  metrics: {
+    avgLatency: string;
+    totalTokens: number;
+    bottleneckCount: number;
+  };
+
+  chatMessages: ChatMessage[];
 }

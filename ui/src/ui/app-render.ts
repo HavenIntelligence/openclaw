@@ -2369,6 +2369,7 @@ export function renderApp(state: AppViewState) {
                   requestRender: requestHostUpdate,
                   agents: state.companyAgents,
                   logs: state.companyAgentLogs,
+                  client: state.client,
                 }),
               )
             : nothing
@@ -2377,7 +2378,7 @@ export function renderApp(state: AppViewState) {
         ${
           state.tab === "companyMonitor"
             ? lazyRender(lazyCompanyMonitor, (m) =>
-                m.renderCompanyMonitor({ requestUpdate: requestHostUpdate }),
+                m.renderCompanyMonitor({ requestUpdate: requestHostUpdate, client: state.client }),
               )
             : nothing
         }

@@ -34,7 +34,8 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { Agent, AgentSnapshot, LifecycleEvent, ActivityWindow } from "./types";
+import { getMockAgentConfig, getMockAgentTelemetry } from "./mockData";
+import type { Agent, AgentSnapshot, LifecycleEvent, ActivityWindow } from "./types";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
 interface BottomPanelProps {
@@ -48,36 +49,48 @@ interface BottomPanelProps {
   onClose: () => void;
 }
 
-const getAgentCapabilities = (agent: Agent) => [
-  { subject: "Reasoning", A: 80 + (agent.id.length % 20) },
-  { subject: "Coding", A: 60 + ((agent.name.length * 5) % 40) },
-  { subject: "Communication", A: 70 + ((agent.role.length * 3) % 30) },
-  { subject: "Data Analysis", A: 50 + ((agent.skills.length * 10) % 50) },
-  { subject: "Planning", A: 85 - (agent.id.length % 15) },
-];
+// ── Icon registry (maps string keys from data to lucide components) ─────
 
-const getToolUsage = (activityId: string) => {
-  return [
-    { name: "Web Search", count: 12 + (activityId.length % 5) },
-    { name: "Read File", count: 8 + (activityId.length % 8) },
-    { name: "Write File", count: 3 + (activityId.length % 4) },
-    { name: "Execute Cmd", count: 5 + (activityId.length % 6) },
-    { name: "API Call", count: 15 + (activityId.length % 10) },
-    { name: "DB Query", count: 6 + (activityId.length % 3) },
-    { name: "Git Commit", count: 2 + (activityId.length % 2) },
-    { name: "Linter", count: 9 + (activityId.length % 4) },
-  ].toSorted((a, b) => b.count - a.count);
+const ICON_MAP: Record<string, React.ElementType> = {
+  Terminal,
+  Code,
+  Globe,
+  FileText,
+  Mail,
+  Shield,
+  Database,
+  Cloud,
+  File,
+  Server,
+  Folder,
+  Cpu,
+  Activity,
 };
 
-const TOOL_ICONS: Record<string, React.ElementType> = {
-  "Web Search": Globe,
-  "Read File": FileText,
-  "Write File": Code,
-  "Execute Cmd": Terminal,
-  "API Call": Cloud,
-  "DB Query": Database,
-  "Git Commit": File,
-  Linter: Shield,
+function IconByName({
+  name,
+  size = 12,
+  className = "",
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+}) {
+  const Icon = ICON_MAP[name] || Circle;
+  return <Icon size={size} className={className} />;
+}
+
+// ── Recharts custom Y-axis tick with icon ───────────────────────────────
+
+const TOOL_ICON_MAP: Record<string, string> = {
+  "Web Search": "Globe",
+  "Read File": "FileText",
+  "Write File": "Code",
+  "Execute Cmd": "Terminal",
+  "API Call": "Cloud",
+  "DB Query": "Database",
+  "Git Commit": "File",
+  Linter: "Shield",
 };
 
 const CustomYAxisTick = ({
@@ -89,12 +102,12 @@ const CustomYAxisTick = ({
   y: number;
   payload: { value: string };
 }) => {
-  const Icon = TOOL_ICONS[payload.value] || Circle;
+  const iconName = TOOL_ICON_MAP[payload.value] || "Circle";
   return (
     <g transform={`translate(${x},${y})`}>
       <foreignObject x={-90} y={-10} width={90} height={20}>
         <div className="flex items-center justify-end gap-1.5 pr-2 text-[10px] text-zinc-400 h-full">
-          <Icon size={10} className="flex-shrink-0" />
+          <IconByName name={iconName} size={10} className="flex-shrink-0" />
           <span className="truncate">{payload.value}</span>
         </div>
       </foreignObject>
@@ -102,22 +115,31 @@ const CustomYAxisTick = ({
   );
 };
 
-const getSystemMetrics = (activityId: string) => {
-  let currentContext = 10;
-  return Array.from({ length: 20 }).map((_, i) => {
-    if (i > 0 && i % 6 === 0) {
-      currentContext = Math.max(5, currentContext * 0.4);
-    } else {
-      currentContext += 2 + Math.random() * 5;
-    }
-    return {
-      time: `T${i * 5}`,
-      cpu: 20 + Math.sin(i + activityId.length) * 15 + Math.random() * 10,
-      memory: 40 + Math.cos(i + activityId.length) * 20 + Math.random() * 5,
-      context: currentContext,
-    };
-  });
+// ── Style lookups ───────────────────────────────────────────────────────
+
+const ACCESS_COLOR: Record<string, { text: string; border: string; bg: string; label: string }> = {
+  rw: {
+    text: "text-emerald-500/70",
+    border: "border-emerald-500/20",
+    bg: "bg-emerald-500/10",
+    label: "R/W",
+  },
+  readonly: {
+    text: "text-amber-500/70",
+    border: "border-amber-500/20",
+    bg: "bg-amber-500/10",
+    label: "Read Only",
+  },
+  none: { text: "text-zinc-600", border: "border-zinc-700", bg: "", label: "No Access" },
 };
+
+const LEVEL_COLOR: Record<string, string> = {
+  allowed: "text-emerald-400 border-emerald-500/30",
+  ask: "text-amber-400 border-amber-500/30",
+  denied: "text-rose-400 border-rose-500/30",
+};
+
+// ── Component ───────────────────────────────────────────────────────────
 
 export function MonitorBottomPanel({
   selectedAgentId,
@@ -140,9 +162,14 @@ export function MonitorBottomPanel({
   void _snap;
   const activity = activityWindows.find((w) => w.id === selectedActivityId);
 
-  const capabilities = useMemo(() => (agent ? getAgentCapabilities(agent) : []), [agent]);
-  const toolUsage = useMemo(() => (activity ? getToolUsage(activity.id) : []), [activity]);
-  const systemMetrics = useMemo(() => (activity ? getSystemMetrics(activity.id) : []), [activity]);
+  const agentConfig = useMemo(() => (agent ? getMockAgentConfig(agent.id) : null), [agent]);
+  const agentTelemetry = useMemo(() => (agent ? getMockAgentTelemetry(agent.id) : null), [agent]);
+
+  // Map capability `value` to `A` for Recharts Radar
+  const radarData = useMemo(
+    () => agentConfig?.capabilities.map((c) => ({ subject: c.subject, A: c.value })) ?? [],
+    [agentConfig],
+  );
 
   return (
     <div className="h-full border-t border-zinc-800/50 bg-[#0f0f0f] flex flex-col min-h-0">
@@ -163,7 +190,7 @@ export function MonitorBottomPanel({
         </button>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden p-4 flex gap-0">
-        {selectedActivityId && activity && agent ? (
+        {selectedActivityId && activity && agent && agentTelemetry ? (
           <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-hidden">
             {/* Col 1: Identity */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
@@ -172,12 +199,17 @@ export function MonitorBottomPanel({
                   <div className="text-xs text-zinc-500 font-mono mb-1">AGENT</div>
                   <div className="text-sm text-zinc-200 flex items-center gap-2">
                     {agent.name}
-                    {agent.workspace && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-zinc-800/80 text-zinc-400 border border-zinc-700/50 flex items-center gap-1">
-                        <WorkspaceIcon workspace={agent.workspace} size={10} />
-                        {agent.workspace}
-                      </span>
-                    )}
+                    <span
+                      className={`text-[9px] px-1 rounded-sm border ${agent.lifecycle === "persistent" ? "text-emerald-400 border-emerald-400/30 bg-emerald-400/10" : "text-amber-400 border-amber-400/30 bg-amber-400/10"}`}
+                    >
+                      {agent.lifecycle.toUpperCase()}
+                    </span>
+                  </div>
+                  <div
+                    className="text-[10px] text-zinc-500 font-mono mt-0.5 truncate"
+                    title={agent.id}
+                  >
+                    {agent.id}
                   </div>
                 </div>
                 <div className="text-right">
@@ -191,39 +223,35 @@ export function MonitorBottomPanel({
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">ACTIVE PLATFORMS</div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="flex items-center gap-1 text-xs text-zinc-300 bg-zinc-800/50 px-2 py-1 rounded border border-zinc-700/50">
-                    <Terminal size={12} className="text-zinc-400" /> Terminal
-                  </span>
-                  <span className="flex items-center gap-1 text-xs text-zinc-300 bg-zinc-800/50 px-2 py-1 rounded border border-zinc-700/50">
-                    <Code size={12} className="text-blue-400" /> VS Code
-                  </span>
-                  <span className="flex items-center gap-1 text-xs text-zinc-300 bg-zinc-800/50 px-2 py-1 rounded border border-zinc-700/50">
-                    <Globe size={12} className="text-emerald-400" /> Browser
-                  </span>
+                  {agentTelemetry.platforms.map((p) => (
+                    <span
+                      key={p.name}
+                      className="flex items-center gap-1 text-xs text-zinc-300 bg-zinc-800/50 px-2 py-1 rounded border border-zinc-700/50"
+                    >
+                      <IconByName name={p.icon} size={12} className={p.iconColor} /> {p.name}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">SEGMENT SUMMARY</div>
                 <div className="text-sm text-zinc-300 leading-relaxed bg-zinc-800/30 p-3 rounded border border-zinc-800/50">
-                  Analyzed user request, gathered context from the codebase, and drafted an initial
-                  response plan for the new feature implementation.
+                  {agentTelemetry.summary}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">TASKS & COMPLETION</div>
                 <div className="space-y-2">
-                  <div className="flex items-start gap-2 text-sm text-zinc-300">
-                    <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
-                    <span>Analyze user request and gather context</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm text-zinc-300">
-                    <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
-                    <span>Draft initial response plan</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm text-zinc-300">
-                    <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                    <span>Execute code modifications</span>
-                  </div>
+                  {agentTelemetry.tasks.map((task) => (
+                    <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
+                      {task.completed ? (
+                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                      ) : (
+                        <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                      )}
+                      <span>{task.label}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -234,47 +262,30 @@ export function MonitorBottomPanel({
                   <FileText size={12} /> OUTPUT & ARTIFACTS
                 </div>
                 <div className="space-y-3">
-                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
-                      <FileText size={14} className="text-blue-400" /> Update README.md
+                  {agentTelemetry.artifacts.map((art) => (
+                    <div
+                      key={art.id}
+                      className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2"
+                    >
+                      <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
+                        <IconByName name={art.icon} size={14} className={art.iconColor} />{" "}
+                        {art.title}
+                      </div>
+                      <div className="text-xs text-zinc-500">{art.description}</div>
+                      <div className="flex items-center gap-3 text-[10px] font-mono">
+                        {art.additions != null && (
+                          <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
+                            +{art.additions} {art.additionUnit ?? "LoC"}
+                          </span>
+                        )}
+                        {art.deletions != null && (
+                          <span className="text-rose-400 bg-rose-400/10 px-1.5 py-0.5 rounded border border-rose-400/20">
+                            -{art.deletions} LoC
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-xs text-zinc-500">
-                      Added installation instructions and API usage examples.
-                    </div>
-                    <div className="flex items-center gap-3 text-[10px] font-mono">
-                      <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
-                        +45 LoC
-                      </span>
-                      <span className="text-rose-400 bg-rose-400/10 px-1.5 py-0.5 rounded border border-rose-400/20">
-                        -12 LoC
-                      </span>
-                    </div>
-                  </div>
-                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
-                      <Mail size={14} className="text-purple-400" /> Status Update Email
-                    </div>
-                    <div className="text-xs text-zinc-500">To: engineering@company.com</div>
-                    <div className="flex items-center gap-3 text-[10px] font-mono">
-                      <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
-                        +1 Email
-                      </span>
-                    </div>
-                  </div>
-                  <div className="bg-zinc-800/30 p-3 rounded-lg border border-zinc-800/50 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-sm text-zinc-200 font-medium">
-                      <Code size={14} className="text-emerald-400" /> src/utils/auth.ts
-                    </div>
-                    <div className="text-xs text-zinc-500">Refactored JWT validation logic.</div>
-                    <div className="flex items-center gap-3 text-[10px] font-mono">
-                      <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded border border-emerald-400/20">
-                        +128 LoC
-                      </span>
-                      <span className="text-rose-400 bg-rose-400/10 px-1.5 py-0.5 rounded border border-rose-400/20">
-                        -42 LoC
-                      </span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -284,7 +295,7 @@ export function MonitorBottomPanel({
               <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[160px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={toolUsage}
+                    data={agentTelemetry.toolUsage}
                     layout="vertical"
                     margin={{ top: 5, right: 20, left: 30, bottom: 5 }}
                   >
@@ -322,7 +333,7 @@ export function MonitorBottomPanel({
                 <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[80px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
-                      data={systemMetrics}
+                      data={agentTelemetry.systemMetrics}
                       margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -363,7 +374,7 @@ export function MonitorBottomPanel({
                 <div className="flex-1 w-full bg-zinc-800/20 rounded-lg p-2 border border-zinc-800/50 min-h-[80px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
-                      data={systemMetrics}
+                      data={agentTelemetry.systemMetrics}
                       margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -391,7 +402,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
           </div>
-        ) : agent ? (
+        ) : agent && agentConfig ? (
           <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-hidden">
             {/* Col 1: Basic Info */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
@@ -417,34 +428,27 @@ export function MonitorBottomPanel({
                   </button>
                 </div>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between bg-zinc-900/50 p-2 rounded border border-zinc-800/80">
-                    <div className="flex items-center gap-2">
-                      <Server size={14} className="text-emerald-400" />
-                      <div>
-                        <div className="text-xs text-zinc-200">Internal APIs</div>
-                        <div className="text-[10px] text-zinc-500">
-                          Full read/write access to internal microservices
+                  {agentConfig.serviceAccess.map((sa) => (
+                    <div
+                      key={sa.name}
+                      className="flex items-center justify-between bg-zinc-900/50 p-2 rounded border border-zinc-800/80"
+                    >
+                      <div className="flex items-center gap-2">
+                        <IconByName name={sa.icon} size={14} className={sa.iconColor} />
+                        <div>
+                          <div className="text-xs text-zinc-200">{sa.name}</div>
+                          <div className="text-[10px] text-zinc-500">{sa.description}</div>
                         </div>
                       </div>
-                    </div>
-                    <div className="w-8 h-4 bg-emerald-500/20 rounded-full flex items-center p-0.5 border border-emerald-500/30 cursor-pointer">
-                      <div className="w-3 h-3 bg-emerald-400 rounded-full translate-x-4"></div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between bg-zinc-900/50 p-2 rounded border border-zinc-800/80">
-                    <div className="flex items-center gap-2">
-                      <Cloud size={14} className="text-amber-400" />
-                      <div>
-                        <div className="text-xs text-zinc-200">External Web</div>
-                        <div className="text-[10px] text-zinc-500">
-                          Read-only access to public internet
-                        </div>
+                      <div
+                        className={`w-8 h-4 rounded-full flex items-center p-0.5 cursor-pointer ${sa.enabled ? "bg-emerald-500/20 border border-emerald-500/30" : "bg-zinc-700/30 border border-zinc-600/30"}`}
+                      >
+                        <div
+                          className={`w-3 h-3 rounded-full ${sa.enabled ? "bg-emerald-400 translate-x-4" : "bg-zinc-500 translate-x-0"}`}
+                        ></div>
                       </div>
                     </div>
-                    <div className="w-8 h-4 bg-amber-500/20 rounded-full flex items-center p-0.5 border border-amber-500/30 cursor-pointer">
-                      <div className="w-3 h-3 bg-amber-400 rounded-full translate-x-4"></div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -460,33 +464,37 @@ export function MonitorBottomPanel({
                   </button>
                 </div>
                 <div className="bg-zinc-900/80 rounded border border-zinc-800/80 p-2 font-mono text-xs text-zinc-300 space-y-1.5 overflow-x-auto flex-1">
-                  <div className="flex items-center gap-1.5 text-emerald-400">
-                    <Folder size={12} className="fill-emerald-400/20" /> src/
-                  </div>
-                  <div className="flex items-center gap-1.5 pl-4 text-emerald-400">
-                    <Folder size={12} className="fill-emerald-400/20" /> components/{" "}
-                    <span className="text-[9px] ml-2 text-emerald-500/70 border border-emerald-500/20 bg-emerald-500/10 px-1 rounded">
-                      R/W
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 pl-4 text-zinc-500">
-                    <Folder size={12} /> utils/{" "}
-                    <span className="text-[9px] ml-2 text-zinc-600 border border-zinc-700 px-1 rounded">
-                      No Access
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-amber-400">
-                    <Folder size={12} className="fill-amber-400/20" /> config/{" "}
-                    <span className="text-[9px] ml-2 text-amber-500/70 border border-amber-500/20 bg-amber-500/10 px-1 rounded">
-                      Read Only
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-emerald-400">
-                    <File size={12} /> package.json{" "}
-                    <span className="text-[9px] ml-2 text-emerald-500/70 border border-emerald-500/20 bg-emerald-500/10 px-1 rounded">
-                      R/W
-                    </span>
-                  </div>
+                  {agentConfig.fileAccess.map((fa) => {
+                    const color = ACCESS_COLOR[fa.access];
+                    const textColor =
+                      fa.access === "rw"
+                        ? "text-emerald-400"
+                        : fa.access === "readonly"
+                          ? "text-amber-400"
+                          : "text-zinc-500";
+                    return (
+                      <div
+                        key={fa.path}
+                        className={`flex items-center gap-1.5 ${textColor}`}
+                        style={{ paddingLeft: fa.indent * 16 }}
+                      >
+                        {fa.isFolder ? (
+                          <Folder
+                            size={12}
+                            className={fa.access !== "none" ? "fill-current opacity-20" : ""}
+                          />
+                        ) : (
+                          <File size={12} />
+                        )}
+                        {fa.path}{" "}
+                        <span
+                          className={`text-[9px] ml-2 ${color.text} border ${color.border} ${color.bg} px-1 rounded`}
+                        >
+                          {color.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -497,7 +505,7 @@ export function MonitorBottomPanel({
               </div>
               <div className="w-full h-64 bg-zinc-800/20 rounded-lg border border-zinc-800/50 flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={capabilities}>
+                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                     <PolarGrid stroke="#3f3f46" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: "#a1a1aa", fontSize: 10 }} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -559,39 +567,28 @@ export function MonitorBottomPanel({
                   </button>
                 </div>
                 <div className="space-y-2">
-                  <div className="bg-zinc-900/50 p-2 rounded border border-zinc-800/80 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Terminal size={14} className="text-zinc-400" />
-                      <span className="text-xs text-zinc-300 font-medium">Shell Execution</span>
-                    </div>
-                    <select className="bg-zinc-800 text-[10px] text-emerald-400 border border-emerald-500/30 rounded px-1.5 py-0.5 outline-none focus:border-emerald-500 cursor-pointer">
-                      <option>Allowed</option>
-                      <option>Ask First</option>
-                      <option>Denied</option>
-                    </select>
-                  </div>
-                  <div className="bg-zinc-900/50 p-2 rounded border border-zinc-800/80 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Database size={14} className="text-zinc-400" />
-                      <span className="text-xs text-zinc-300 font-medium">Database Query</span>
-                    </div>
-                    <select className="bg-zinc-800 text-[10px] text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 outline-none focus:border-amber-500 cursor-pointer">
-                      <option>Ask First</option>
-                      <option>Allowed</option>
-                      <option>Denied</option>
-                    </select>
-                  </div>
-                  <div className="bg-zinc-900/50 p-2 rounded border border-zinc-800/80 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Globe size={14} className="text-zinc-400" />
-                      <span className="text-xs text-zinc-300 font-medium">Web Browsing</span>
-                    </div>
-                    <select className="bg-zinc-800 text-[10px] text-emerald-400 border border-emerald-500/30 rounded px-1.5 py-0.5 outline-none focus:border-emerald-500 cursor-pointer">
-                      <option>Allowed</option>
-                      <option>Ask First</option>
-                      <option>Denied</option>
-                    </select>
-                  </div>
+                  {agentConfig.toolPermissions.map((tp) => {
+                    const colorCls = LEVEL_COLOR[tp.level] ?? "";
+                    return (
+                      <div
+                        key={tp.name}
+                        className="bg-zinc-900/50 p-2 rounded border border-zinc-800/80 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <IconByName name={tp.icon} size={14} className="text-zinc-400" />
+                          <span className="text-xs text-zinc-300 font-medium">{tp.name}</span>
+                        </div>
+                        <select
+                          className={`bg-zinc-800 text-[10px] border rounded px-1.5 py-0.5 outline-none cursor-pointer ${colorCls}`}
+                          defaultValue={tp.level}
+                        >
+                          <option value="allowed">Allowed</option>
+                          <option value="ask">Ask First</option>
+                          <option value="denied">Denied</option>
+                        </select>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

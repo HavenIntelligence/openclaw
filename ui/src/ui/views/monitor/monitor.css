@@ -392,6 +392,23 @@
   background-color: rgba(0, 0, 0, 0.06) !important;
 }
 
+/* ── Light mode: event icon backgrounds ── */
+:root[data-theme-mode="light"] #monitor-react-root .bg-emerald-950 { background-color: color-mix(in srgb, var(--monitor-ok) 15%, white) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-purple-950 { background-color: color-mix(in srgb, var(--monitor-purple) 15%, white) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-amber-950 { background-color: color-mix(in srgb, var(--monitor-warn) 15%, white) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-rose-950 { background-color: color-mix(in srgb, var(--monitor-destructive) 15%, white) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-blue-950 { background-color: color-mix(in srgb, var(--monitor-info) 15%, white) !important; }
+
+/* ── Light mode: selected activity bar ring ── */
+:root[data-theme-mode="light"] #monitor-react-root .ring-white\/50 { --tw-ring-color: rgba(0, 0, 0, 0.4) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .shadow-\[0_0_15px_rgba\(255\,255\,255\,0\.2\)\] { box-shadow: 0 0 15px rgba(0, 0, 0, 0.15) !important; }
+
+/* ── Light mode: activity bar colors stronger ── */
+:root[data-theme-mode="light"] #monitor-react-root .bg-emerald-500\/20 { background-color: color-mix(in srgb, var(--monitor-ok) 30%, transparent) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .bg-amber-500\/20 { background-color: color-mix(in srgb, var(--monitor-warn) 30%, transparent) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .border-emerald-500\/50 { border-color: color-mix(in srgb, var(--monitor-ok) 60%, transparent) !important; }
+:root[data-theme-mode="light"] #monitor-react-root .border-amber-500\/50 { border-color: color-mix(in srgb, var(--monitor-warn) 60%, transparent) !important; }
+
 /* ═══════════════════════════════════════════════════════════════════════
    Scrollbar
    ═══════════════════════════════════════════════════════════════════════ */

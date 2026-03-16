@@ -9,11 +9,17 @@ import {
   GripVertical,
 } from "lucide-react";
 import React, { useRef, useState, useEffect, useCallback, UIEvent, MouseEvent } from "react";
-import { mockAnnotations } from "./annotations";
 import { MonitorBottomPanel } from "./MonitorBottomPanel";
 import { MonitorRightPanel } from "./MonitorRightPanel";
 import { MonitorTimeline } from "./MonitorTimeline";
-import { Agent, LifecycleEvent, ActivityWindow, LineageEdge, AgentSnapshot } from "./types";
+import type {
+  Agent,
+  LifecycleEvent,
+  ActivityWindow,
+  LineageEdge,
+  AgentSnapshot,
+  TaskSessionData,
+} from "./types";
 import { WorkspaceIcon } from "./WorkspaceIcon";
 
 interface DashboardProps {
@@ -32,6 +38,9 @@ interface DashboardProps {
   lineageEdges: LineageEdge[];
   maxTime: number;
   isDark: boolean;
+  taskSession: TaskSessionData;
+  availableTaskSessions: Pick<TaskSessionData, "id" | "name" | "startTime" | "endTime">[];
+  onSessionChange: (id: string) => void;
 }
 
 // ── Resize constants ────────────────────────────────────────────────────
@@ -160,6 +169,16 @@ function ResizeHandle({
   );
 }
 
+// ── Time formatting ─────────────────────────────────────────────────────
+type TimeUnit = "s" | "min";
+
+function formatTimeCompact(seconds: number, unit: TimeUnit): string {
+  if (unit === "min") {
+    return `${(seconds / 60).toFixed(1)}m`;
+  }
+  return `${seconds}s`;
+}
+
 // ── Main dashboard ──────────────────────────────────────────────────────
 export function MonitorDashboard(props: DashboardProps) {
   const { currentTime, setCurrentTime, isPlaying, setIsPlaying, agents, snapshots, maxTime } =
@@ -170,8 +189,9 @@ export function MonitorDashboard(props: DashboardProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const hasAutoFaded = useRef(false);
-  const [timeScale, setTimeScale] = useState(6);
+  const [timeScale, setTimeScale] = useState(maxTime > 300 ? 2 : 6);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [timeUnit, setTimeUnit] = useState<TimeUnit>(maxTime > 300 ? "min" : "s");
 
   // Resizable panels
   const left = useResizable("x", LEFT_DEFAULT, LEFT_MIN);
@@ -231,6 +251,21 @@ export function MonitorDashboard(props: DashboardProps) {
           className="flex h-10 border-b flex-shrink-0 items-center px-3 gap-1.5"
           style={{ borderColor: "var(--border)", background: "var(--card)" }}
         >
+          {/* Task session picker */}
+          <select
+            value={props.taskSession.id}
+            onChange={(e) => props.onSessionChange(e.target.value)}
+            className="bg-transparent text-xs font-medium text-zinc-200 border border-zinc-700/50 rounded px-2 py-1 outline-none cursor-pointer hover:border-zinc-500 transition-colors"
+            style={{ maxWidth: 180, fontFamily: "var(--mono)" }}
+            title="Select task session"
+          >
+            {props.availableTaskSessions.map((s) => (
+              <option key={s.id} value={s.id} style={{ background: "var(--card, #161920)" }}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
           {/* Playback controls */}
           <button
             onClick={() => setIsPlaying(!isPlaying)}
@@ -263,7 +298,9 @@ export function MonitorDashboard(props: DashboardProps) {
           </button>
           <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
           <button
-            onClick={() => setTimeScale(Math.max(2, timeScale - 2))}
+            onClick={() =>
+              setTimeScale(Math.max(0.5, timeScale <= 2 ? timeScale - 0.5 : timeScale - 2))
+            }
             className="btn btn--sm"
             style={{ padding: "3px 5px" }}
             title="Zoom Out"
@@ -282,7 +319,9 @@ export function MonitorDashboard(props: DashboardProps) {
             {timeScale}x
           </span>
           <button
-            onClick={() => setTimeScale(Math.min(32, timeScale + 2))}
+            onClick={() =>
+              setTimeScale(Math.min(32, timeScale < 2 ? timeScale + 0.5 : timeScale + 2))
+            }
             className="btn btn--sm"
             style={{ padding: "3px 5px" }}
             title="Zoom In"
@@ -314,9 +353,19 @@ export function MonitorDashboard(props: DashboardProps) {
             </span>
           )}
           <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
+          {/* Time unit toggle */}
+          <button
+            onClick={() => setTimeUnit(timeUnit === "s" ? "min" : "s")}
+            className="btn btn--sm"
+            style={{ padding: "3px 6px", fontSize: 10, fontFamily: "var(--mono)" }}
+            title={`Switch to ${timeUnit === "s" ? "minutes" : "seconds"}`}
+          >
+            {timeUnit === "s" ? "sec" : "min"}
+          </button>
+          <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
           {/* Scrubber */}
           <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--muted)" }}>
-            {currentTime}
+            {formatTimeCompact(currentTime, timeUnit)}
           </span>
           <input
             type="range"
@@ -337,7 +386,7 @@ export function MonitorDashboard(props: DashboardProps) {
             }}
           />
           <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--muted)" }}>
-            {maxTime}
+            {formatTimeCompact(maxTime, timeUnit)}
           </span>
         </div>
 
@@ -360,22 +409,36 @@ export function MonitorDashboard(props: DashboardProps) {
               className="absolute inset-0 flex items-end pb-1 px-4"
               style={{ width: maxTime * timeScale + 32 }}
             >
-              {Array.from({ length: Math.floor(maxTime / 10) + 1 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="absolute flex flex-col items-center"
-                  style={{ left: i * 10 * timeScale + 16 }}
-                >
-                  <span className="text-[9px] font-mono text-zinc-500">{i * 10}</span>
-                  <div className="w-px h-1.5 bg-zinc-700" />
-                </div>
-              ))}
+              {(() => {
+                // Choose tick interval based on time unit and total duration
+                const tickInterval =
+                  timeUnit === "min"
+                    ? maxTime > 600
+                      ? 60
+                      : 30 // every 60s or 30s in min mode
+                    : maxTime > 120
+                      ? 10
+                      : 5; // every 10s or 5s in sec mode
+                const tickCount = Math.floor(maxTime / tickInterval) + 1;
+                return Array.from({ length: tickCount }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute flex flex-col items-center"
+                    style={{ left: i * tickInterval * timeScale + 16 }}
+                  >
+                    <span className="text-[9px] font-mono text-zinc-500">
+                      {formatTimeCompact(i * tickInterval, timeUnit)}
+                    </span>
+                    <div className="w-px h-1.5 bg-zinc-700" />
+                  </div>
+                ));
+              })()}
               <div
                 className="absolute bottom-0 w-px h-3 bg-emerald-500 z-20 transition-all duration-100"
                 style={{ left: currentTime * timeScale + 16 }}
               >
-                <div className="absolute -top-3.5 -translate-x-1/2 bg-emerald-500 text-[#0a0a0a] text-[8px] font-bold px-0.5 rounded-sm">
-                  {currentTime}
+                <div className="absolute -top-3.5 -translate-x-1/2 bg-emerald-500 text-[#0a0a0a] text-[8px] font-bold px-0.5 rounded-sm whitespace-nowrap">
+                  {formatTimeCompact(currentTime, timeUnit)}
                 </div>
               </div>
             </div>
@@ -419,7 +482,11 @@ export function MonitorDashboard(props: DashboardProps) {
                   className="flex-shrink-0 border-r border-zinc-800/50 overflow-hidden bg-[#0f0f0f] z-10"
                   style={{ width: left.size }}
                   ref={leftHeadersRef}
-                  onClick={() => props.setSelectedAgentId(null)}
+                  onClick={() => {
+                    props.setSelectedAgentId(null);
+                    props.setHoveredAgentId(null);
+                    setSelectedActivityId(null);
+                  }}
                 >
                   <div className="relative" style={{ height: agents.length * 64 + 32 + 24 }}>
                     {agents.map((agent, index) => {
@@ -434,7 +501,24 @@ export function MonitorDashboard(props: DashboardProps) {
                           onClick={(e) => {
                             e.stopPropagation();
                             props.setSelectedAgentId(agent.id);
-                            setSelectedActivityId(null);
+                            const agentWindows = props.activityWindows
+                              .filter((w: ActivityWindow) => w.agentId === agent.id)
+                              .toSorted(
+                                (a: ActivityWindow, b: ActivityWindow) => b.startTime - a.startTime,
+                              );
+                            const latestWindow = agentWindows[0];
+                            if (latestWindow) {
+                              setSelectedActivityId(latestWindow.id);
+                              if (timelineRef.current) {
+                                const windowX = latestWindow.startTime * timeScale;
+                                timelineRef.current.scrollTo({
+                                  left: Math.max(0, windowX - 100),
+                                  behavior: "smooth",
+                                });
+                              }
+                            } else {
+                              setSelectedActivityId(null);
+                            }
                           }}
                           onMouseEnter={() => props.setHoveredAgentId(agent.id)}
                           onMouseLeave={() => props.setHoveredAgentId(null)}
@@ -483,6 +567,7 @@ export function MonitorDashboard(props: DashboardProps) {
               onScroll={handleTimelineScroll}
               onClick={() => {
                 props.setSelectedAgentId(null);
+                props.setHoveredAgentId(null);
                 setSelectedActivityId(null);
               }}
             >
@@ -493,7 +578,7 @@ export function MonitorDashboard(props: DashboardProps) {
                 <MonitorTimeline
                   {...props}
                   showAnnotations={showAnnotations}
-                  annotations={mockAnnotations}
+                  annotations={props.taskSession.annotations}
                   timeScale={timeScale}
                   selectedActivityId={selectedActivityId}
                   onActivityClick={(activityId, agentId) => {
@@ -597,6 +682,7 @@ export function MonitorDashboard(props: DashboardProps) {
               events={props.events}
               currentTime={currentTime}
               maxTime={maxTime}
+              taskSession={props.taskSession}
             />
           </div>
         </>

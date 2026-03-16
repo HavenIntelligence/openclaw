@@ -13,8 +13,8 @@ import {
   Zap,
   MessageSquare,
 } from "lucide-react";
-import React, { useState, useRef, useCallback } from "react";
-import { Agent, LifecycleEvent, AgentSnapshot } from "./types";
+import React, { useState, useRef } from "react";
+import type { Agent, LifecycleEvent, AgentSnapshot, TaskSessionData } from "./types";
 
 interface RightPanelProps {
   agents: Agent[];
@@ -24,6 +24,7 @@ interface RightPanelProps {
   events: LifecycleEvent[];
   currentTime: number;
   maxTime: number;
+  taskSession: TaskSessionData;
 }
 
 export function MonitorRightPanel({
@@ -32,42 +33,10 @@ export function MonitorRightPanel({
   events,
   currentTime,
   maxTime,
+  taskSession,
 }: Omit<RightPanelProps, "selectedAgentId" | "setSelectedAgentId">) {
   const [showLegendModal, setShowLegendModal] = useState(false);
-  const [chatHeight, setChatHeight] = useState<number | null>(null); // null = use 40% default
-  const chatDragging = useRef(false);
-  const chatStartY = useRef(0);
-  const chatStartH = useRef(0);
-
   const chatRef = useRef<HTMLDivElement>(null);
-  const onChatResizeDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      chatDragging.current = true;
-      chatStartY.current = e.clientY;
-      chatStartH.current = chatRef.current?.offsetHeight ?? chatHeight ?? 160;
-      document.body.style.cursor = "row-resize";
-      document.body.style.userSelect = "none";
-
-      const onMove = (ev: globalThis.MouseEvent) => {
-        if (!chatDragging.current) {
-          return;
-        }
-        const delta = chatStartY.current - ev.clientY;
-        setChatHeight(Math.max(60, chatStartH.current + delta));
-      };
-      const onUp = () => {
-        chatDragging.current = false;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    },
-    [chatHeight],
-  );
 
   const groupedSnapshots = {
     running: snapshots.filter((s) => s.currentStatus === "running"),
@@ -79,8 +48,8 @@ export function MonitorRightPanel({
 
   return (
     <div className="w-full flex flex-col bg-[#0f0f0f] h-full min-w-0">
-      {/* System Overview */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
+      {/* System Overview — compact, max height capped */}
+      <div className="flex-none overflow-y-auto p-4 custom-scrollbar" style={{ maxHeight: "45%" }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
             <Layers size={16} className="text-zinc-400" />
@@ -176,8 +145,8 @@ export function MonitorRightPanel({
         </h3>
         <div className="space-y-2">
           <div className="flex justify-between items-center">
-            <span className="text-xs text-zinc-500 font-mono">PROJECT NAME</span>
-            <span className="text-xs text-zinc-200 font-medium">Data Aggregation Pipeline</span>
+            <span className="text-xs text-zinc-500 font-mono">TASK NAME</span>
+            <span className="text-xs text-zinc-200 font-medium">{taskSession.name}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-xs text-zinc-500 font-mono">PROGRESS</span>
@@ -202,52 +171,26 @@ export function MonitorRightPanel({
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-xs text-zinc-500 font-mono">TOKENS GENERATED</span>
+            <span className="text-xs text-zinc-500 font-mono">TOTAL TOKENS</span>
             <span className="text-xs text-zinc-200 font-mono">
-              ~{Math.round(events.filter((e) => e.timestamp <= currentTime).length * 1.45)}K
+              {taskSession.metrics.totalTokens > 1_000_000
+                ? `${(taskSession.metrics.totalTokens / 1_000_000).toFixed(1)}M`
+                : taskSession.metrics.totalTokens > 1_000
+                  ? `${(taskSession.metrics.totalTokens / 1_000).toFixed(0)}K`
+                  : taskSession.metrics.totalTokens}
             </span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-zinc-500 font-mono">AVG LATENCY</span>
-            <span className="text-xs text-emerald-400 font-mono">245ms</span>
           </div>
         </div>
       </div>
 
-      {/* Chat resize handle */}
-      <div
-        onMouseDown={onChatResizeDown}
-        style={{
-          height: 5,
-          cursor: "row-resize",
-          position: "relative",
-          flexShrink: 0,
-          marginTop: -2,
-          marginBottom: -3,
-          zIndex: 30,
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 2,
-            height: 1,
-            background: "var(--border, rgba(63,63,70,0.5))",
-            transition: "background 0.15s",
-          }}
-        />
-      </div>
+      {/* Divider */}
+      <div style={{ height: 1, flexShrink: 0, background: "var(--border, rgba(63,63,70,0.5))" }} />
 
-      {/* Chat */}
+      {/* Chat — fills all remaining space */}
       <div
         ref={chatRef}
-        className="flex flex-col overflow-hidden"
+        className="flex-1 flex flex-col overflow-hidden min-h-0"
         style={{
-          height: chatHeight ?? "40%",
-          flexShrink: 0,
-          minHeight: 60,
           background: "var(--bg-elevated, #191c24)",
         }}
       >
@@ -260,32 +203,19 @@ export function MonitorRightPanel({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-          <div className="flex justify-end pl-12">
-            <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm">
-              Dispatch an agent to investigate the memory leak in the payment service.
-            </div>
-          </div>
-          <div className="w-full">
-            <div className="text-sm text-zinc-300 leading-relaxed">
-              Agent <span className="text-emerald-400 font-mono">Debugger-01</span> dispatched to{" "}
-              <span className="text-blue-400 font-mono">payment-service</span>.<br />
-              <span className="text-zinc-500 mt-1 block text-xs">
-                Estimated time to initial report: 2m.
-              </span>
-            </div>
-          </div>
-          <div className="flex justify-end pl-12">
-            <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm">
-              Update schedule for Data-Processor to run every hour instead of every 6 hours.
-            </div>
-          </div>
-          <div className="w-full">
-            <div className="text-sm text-zinc-300 leading-relaxed">
-              Schedule updated for{" "}
-              <span className="text-emerald-400 font-mono">Data-Processor</span>.<br />
-              <span className="text-zinc-500 mt-1 block text-xs">Next run scheduled at T+60m.</span>
-            </div>
-          </div>
+          {taskSession.chatMessages.map((msg) =>
+            msg.role === "user" ? (
+              <div key={msg.id} className="flex justify-end pl-12">
+                <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm">
+                  {msg.content}
+                </div>
+              </div>
+            ) : (
+              <div key={msg.id} className="w-full">
+                <div className="text-sm text-zinc-300 leading-relaxed">{msg.content}</div>
+              </div>
+            ),
+          )}
         </div>
         <div
           className="p-4 border-t border-zinc-800/80"
