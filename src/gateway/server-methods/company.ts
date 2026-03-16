@@ -158,6 +158,14 @@ export const companyHandlers: GatewayRequestHandlers = {
     if (typeof params.runtime === "string") {
       metaPartial.runtime = params.runtime;
     }
+    if (typeof params.agentCli === "string") {
+      const cli = params.agentCli.trim();
+      metaPartial.agentCli = cli || undefined;
+    }
+    if (typeof params.systemPrompt === "string") {
+      const prompt = params.systemPrompt.trim();
+      metaPartial.systemPrompt = prompt || undefined;
+    }
     if (typeof params.reportTo === "string") {
       const reportTo = params.reportTo.trim();
       metaPartial.reportTo = reportTo || undefined;
@@ -195,6 +203,14 @@ export const companyHandlers: GatewayRequestHandlers = {
         params.runtime,
         "openclaw",
       ) as import("../../company/types.js").ClawDockRuntime,
+      agentCli:
+        typeof params.agentCli === "string" && params.agentCli.trim()
+          ? params.agentCli.trim()
+          : undefined,
+      systemPrompt:
+        typeof params.systemPrompt === "string" && params.systemPrompt.trim()
+          ? params.systemPrompt
+          : undefined,
     };
     if (typeof params.reportTo === "string") {
       metaPartial.reportTo = params.reportTo.trim() || undefined;

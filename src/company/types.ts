@@ -88,6 +88,8 @@ export interface ClawDockAgent {
   name: string;
   model: string;
   skills?: string[];
+  agentCli?: string;
+  systemPrompt?: string;
   // from AgentMeta
   role: string;
   team: string;

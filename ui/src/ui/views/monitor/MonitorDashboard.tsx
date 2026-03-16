@@ -311,17 +311,23 @@ export function MonitorDashboard(props: DashboardProps) {
           {/* Session/Mission picker */}
           {props.viewMode === "sessions" ? (
             <select
-              value={props.taskSession.id}
+              value={props.availableTaskSessions.length > 0 ? props.taskSession.id : ""}
               onChange={(e) => props.onSessionChange(e.target.value)}
               className="bg-transparent text-xs font-medium text-zinc-200 border border-zinc-700/50 rounded px-2 py-1 outline-none cursor-pointer hover:border-zinc-500 transition-colors"
               style={{ maxWidth: 240, fontFamily: "var(--mono)" }}
               title="Select task session"
             >
-              {props.availableTaskSessions.map((s) => (
-                <option key={s.id} value={s.id} style={{ background: "var(--card, #161920)" }}>
-                  {s.name}
+              {props.availableTaskSessions.length === 0 ? (
+                <option value="" disabled style={{ background: "var(--card, #161920)" }}>
+                  No sessions yet
                 </option>
-              ))}
+              ) : (
+                props.availableTaskSessions.map((s) => (
+                  <option key={s.id} value={s.id} style={{ background: "var(--card, #161920)" }}>
+                    {s.name}
+                  </option>
+                ))
+              )}
             </select>
           ) : (
             <select

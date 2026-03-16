@@ -153,6 +153,8 @@ export type CreateAgentParams = {
   color?: string;
   runtime?: string;
   description?: string;
+  agentCli?: string;
+  systemPrompt?: string;
   reportTo?: string | null;
 };
 
@@ -163,6 +165,8 @@ export type UpdateAgentParams = {
   color?: string;
   runtime?: string;
   description?: string;
+  agentCli?: string;
+  systemPrompt?: string;
   reportTo?: string | null;
 };
 

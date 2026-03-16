@@ -1,6 +1,6 @@
 import { html } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { getAvatarUrlForAgent } from "../company-avatars.ts";
+import { getAvatarVariantForAgent } from "../company-avatars.ts";
 import type { ClawDockAgent, LogEntry as RealLogEntry } from "../company-types.ts";
 import { formatExecutionLogContent, toSanitizedMarkdownHtml } from "../markdown.ts";
 
@@ -61,6 +61,8 @@ type LogEntry = {
   content: string;
   tokens?: number;
   duration?: number;
+  pinnedCopy?: boolean;
+  pinnedFromId?: string;
 };
 
 /** Saved replay snapshot for execution log playback. */
@@ -428,9 +430,12 @@ function normalizeLogContent(content: string): string {
 
 /** Strip [tools], [tool], [warn], [info] etc. for display in office animation bubbles. */
 function stripNoiseForDisplay(content: string): string {
-  const s = stripLogContent(content).trim();
-  const stripped = s.replace(
-    /^\[(?:tools?|warn|info|plugins|model-selection|model-fallback\/decision)\]\s*/i,
+  let stripped = stripLogContent(content).trim();
+  const noisePrefix =
+    /^(?:\[(?:tools?|tool_call|warn|info|plugins|model-selection|model-fallback\/decision|filter|filters|debug|trace)\]\s*)+/i;
+  stripped = stripped.replace(noisePrefix, "").trim();
+  stripped = stripped.replace(
+    /\[(?:tools?|tool_call|warn|info|plugins|model-selection|model-fallback\/decision|filter|filters|debug|trace)\]/gi,
     "",
   );
   return stripped.trim();
@@ -445,7 +450,9 @@ function isNoiseLogEntry(entry: LogEntry): boolean {
     return true;
   }
   return (
-    /^\[(?:tools|warn|info|plugins|model-selection|model-fallback\/decision)\]/.test(content) ||
+    /^\[(?:tools?|tool_call|warn|info|plugins|model-selection|model-fallback\/decision|filter|filters|debug|trace)\]/.test(
+      content,
+    ) ||
     content.startsWith("[agent/embedded] embedded run agent end:") ||
     content.startsWith("[agent/embedded] embedded run failover decision:")
   );
@@ -515,9 +522,12 @@ function addLog(
   }
   _scrollLogToBottom();
   // Spawn canvas bubble for output and thinking (skip tool_call noise like [tools])
-  if (type === "output" || type === "thinking" || type === "tool_call") {
+  if (type === "output" || type === "thinking") {
     const displayContent = stripNoiseForDisplay(content);
-    if (displayContent.length < 2) {
+    if (!displayContent || displayContent.length < 2) {
+      return;
+    }
+    if (/^\s*\[(?:tool|tools)\b/i.test(displayContent)) {
       return;
     }
     const maxBubbleLen = 120;
@@ -1155,15 +1165,21 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                 const fadeIn = (200 - bubble.timer) / 10;
                 const fadeOut = bubble.timer < 40 ? bubble.timer / 40 : 1;
                 const opacity = Math.min(fadeIn, fadeOut);
-                // Position bubble above the agent, offset to the right to avoid overlap
-                const offsetY = -TILE * 1.1;
+                const bubbleWidth = 300;
+                const agentWidth = 92;
+                const anchorLeft = agent.x * TILE + agentWidth + 16;
+                const left = Math.min(anchorLeft, W - bubbleWidth - 12);
+                const anchorTop = agent.y * TILE - 18;
+                const top = Math.max(12, anchorTop - 96);
                 return html`
                   <div class="cd-canvas-bubble" style="
-                    left:${agent.x * TILE + TILE * 0.6}px;
-                    top:${agent.y * TILE + offsetY}px;
+                    left:${left}px;
+                    top:${top}px;
                     opacity:${opacity};
                     border-color:${bubble.color}40;
-                    box-shadow: 0 0 12px ${bubble.color}30;
+                    box-shadow:
+                      0 12px 30px rgba(15,23,42,0.25),
+                      0 0 0 1px ${bubble.color}1f;
                   ">
                     <div class="cd-canvas-bubble__bar" style="background:${bubble.color}"></div>
                     <div class="cd-canvas-bubble__text">${bubble.text}</div>
@@ -1173,6 +1189,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
 
               <!-- Agents -->
               ${_agents.map((agent) => {
+                const avatar = getAvatarVariantForAgent(agent.id);
                 return html`
                   <div class="cd-office-agent ${agent.status === "crashed" ? "cd-office-agent--crashed" : ""} ${agent.status === "messaging" ? "cd-office-agent--messaging" : ""}"
                     style="left:${agent.x * TILE}px;top:${agent.y * TILE}px;--agent-accent:${agent.color}">
@@ -1186,7 +1203,14 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                             : "#ef4444"
                     }"></span>
                     <span class="cd-office-agent__avatar-shell">
-                      <img class="cd-office-agent__avatar-img" src="${getAvatarUrlForAgent(agent.id)}" alt="" width="40" height="40" />
+                      <img
+                        class="cd-office-agent__avatar-img"
+                        src="${avatar.url}"
+                        alt=""
+                        width="40"
+                        height="40"
+                        style="filter:hue-rotate(${avatar.hue}deg) saturate(1.05);"
+                      />
                     </span>
                     <span class="cd-office-agent__name-pill">${agent.name}</span>
                     <span class="cd-office-agent__role-text">${agent.team}</span>
@@ -1443,14 +1467,32 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                         .toReversed()
                         .find((e) => e.type === "output" && e.content.trim().length > 50);
                       const lastOutputId = lastOutput?.id ?? null;
-                      return filteredLog
-                        .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
-                        .map((entry) => {
-                          const isFinalOutput =
-                            entry.type === "output" &&
+                      const visibleLog = filteredLog.filter(
+                        (e) => _logAgentFilter === "all" || e.agent === _logAgentFilter,
+                      );
+                      const shouldPinFinal =
+                        Boolean(lastOutput) &&
+                        visibleLog.some((entry) => entry.id === lastOutputId) &&
+                        visibleLog.at(-1)?.id !== lastOutputId;
+                      const entriesToRender: LogEntry[] = shouldPinFinal
+                        ? [
+                            ...visibleLog,
+                            {
+                              ...lastOutput!,
+                              id: `${lastOutput!.id}__pinned`,
+                              pinnedCopy: true,
+                              pinnedFromId: lastOutput!.id,
+                            },
+                          ]
+                        : visibleLog;
+                      return entriesToRender.map((entry) => {
+                        const isPinnedCopy = entry.pinnedCopy === true;
+                        const isFinalOutput =
+                          isPinnedCopy ||
+                          (entry.type === "output" &&
                             entry.id === lastOutputId &&
-                            entry.content.trim().length > 50;
-                          return html`
+                            entry.content.trim().length > 50);
+                        return html`
                 <div class="cd-log-entry ${logTypeClass(entry.type)} ${isFinalOutput ? "cd-log-entry--final" : ""}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
@@ -1458,7 +1500,9 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                     ${
                       isFinalOutput
                         ? html`
-                            <span class="cd-log-entry__final-badge">Final Output</span>
+                            <span class="cd-log-entry__final-badge">
+                              ${isPinnedCopy ? "Final Output (pinned)" : "Final Output"}
+                            </span>
                           `
                         : ""
                     }
@@ -1485,7 +1529,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   }</div>
                 </div>
               `;
-                        });
+                      });
                     })()
               }
             </div>
