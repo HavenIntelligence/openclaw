@@ -373,7 +373,13 @@ export function MonitorBottomPanel({
                       margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
-                      <XAxis type="number" stroke="#666" fontSize={10} allowDecimals={false} />
+                      <XAxis
+                        type="number"
+                        stroke="#666"
+                        fontSize={10}
+                        allowDecimals={false}
+                        domain={[0, (max: number) => Math.max(max, 1)]}
+                      />
                       <YAxis
                         dataKey="name"
                         type="category"
