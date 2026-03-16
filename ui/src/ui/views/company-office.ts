@@ -63,7 +63,35 @@ type LogEntry = {
   duration?: number;
 };
 
-// ── (Project type removed — projects UI stripped) ───────────────────────────
+/** Saved replay snapshot for execution log playback. */
+export type ReplaySnapshot = {
+  id: string;
+  savedAt: number;
+  title?: string;
+  entries: LogEntry[];
+};
+
+const REPLAY_STORAGE_KEY = "clawdock-office-replays";
+const REPLAY_LIST_MAX = 20;
+
+function getReplayList(): ReplaySnapshot[] {
+  try {
+    const raw = localStorage.getItem(REPLAY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const list = JSON.parse(raw) as ReplaySnapshot[];
+    return Array.isArray(list) ? list.slice(-REPLAY_LIST_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushReplay(snapshot: ReplaySnapshot): void {
+  const list = getReplayList();
+  list.push(snapshot);
+  localStorage.setItem(REPLAY_STORAGE_KEY, JSON.stringify(list.slice(-REPLAY_LIST_MAX)));
+}
 
 // ── Layout constants ──────────────────────────────────────────────────────
 const TILE = 80;
@@ -148,8 +176,8 @@ function computeLayout(agents: ClawDockAgent[]): {
   const totalTeamCols = Math.max(nonDirTeams.length + (dirTeamAgents.length > 0 ? 1 : 0), 1);
   const totalW = totalTeamCols * ZONE_W;
 
-  // Offset director down by 1 row so thought bubbles have room above
-  const dirTopY = 1;
+  // Offset director down so thought bubbles have room above and are not clipped
+  const dirTopY = 2;
 
   if (director) {
     const dirX = Math.floor(totalW / 2);
@@ -165,8 +193,8 @@ function computeLayout(agents: ClawDockAgent[]): {
     });
   }
 
-  // Team columns below director zone
-  const teamStartY = director ? dirTopY + 2 : 0;
+  // Team columns below director zone (extra row gap so CEO is not tight against team)
+  const teamStartY = director ? dirTopY + 2 + 1 : 0;
   let colIdx = 0;
 
   // If director's team has other members, show them as a column too
@@ -235,12 +263,26 @@ let _logIdCounter = 0;
 
 // ── Human input state ──────────────────────────────────────────────────────
 let _humanInput = "";
-let _rightTab: "log" | "output" = "log";
+let _rightTab: "log" | "output" | "replay" = "log";
 let _logAgentFilter: string = "all";
 let _expandedOutputIds: Set<string> = new Set();
 let _panelWidth = 380; // px — right panel width, draggable
 let _isDragging = false;
 let _lastVisibleLogId = "";
+
+// Replay state
+let _replayList: ReplaySnapshot[] = [];
+let _replaySelectedId: string | null = null;
+let _replayEntries: LogEntry[] = [];
+let _replayIndex = 0;
+let _replayPlaying = false;
+let _replaySpeed = 1; // 1, 2, 4
+let _replayTimerId: ReturnType<typeof setInterval> | null = null;
+let _replayRequestUpdate: (() => void) | null = null;
+let _prevRunningCount = -1;
+/** Entry IDs whose full content is shown in replay log (long entries default collapsed). */
+const REPLAY_COLLAPSE_THRESHOLD = 500;
+let _replayExpandedIds = new Set<string>();
 
 // ── Callbacks from props (module-level to be accessible in renderFn) ────────
 let _onSendMessage: ((content: string) => void) | undefined;
@@ -250,6 +292,94 @@ let _onResumeAll: (() => void | Promise<void>) | undefined;
 let _onStopAll: (() => void | Promise<void>) | undefined;
 let _runningCount = 0;
 let _pausedCount = 0;
+
+/** Save current log as JSON and optionally add to replay list. */
+function saveLogToFile(
+  entries: LogEntry[],
+  addToReplays: boolean,
+  requestUpdate?: () => void,
+): void {
+  const snapshot: ReplaySnapshot = {
+    id: `replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    savedAt: Date.now(),
+    title: `Session ${new Date().toLocaleString()}`,
+    entries: entries.map((e) => ({ ...e })),
+  };
+  if (addToReplays) {
+    pushReplay(snapshot);
+    _replayList = getReplayList();
+    if (requestUpdate) {
+      requestUpdate();
+    }
+  }
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `clawdock-exec-log-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** Auto-save a replay when conversation finishes (call when run ends with logs). */
+function autoSaveReplayIfNeeded(entries: LogEntry[], requestUpdate?: () => void): void {
+  if (entries.length === 0) {
+    return;
+  }
+  const snapshot: ReplaySnapshot = {
+    id: `replay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    savedAt: Date.now(),
+    title: `Auto ${new Date().toLocaleString()}`,
+    entries: entries.map((e) => ({ ...e })),
+  };
+  pushReplay(snapshot);
+  _replayList = getReplayList();
+  if (requestUpdate) {
+    requestUpdate();
+  }
+}
+
+function replayStop(): void {
+  _replayPlaying = false;
+  if (_replayTimerId) {
+    clearInterval(_replayTimerId);
+    _replayTimerId = null;
+  }
+  _replayRequestUpdate?.();
+}
+
+function replayStepForward(): void {
+  if (_replayIndex < _replayEntries.length - 1) {
+    _replayIndex++;
+    _replayRequestUpdate?.();
+  } else {
+    replayStop();
+  }
+}
+
+function replayStepBack(): void {
+  if (_replayIndex > 0) {
+    _replayIndex--;
+    _replayRequestUpdate?.();
+  }
+}
+
+function replayPlay(): void {
+  if (_replayEntries.length === 0) {
+    return;
+  }
+  if (_replayIndex >= _replayEntries.length - 1) {
+    _replayIndex = 0;
+  }
+  _replayPlaying = true;
+  const intervalMs = Math.max(400, 1500 / _replaySpeed);
+  _replayTimerId = setInterval(() => {
+    replayStepForward();
+    if (!_replayPlaying) {
+      return;
+    }
+  }, intervalMs);
+  _replayRequestUpdate?.();
+}
 
 /** Sends a message to the company: records an optimistic log entry and sets director to thinking. */
 function _sendToCompany(msg: string) {
@@ -261,7 +391,9 @@ function _sendToCompany(msg: string) {
   if (directorAgent) {
     directorAgent.activity = "Reading your message…";
     directorAgent.status = "thinking";
-    directorAgent.thoughtBubble = msg.slice(0, 48) + (msg.length > 48 ? "…" : "");
+    const maxThoughtLen = 120;
+    directorAgent.thoughtBubble =
+      msg.slice(0, maxThoughtLen) + (msg.length > maxThoughtLen ? "…" : "");
     directorAgent.thoughtTimer = 240;
   }
   // Fire the real backend RPC.
@@ -292,6 +424,16 @@ function stripLogContent(content: string): string {
 
 function normalizeLogContent(content: string): string {
   return stripLogContent(content).trim();
+}
+
+/** Strip [tools], [tool], [warn], [info] etc. for display in office animation bubbles. */
+function stripNoiseForDisplay(content: string): string {
+  const s = stripLogContent(content).trim();
+  const stripped = s.replace(
+    /^\[(?:tools?|warn|info|plugins|model-selection|model-fallback\/decision)\]\s*/i,
+    "",
+  );
+  return stripped.trim();
 }
 
 function isNoiseLogEntry(entry: LogEntry): boolean {
@@ -372,11 +514,18 @@ function addLog(
     _execLog = _execLog.slice(-60);
   }
   _scrollLogToBottom();
-  // Spawn canvas bubble for output and thinking entries
+  // Spawn canvas bubble for output and thinking (skip tool_call noise like [tools])
   if (type === "output" || type === "thinking" || type === "tool_call") {
-    const shortText = content.length > 60 ? content.slice(0, 57) + "…" : content;
+    const displayContent = stripNoiseForDisplay(content);
+    if (displayContent.length < 2) {
+      return;
+    }
+    const maxBubbleLen = 120;
+    const shortText =
+      displayContent.length > maxBubbleLen
+        ? displayContent.slice(0, maxBubbleLen - 1) + "…"
+        : displayContent;
     const color = type === "output" ? "var(--ok)" : type === "tool_call" ? "#a78bfa" : "#60a5fa";
-    // Remove existing bubble for same agent before adding new one (prevents overlap)
     _canvasBubbles = _canvasBubbles.filter((b) => b.agentId !== agent);
     _canvasBubbles.push({
       id: `bubble-${_bubbleIdCounter++}`,
@@ -473,12 +622,12 @@ function startSimulation(update: () => void) {
 // ── Log type helpers ───────────────────────────────────────────────────────
 function logTypeClass(type: LogEntry["type"]) {
   const map: Record<string, string> = {
-    tool_call: "cd-log--tool",
-    output: "cd-log--output",
-    thinking: "cd-log--thinking",
-    human: "cd-log--human",
-    error: "cd-log--error",
-    system: "cd-log--system",
+    tool_call: "cd-log-entry--tool",
+    output: "cd-log-entry--output",
+    thinking: "cd-log-entry--thinking",
+    human: "cd-log-entry--human",
+    error: "cd-log-entry--error",
+    system: "cd-log-entry--system",
   };
   return map[type] ?? "";
 }
@@ -553,6 +702,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   _onStopAll = props.onStopAll;
   _runningCount = props.runningCount ?? 0;
   _pausedCount = props.pausedCount ?? 0;
+  _replayRequestUpdate = props.requestUpdate ?? null;
 
   // Rebuild agent list from real backend data on first seed or when the list changes.
   if (props.agents && props.agents.length > 0) {
@@ -626,8 +776,71 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
     _agents = _agents.filter((a) => backendIds.has(a.id));
   }
 
-  // Ingest real-time logs into animation: recent log entries trigger thought bubbles and canvas bubbles
-  if (props.logs && props.logs.size > 0) {
+  // Ingest logs into animation: thought bubbles and canvas bubbles. In replay mode, drive from replay entries up to _replayIndex so left office matches right panel.
+  if (_rightTab === "replay" && _replayEntries.length > 0) {
+    const slice = _replayEntries.slice(0, _replayIndex + 1);
+    const byAgent = new Map<string, LogEntry[]>();
+    for (const e of slice) {
+      if (!e.agent) {
+        continue;
+      }
+      const list = byAgent.get(e.agent) ?? [];
+      list.push(e);
+      byAgent.set(e.agent, list);
+    }
+    for (const [agentId, entries] of byAgent) {
+      const agent = _agents.find((a) => a.id === agentId);
+      if (!agent) {
+        continue;
+      }
+      const latest = entries[entries.length - 1];
+      for (const e of entries) {
+        if (e.type === "system" && e.content.includes("[TASK_ASSIGNED]")) {
+          const taskDesc = e.content.replace(/\[TASK_ASSIGNED\]\s*\S+\s*picked up:\s*/, "");
+          agent.activity = taskDesc.slice(0, 40);
+          agent.status = "working";
+        } else if (e.type === "system" && e.content.includes("[TASK_DONE]")) {
+          agent.activity = "";
+          agent.status = "idle";
+        } else if (e.type === "system" && e.content.includes("[TASK_FAILED]")) {
+          agent.activity = "";
+          agent.status = "crashed";
+        }
+      }
+      const maxThoughtLen = 120; // ~3 lines in thought bubble
+      const text = latest.content.slice(0, maxThoughtLen);
+      if (text.length > 5) {
+        agent.thoughtBubble = text + (latest.content.length > maxThoughtLen ? "…" : "");
+        agent.thoughtTimer = 200;
+      }
+    }
+    _canvasBubbles = [];
+    const maxBubbleLen = 120;
+    for (const e of slice) {
+      if (e.type !== "output" && e.type !== "system" && e.type !== "thinking") {
+        continue;
+      }
+      const displayContent = stripNoiseForDisplay(e.content);
+      if (displayContent.length < 2) {
+        continue;
+      }
+      const shortText =
+        displayContent.length > maxBubbleLen
+          ? displayContent.slice(0, maxBubbleLen - 1) + "…"
+          : displayContent;
+      const color = e.type === "output" ? "var(--ok)" : e.type === "system" ? "#60a5fa" : "#a78bfa";
+      _canvasBubbles.push({
+        id: `be-${e.id}`,
+        agentId: e.agent,
+        text: shortText,
+        timer: 300,
+        color,
+      });
+    }
+    if (_canvasBubbles.length > 8) {
+      _canvasBubbles = _canvasBubbles.slice(-8);
+    }
+  } else if (props.logs && props.logs.size > 0) {
     const recentCutoff = Date.now() - 30_000; // last 30 seconds
     for (const [agentId, entries] of props.logs) {
       const agent = _agents.find((a) => a.id === agentId);
@@ -637,7 +850,6 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
       const recent = entries.filter((e) => e.ts > recentCutoff);
       if (recent.length > 0) {
         const latest = recent[recent.length - 1];
-        // Update agent activity and status based on task lifecycle events
         for (const e of recent) {
           if (e.type === "system" && e.content.includes("[TASK_ASSIGNED]")) {
             const taskDesc = e.content.replace(/\[TASK_ASSIGNED\]\s*\S+\s*picked up:\s*/, "");
@@ -651,22 +863,29 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             agent.status = "crashed";
           }
         }
-        // Show latest log as thought bubble if agent doesn't already have one
+        const maxThoughtLen = 120;
         if (agent.thoughtTimer <= 0) {
-          const text = latest.content.slice(0, 60);
+          const text = latest.content.slice(0, maxThoughtLen);
           if (text.length > 5) {
-            agent.thoughtBubble = text + (latest.content.length > 60 ? "…" : "");
+            agent.thoughtBubble = text + (latest.content.length > maxThoughtLen ? "…" : "");
             agent.thoughtTimer = 200;
           }
         }
-        // Create canvas bubbles for output/system entries not already bubbled
+        const maxBubbleLen = 120;
         for (const e of recent) {
           const bubbleExists = _canvasBubbles.some((b) => b.id === `be-${e.id}`);
           if (
             !bubbleExists &&
             (e.type === "output" || e.type === "system" || e.type === "thinking")
           ) {
-            const shortText = e.content.length > 60 ? e.content.slice(0, 57) + "…" : e.content;
+            const displayContent = stripNoiseForDisplay(e.content);
+            if (displayContent.length < 2) {
+              continue;
+            }
+            const shortText =
+              displayContent.length > maxBubbleLen
+                ? displayContent.slice(0, maxBubbleLen - 1) + "…"
+                : displayContent;
             const color =
               e.type === "output" ? "var(--ok)" : e.type === "system" ? "#60a5fa" : "#a78bfa";
             _canvasBubbles.push({
@@ -781,6 +1000,11 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
   } else if (!latestVisibleLogId) {
     _lastVisibleLogId = "";
   }
+  // Auto-save replay when conversation run finishes (running count drops to 0 with logs)
+  if (_prevRunningCount > 0 && _runningCount === 0 && filteredLog.length > 0) {
+    autoSaveReplayIfNeeded(filteredLog, props.requestUpdate);
+  }
+  _prevRunningCount = _runningCount;
 
   return html`
     <div class="cd-page cd-page--office"
@@ -1167,33 +1391,45 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
             <button class="cd-office-panel__tab ${_rightTab === "log" ? "cd-office-panel__tab--active" : ""}"
               @click=${() => {
                 _rightTab = "log";
-              }}>📋 Execution Log</button>
+              }}>📋 Log</button>
             <button class="cd-office-panel__tab ${_rightTab === "output" ? "cd-office-panel__tab--active" : ""}"
               @click=${() => {
                 _rightTab = "output";
               }}>📤 Outputs</button>
+            <button class="cd-office-panel__tab ${_rightTab === "replay" ? "cd-office-panel__tab--active" : ""}"
+              @click=${() => {
+                _rightTab = "replay";
+                _replayList = getReplayList();
+              }}>▶ Replay</button>
           </div>
 
           <!-- Execution Log tab — newest at bottom, auto-scroll -->
           ${
             _rightTab === "log"
               ? html`
-            <div class="cd-log-agent-filter">
-              <button class="cd-log-af-btn ${_logAgentFilter === "all" ? "cd-log-af-btn--active" : ""}"
-                @click=${() => {
-                  _logAgentFilter = "all";
-                }}>All</button>
-              ${_agents.map(
-                (a) => html`
-                <button class="cd-log-af-btn ${_logAgentFilter === a.id ? "cd-log-af-btn--active" : ""}"
-                  style="${_logAgentFilter === a.id ? `border-color:${a.color};color:${a.color}` : ""}"
+            <div class="cd-office-log-toolbar">
+              <div class="cd-log-agent-filter">
+                <button class="cd-log-af-btn ${_logAgentFilter === "all" ? "cd-log-af-btn--active" : ""}"
                   @click=${() => {
-                    _logAgentFilter = _logAgentFilter === a.id ? "all" : a.id;
-                  }}>
-                  ${a.emoji} ${agentDisplayName(a.id, a.name)}
-                </button>
-              `,
-              )}
+                    _logAgentFilter = "all";
+                  }}>All</button>
+                ${_agents.map(
+                  (a) => html`
+                  <button class="cd-log-af-btn ${_logAgentFilter === a.id ? "cd-log-af-btn--active" : ""}"
+                    style="${_logAgentFilter === a.id ? `border-color:${a.color};color:${a.color}` : ""}"
+                    @click=${() => {
+                      _logAgentFilter = _logAgentFilter === a.id ? "all" : a.id;
+                    }}>
+                    ${a.emoji} ${agentDisplayName(a.id, a.name)}
+                  </button>
+                `,
+                )}
+              </div>
+              <button class="cd-btn cd-btn--ghost cd-btn--xs cd-office-log-save"
+                title="Save log as JSON and add to Replay list"
+                @click=${() => {
+                  saveLogToFile(filteredLog, true, props.requestUpdate);
+                }}>💾 Save log</button>
             </div>
             <div class="cd-office-log" id="cd-exec-log">
               ${
@@ -1201,11 +1437,20 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   ? html`
                       <div class="cd-office-empty">No logs yet — send a message below to start.</div>
                     `
-                  : filteredLog
-                      .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
-                      .map((entry) => {
-                        const isFinalOutput = entry.type === "output" && entry.content.length > 100;
-                        return html`
+                  : (() => {
+                      // Only the chronologically last output is "Final Output" (after verify passes)
+                      const lastOutput = [...filteredLog]
+                        .toReversed()
+                        .find((e) => e.type === "output" && e.content.trim().length > 50);
+                      const lastOutputId = lastOutput?.id ?? null;
+                      return filteredLog
+                        .filter((e) => _logAgentFilter === "all" || e.agent === _logAgentFilter)
+                        .map((entry) => {
+                          const isFinalOutput =
+                            entry.type === "output" &&
+                            entry.id === lastOutputId &&
+                            entry.content.trim().length > 50;
+                          return html`
                 <div class="cd-log-entry ${logTypeClass(entry.type)} ${isFinalOutput ? "cd-log-entry--final" : ""}">
                   <div class="cd-log-entry__header">
                     <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
@@ -1240,7 +1485,8 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                   }</div>
                 </div>
               `;
-                      })
+                        });
+                    })()
               }
             </div>
           `
@@ -1298,7 +1544,158 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
               }
             </div>
           `
-              : ""
+              : _rightTab === "replay"
+                ? html`
+            <div class="cd-office-replay">
+              <div class="cd-office-replay__load">
+                <label class="cd-office-replay__label">Load replay</label>
+                <select class="cd-office-replay__select"
+                  .value=${_replaySelectedId ?? ""}
+                  @change=${(e: Event) => {
+                    const id = (e.target as HTMLSelectElement).value;
+                    _replaySelectedId = id || null;
+                    const snap = _replayList.find((r) => r.id === id);
+                    if (snap) {
+                      _replayEntries = snap.entries;
+                      _replayIndex = 0;
+                      _replayExpandedIds = new Set();
+                      replayStop();
+                    } else {
+                      _replayEntries = [];
+                      _replayIndex = 0;
+                      _replayExpandedIds = new Set();
+                    }
+                    props.requestUpdate?.();
+                  }}>
+                  <option value="">— Select or load file —</option>
+                  ${_replayList.map(
+                    (r) => html`
+                    <option value="${r.id}">${r.title ?? new Date(r.savedAt).toLocaleString()} (${r.entries.length})</option>
+                  `,
+                  )}
+                </select>
+                <input type="file" accept=".json,application/json" class="cd-office-replay__file" id="cd-replay-file-input"
+                  @change=${(e: Event) => {
+                    const input = e.target as HTMLInputElement;
+                    const file = input.files?.[0];
+                    if (!file) {
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.addEventListener("load", () => {
+                      try {
+                        const snap = JSON.parse(reader.result as string) as ReplaySnapshot;
+                        if (!snap.entries || !Array.isArray(snap.entries)) {
+                          return;
+                        }
+                        snap.id = `replay_${Date.now()}`;
+                        snap.savedAt = snap.savedAt ?? Date.now();
+                        _replayEntries = snap.entries;
+                        _replayIndex = 0;
+                        _replaySelectedId = null;
+                        _replayExpandedIds = new Set();
+                        replayStop();
+                        props.requestUpdate?.();
+                      } catch {
+                        /* ignore */
+                      }
+                      input.value = "";
+                    });
+                    reader.readAsText(file);
+                  }} />
+                <button type="button" class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => document.getElementById("cd-replay-file-input")?.click()}>📂 Load file</button>
+              </div>
+              ${
+                _replayEntries.length > 0
+                  ? html`
+                <div class="cd-office-replay__controls">
+                  <button class="cd-replay-btn" title="Previous" @click=${() => {
+                    replayStepBack();
+                    props.requestUpdate?.();
+                  }}>⏮</button>
+                  <button class="cd-replay-btn" title="${_replayPlaying ? "Pause" : "Play"}"
+                    @click=${() => {
+                      if (_replayPlaying) {
+                        replayStop();
+                      } else {
+                        replayPlay();
+                      }
+                      props.requestUpdate?.();
+                    }}>${_replayPlaying ? "⏸" : "▶"}</button>
+                  <button class="cd-replay-btn" title="Next" @click=${() => {
+                    replayStepForward();
+                    props.requestUpdate?.();
+                  }}>⏭</button>
+                  <span class="cd-office-replay__speed">
+                    <button class="cd-replay-btn cd-replay-btn--sm ${_replaySpeed === 1 ? "cd-replay-btn--active" : ""}" @click=${() => {
+                      _replaySpeed = 1;
+                      if (_replayPlaying) {
+                        replayStop();
+                        replayPlay();
+                      }
+                      props.requestUpdate?.();
+                    }}>1×</button>
+                    <button class="cd-replay-btn cd-replay-btn--sm ${_replaySpeed === 2 ? "cd-replay-btn--active" : ""}" @click=${() => {
+                      _replaySpeed = 2;
+                      if (_replayPlaying) {
+                        replayStop();
+                        replayPlay();
+                      }
+                      props.requestUpdate?.();
+                    }}>2×</button>
+                    <button class="cd-replay-btn cd-replay-btn--sm ${_replaySpeed === 4 ? "cd-replay-btn--active" : ""}" @click=${() => {
+                      _replaySpeed = 4;
+                      if (_replayPlaying) {
+                        replayStop();
+                        replayPlay();
+                      }
+                      props.requestUpdate?.();
+                    }}>4×</button>
+                  </span>
+                  <span class="cd-office-replay__pos">${_replayIndex + 1} / ${_replayEntries.length}</span>
+                </div>
+                <div class="cd-office-replay__log">
+                  ${_replayEntries.slice(0, _replayIndex + 1).map((entry) => {
+                    const isLong = entry.content.length > REPLAY_COLLAPSE_THRESHOLD;
+                    const expanded = _replayExpandedIds.has(entry.id);
+                    const showFull = !isLong || expanded;
+                    const displayContent = showFull
+                      ? entry.content
+                      : entry.content.slice(0, REPLAY_COLLAPSE_THRESHOLD) + "…";
+                    return html`
+                <div class="cd-log-entry ${logTypeClass(entry.type)}">
+                  <div class="cd-log-entry__header">
+                    <span class="cd-log-entry__icon">${logTypeIcon(entry.type, entry.content)}</span>
+                    <span class="cd-log-entry__agent">${entry.agentEmoji} ${entry.agentDisplayName ?? entry.agent}</span>
+                    <span class="cd-log-entry__ts">${entry.ts}</span>
+                  </div>
+                  <div class="cd-log-entry__content cd-log-entry__content--wrap">${displayContent}</div>
+                  ${
+                    isLong
+                      ? html`
+                  <button type="button" class="cd-replay-expand-btn" @click=${() => {
+                    if (expanded) {
+                      _replayExpandedIds.delete(entry.id);
+                    } else {
+                      _replayExpandedIds.add(entry.id);
+                    }
+                    props.requestUpdate?.();
+                  }}>${expanded ? "收起" : "展开"}</button>
+                  `
+                      : ""
+                  }
+                </div>
+                  `;
+                  })}
+                </div>
+              `
+                  : html`
+                      <div class="cd-office-empty">Select a replay above or load a JSON file.</div>
+                    `
+              }
+            </div>
+          `
+                : ""
           }
         </div>
       </div>

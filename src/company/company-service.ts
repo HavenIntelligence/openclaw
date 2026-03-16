@@ -16,6 +16,7 @@ import { GeminiRunner } from "./runners/gemini-runner.js";
 import { OpenClawRunner } from "./runners/openclaw-runner.js";
 import { TaskStore } from "./task-store.js";
 import { TeamStore } from "./team-store.js";
+import type { TeamConfig } from "./types.js";
 
 /**
  * CompanyService — top-level façade for ClawDock multi-agent orchestration.
@@ -88,6 +89,31 @@ export class CompanyService {
       this.profileStore.load(),
     ]);
     this.fleetMonitor.start();
+  }
+
+  /**
+   * Sync agent meta (team, reportTo) from team config so org chart, office, and teams
+   * stay consistent. Call after team create/update/delete.
+   * @param team - Updated team; members get team.name and reportTo = team.leaderId.
+   * @param previousAgentIds - Agents that were in the team before; those no longer in team get team "general" and reportTo cleared.
+   */
+  async syncAgentMetaFromTeam(
+    team: TeamConfig | null,
+    previousAgentIds: string[] = [],
+  ): Promise<void> {
+    const currentIds = new Set(team?.agents ?? []);
+    const toClear = previousAgentIds.filter((id) => !currentIds.has(id));
+    for (const agentId of toClear) {
+      await this.registry.upsertMeta(agentId, { team: "general", reportTo: undefined });
+    }
+    if (team) {
+      for (const agentId of team.agents) {
+        await this.registry.upsertMeta(agentId, {
+          team: team.name,
+          reportTo: team.leaderId?.trim() || undefined,
+        });
+      }
+    }
   }
 
   async shutdown(): Promise<void> {

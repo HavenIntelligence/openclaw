@@ -26,7 +26,11 @@ import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import { handleChatEvent, type ChatEventPayload } from "./controllers/chat.ts";
-import { loadCompanyAll, messageMatchesCompanyChatFilter } from "./controllers/company.ts";
+import {
+  loadCompanyAgents,
+  loadCompanyAll,
+  messageMatchesCompanyChatFilter,
+} from "./controllers/company.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import {
@@ -483,6 +487,8 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     } else {
       host.companyTeams = [...host.companyTeams, team];
     }
+    // Refetch agents so org chart and office hierarchy stay in sync with teams.
+    void loadCompanyAgents(host as unknown as import("./controllers/company.ts").CompanyState);
     return;
   }
 

@@ -99,6 +99,7 @@ const NODE_W = 220;
 const NODE_H = 118;
 const H_GAP = 44;
 const V_GAP = 86;
+const TOP_MARGIN = 48;
 
 // ── Layout engine ─────────────────────────────────────────────────────────────
 type LayoutNode = OrgNode & { x: number; y: number; subtreeW: number };
@@ -109,7 +110,13 @@ function layoutTree(node: OrgNode, depth = 0): LayoutNode {
     children.length === 0
       ? NODE_W
       : children.reduce((s, c) => s + c.subtreeW, 0) + (children.length - 1) * H_GAP;
-  return { ...node, x: 0, y: depth * (NODE_H + V_GAP), subtreeW, children } as LayoutNode;
+  return {
+    ...node,
+    x: 0,
+    y: TOP_MARGIN + depth * (NODE_H + V_GAP),
+    subtreeW,
+    children,
+  } as LayoutNode;
 }
 
 function placeTree(node: LayoutNode, left: number): void {
@@ -183,6 +190,17 @@ function agentsToOrgTree(agents: ClawDockAgent[]): OrgNode {
   // Roots = agents whose reportTo is null/undefined or points to a non-existent agent
   const roots = agents.filter((a) => !a.reportTo || !agentMap.has(a.reportTo));
 
+  // Prefer CEO/orchestrator as the single top node (no "organization" virtual root)
+  const director = agents.find(
+    (a) =>
+      a.role?.toLowerCase().includes("director") ||
+      a.role?.toLowerCase().includes("ceo") ||
+      a.role?.toLowerCase().includes("orchestrator") ||
+      a.id === "ai-director" ||
+      a.id === "orchestrator" ||
+      a.id === "ceo",
+  );
+
   function toOrgNode(agent: ClawDockAgent): OrgNode {
     const kids = (childrenMap.get(agent.id) ?? []).map((a) => toOrgNode(a));
     return {
@@ -205,7 +223,26 @@ function agentsToOrgTree(agents: ClawDockAgent[]): OrgNode {
   if (roots.length === 1) {
     return toOrgNode(roots[0]);
   }
-  // Multiple roots: create a virtual organization root
+  // Multiple roots: use CEO as single root and attach all other roots as CEO's subordinates
+  if (director && roots.some((r) => r.id === director.id)) {
+    const ceoRoot = roots.find((r) => r.id === director.id)!;
+    const otherRoots = roots.filter((r) => r.id !== director.id);
+    const ceoChildren = childrenMap.get(ceoRoot.id) ?? [];
+    const allChildren = [...ceoChildren, ...otherRoots];
+    return {
+      ...toOrgNode(ceoRoot),
+      children: allChildren.map((a) => toOrgNode(a)),
+    };
+  }
+  // CEO not in roots but present in agents: use CEO as root and attach everyone else under them
+  if (director) {
+    const ceoChildren = roots.filter((r) => r.id !== director.id);
+    return {
+      ...toOrgNode(director),
+      children: [...(childrenMap.get(director.id) ?? []), ...ceoChildren].map((a) => toOrgNode(a)),
+    };
+  }
+  // Fallback: virtual root only when there is no CEO at all
   return {
     id: "__org__",
     name: "organization",

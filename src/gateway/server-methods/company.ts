@@ -433,7 +433,10 @@ export const companyHandlers: GatewayRequestHandlers = {
       strategy: (params.strategy as never) ?? "one-for-one",
       color: typeof params.color === "string" ? params.color : undefined,
       description: typeof params.description === "string" ? params.description : undefined,
+      leaderId: typeof params.leaderId === "string" ? params.leaderId : undefined,
+      goal: typeof params.goal === "string" ? params.goal : undefined,
     });
+    await svc.syncAgentMetaFromTeam(team, []);
     svc.broadcast("company.team.updated", { team });
     respond(true, team, undefined);
   },
@@ -445,17 +448,21 @@ export const companyHandlers: GatewayRequestHandlers = {
       return;
     }
     const svc = getCompanyService();
+    const oldTeam = svc.teamStore.get(id);
     const team = await svc.teamStore.update(id, {
       name: typeof params.name === "string" ? params.name : undefined,
       agents: Array.isArray(params.agents) ? (params.agents as string[]) : undefined,
       strategy: params.strategy as never,
       color: typeof params.color === "string" ? params.color : undefined,
       description: typeof params.description === "string" ? params.description : undefined,
+      leaderId: typeof params.leaderId === "string" ? params.leaderId : undefined,
+      goal: typeof params.goal === "string" ? params.goal : undefined,
     });
     if (!team) {
       respond(false, undefined, { code: "NOT_FOUND", message: `team "${id}" not found` });
       return;
     }
+    await svc.syncAgentMetaFromTeam(team, oldTeam?.agents ?? []);
     svc.broadcast("company.team.updated", { team });
     respond(true, team, undefined);
   },
@@ -467,7 +474,11 @@ export const companyHandlers: GatewayRequestHandlers = {
       return;
     }
     const svc = getCompanyService();
+    const team = svc.teamStore.get(id);
     await svc.teamStore.delete(id);
+    if (team?.agents?.length) {
+      await svc.syncAgentMetaFromTeam(null, team.agents);
+    }
     respond(true, { ok: true }, undefined);
   },
 
