@@ -140,16 +140,22 @@ function computeLayout(agents: ClawDockAgent[]): {
     teamMap.get(team)!.push(a);
   }
 
-  // Find the director/orchestrator — place in a top row
-  const director = agents.find(
-    (a) =>
-      a.role?.toLowerCase().includes("director") ||
-      a.role?.toLowerCase().includes("ceo") ||
-      a.role?.toLowerCase().includes("orchestrator") ||
-      a.id === "ai-director" ||
-      a.id === "orchestrator" ||
-      a.id === "ceo",
-  );
+  // Find the director/orchestrator — place in a top row.
+  // Priority: explicit role match > most direct reports > "main" agent > first agent
+  const director =
+    agents.find(
+      (a) =>
+        a.role?.toLowerCase().includes("director") ||
+        a.role?.toLowerCase().includes("ceo") ||
+        a.role?.toLowerCase().includes("orchestrator") ||
+        a.id === "ai-director" ||
+        a.id === "orchestrator" ||
+        a.id === "ceo",
+    ) ??
+    // Agent with the most direct reports is likely the leader
+    agents.toSorted((a, b) => (b.directReports?.length ?? 0) - (a.directReports?.length ?? 0))[0] ??
+    agents.find((a) => a.id === "main") ??
+    agents[0];
   const directorTeam = director?.team || "";
 
   const teamNames = [...teamMap.keys()].toSorted((a, b) => {

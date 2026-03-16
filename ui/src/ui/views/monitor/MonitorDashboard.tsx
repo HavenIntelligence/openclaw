@@ -262,7 +262,6 @@ export function MonitorDashboard(props: DashboardProps) {
   // Whether bottom panel has content to show
   const hasBottomContent = !!(props.selectedAgentId || selectedActivityId);
   console.log(
-    "[dashboard] hasBottomContent:",
     hasBottomContent,
     "agentId:",
     props.selectedAgentId,

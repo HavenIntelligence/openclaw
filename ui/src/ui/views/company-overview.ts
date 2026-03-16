@@ -466,7 +466,7 @@ function _renderAgentDetail(agent: AgentRecord) {
             <span class="cd-ad-badge" style="background:${statusColor(agent.status)}22;color:${statusColor(agent.status)};border-color:${statusColor(agent.status)}44">
               ${agent.status}
             </span>
-            <span class="cd-ad-badge cd-ad-badge--model">${agent.model}</span>
+            <span class="cd-ad-badge cd-ad-badge--model" title="${agent.model}">${agent.model.replace(/^(anthropic|openai|google)\//, "")}</span>
           </div>
         </div>
         <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {

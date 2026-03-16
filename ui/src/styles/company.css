@@ -4797,6 +4797,10 @@
   background: var(--bg-muted);
   color: var(--muted-foreground);
   border-color: var(--border);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cd-agent-detail__stats {

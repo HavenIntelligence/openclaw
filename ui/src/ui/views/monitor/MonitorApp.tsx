@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import "./monitor.css";
 import { deriveState } from "./derivation";
 import { MonitorDashboard } from "./MonitorDashboard";
@@ -161,17 +161,16 @@ export function MonitorApp(props: MonitorAppProps) {
   const [missionEntry, setMissionEntry] = useState<SessionEntry | null>(null);
   const [missionsLoaded, setMissionsLoaded] = useState(false);
 
-  // Pick up pending mission navigation from company-tasks (via prop)
-  const pendingRef = useRef<string | null>(null);
+  // Pick up pending mission navigation from company-tasks (via prop).
+  // No dedup ref needed — company-monitor uses a unique React key per navigation,
+  // so this component is always a fresh instance when pendingMissionId is set.
   useEffect(() => {
-    const pending = props.pendingMissionId;
-    if (pending && pending !== pendingRef.current) {
-      pendingRef.current = pending;
+    if (props.pendingMissionId) {
       setViewMode("missions");
-      setSelectedMissionId(pending);
-      setMissionsLoaded(false); // force reload missions list
+      setSelectedMissionId(props.pendingMissionId);
+      setMissionsLoaded(false);
     }
-  }, [props.pendingMissionId]);
+  }, []);
 
   useEffect(() => {
     if (dataLoaded) {
@@ -242,11 +241,14 @@ export function MonitorApp(props: MonitorAppProps) {
     void doFetchMissions(c).then((missions) => {
       setMissionSummaries(missions);
       setMissionsLoaded(true);
-      if (missions.length > 0 && !selectedMissionId) {
-        setSelectedMissionId(missions[0].missionId);
+      if (missions.length > 0) {
+        setSelectedMissionId((prev) => {
+          const next = prev ?? missions[0].missionId;
+          return next;
+        });
       }
     });
-  }, [viewMode, missionsLoaded, resolvedClient, selectedMissionId]);
+  }, [viewMode, missionsLoaded, resolvedClient]);
 
   // Load mission data when selection changes
   useEffect(() => {

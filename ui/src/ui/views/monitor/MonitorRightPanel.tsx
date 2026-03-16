@@ -102,6 +102,15 @@ export function MonitorRightPanel({
           <h2 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
             <Layers size={16} className="text-zinc-400" />
             System Overview
+            {taskSession.endTime == null && taskSession.agents.length > 0 ? (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 animate-pulse">
+                Live
+              </span>
+            ) : taskSession.agents.length > 0 ? (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
+                Completed
+              </span>
+            ) : null}
           </h2>
           <button
             onClick={() => setShowLegendModal(true)}

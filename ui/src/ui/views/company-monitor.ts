@@ -14,6 +14,8 @@ let _reactRoot: { render: (el: unknown) => void; unmount: () => void } | null = 
 let _mountEl: Element | null = null;
 let _mountScheduled = false;
 let _lastClient: GatewayClient | null = null;
+let _pendingMissionId: string | null = null;
+let _missionNavCounter = 0;
 
 async function mountReact(container: Element, client: GatewayClient | null) {
   try {
@@ -27,14 +29,23 @@ async function mountReact(container: Element, client: GatewayClient | null) {
     const { MonitorApp } = monitorModule;
     const React = reactModule.default || reactModule;
 
-    // Use ?mission= param as React key: when it changes, React destroys
-    // the old MonitorApp instance and creates a new one (re-runs useEffect([])),
-    // WITHOUT unmounting the React root or clearing the DOM container.
-    // If ?mission= in URL, use a unique key to force React to remount MonitorApp.
-    // This re-runs useEffect([]) without destroying the DOM container.
-    const missionParam = new URLSearchParams(window.location.search).get("mission");
-    const key = missionParam ? `m-${Date.now()}` : undefined;
-    const props = { isDark: true, client, key };
+    // Read pending mission from window global into module var (survives multiple mountReact calls)
+    const win = window as unknown as Record<string, unknown>;
+    if (typeof win.__openclawPendingMissionId === "string") {
+      _pendingMissionId = win.__openclawPendingMissionId;
+      _missionNavCounter++;
+      delete win.__openclawPendingMissionId;
+    }
+    const pendingMissionId = _pendingMissionId;
+    // Consume after React mounts (deferred so concurrent mountReact calls still see it)
+    if (pendingMissionId) {
+      requestAnimationFrame(() => {
+        _pendingMissionId = null;
+      });
+    }
+
+    const key = pendingMissionId ? `m-${_missionNavCounter}` : undefined;
+    const props = { isDark: true, client, key, pendingMissionId };
 
     if (_reactRoot && _mountEl === container) {
       _reactRoot.render(React.createElement(MonitorApp, props));
@@ -53,8 +64,7 @@ async function mountReact(container: Element, client: GatewayClient | null) {
     _mountEl = container;
     _reactRoot = createRoot(container);
     _reactRoot.render(React.createElement(MonitorApp, props));
-  } catch (err) {
-    console.error("[company-monitor] Failed to mount React app:", err);
+  } catch {
     container.innerHTML =
       '<div style="padding:24px;color:#f43f5e;">Failed to load Monitor view. Check console for details.</div>';
   }
@@ -91,7 +101,6 @@ function scheduleMountOnce(client: GatewayClient | null) {
       requestAnimationFrame(poll);
     } else {
       _mountScheduled = false;
-      console.warn("[company-monitor] Could not find #monitor-react-root");
     }
   };
   requestAnimationFrame(poll);
@@ -108,10 +117,12 @@ export function renderCompanyMonitor(props: CompanyMonitorProps) {
     _mountEl = null;
   }
 
-  // Re-render if client changed or ?mission= param present, otherwise schedule mount
-  const hasMissionParam = new URLSearchParams(window.location.search).has("mission");
+  // If pending mission and React already mounted, trigger remount via mountReact
+  const win = window as unknown as Record<string, unknown>;
+  const hasPending = typeof win.__openclawPendingMissionId === "string";
+
   if (_reactRoot && _mountEl) {
-    if (client !== _lastClient || hasMissionParam) {
+    if (client !== _lastClient || hasPending) {
       _lastClient = client;
       void mountReact(_mountEl, client);
     }

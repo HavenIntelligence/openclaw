@@ -2016,9 +2016,8 @@ export function renderApp(state: AppViewState) {
                     requestHostUpdate?.();
                   },
                   onNavigateToMission: (missionId) => {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("mission", missionId);
-                    window.history.pushState({}, "", url.toString());
+                    (window as unknown as Record<string, unknown>).__openclawPendingMissionId =
+                      missionId;
                     state.setTab("companyMonitor");
                     requestHostUpdate?.();
                   },
@@ -2443,9 +2442,8 @@ export function renderApp(state: AppViewState) {
                     requestHostUpdate?.();
                   },
                   onNavigateToMission: (missionId) => {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("mission", missionId);
-                    window.history.pushState({}, "", url.toString());
+                    (window as unknown as Record<string, unknown>).__openclawPendingMissionId =
+                      missionId;
                     state.setTab("companyMonitor");
                     requestHostUpdate?.();
                   },

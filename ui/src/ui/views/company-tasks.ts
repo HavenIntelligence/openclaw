@@ -354,12 +354,7 @@ function findOpenClawHost(target: EventTarget | null) {
 }
 
 function navigateToMission(missionId: string, _target: EventTarget | null) {
-  // Put mission ID in URL query param (no page reload), then switch tab.
-  // MonitorApp reads ?mission= on mount. company-monitor.ts resets React root
-  // on tab switch (old DOM detached), so useEffect([]) always fires fresh.
-  const url = new URL(window.location.href);
-  url.searchParams.set("mission", missionId);
-  window.history.pushState({}, "", url.toString());
+  (window as unknown as Record<string, unknown>).__openclawPendingMissionId = missionId;
   const app = document.querySelector("openclaw-app");
   if (app?.setTab) {
     app.setTab("companyMonitor");
