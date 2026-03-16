@@ -1,4 +1,4 @@
-import { Globe, Figma, Bug, Server, FileText, Layout } from "lucide-react";
+import { Globe, Figma, Bug, Server, FileText, Layout, FolderOpen } from "lucide-react";
 import React from "react";
 
 export function WorkspaceIcon({
@@ -23,6 +23,9 @@ export function WorkspaceIcon({
     case "notion":
       return <FileText size={size} className={className} />;
     default:
+      if (workspace.startsWith("/") || workspace.includes("\\")) {
+        return <FolderOpen size={size} className={className} />;
+      }
       return <Layout size={size} className={className} />;
   }
 }

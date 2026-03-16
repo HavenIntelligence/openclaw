@@ -20,7 +20,6 @@ import type {
   AgentSnapshot,
   TaskSessionData,
 } from "./types";
-import { WorkspaceIcon } from "./WorkspaceIcon";
 
 interface DashboardProps {
   currentTime: number;
@@ -501,23 +500,19 @@ export function MonitorDashboard(props: DashboardProps) {
                           onClick={(e) => {
                             e.stopPropagation();
                             props.setSelectedAgentId(agent.id);
+                            setSelectedActivityId(null);
                             const agentWindows = props.activityWindows
                               .filter((w: ActivityWindow) => w.agentId === agent.id)
                               .toSorted(
                                 (a: ActivityWindow, b: ActivityWindow) => b.startTime - a.startTime,
                               );
                             const latestWindow = agentWindows[0];
-                            if (latestWindow) {
-                              setSelectedActivityId(latestWindow.id);
-                              if (timelineRef.current) {
-                                const windowX = latestWindow.startTime * timeScale;
-                                timelineRef.current.scrollTo({
-                                  left: Math.max(0, windowX - 100),
-                                  behavior: "smooth",
-                                });
-                              }
-                            } else {
-                              setSelectedActivityId(null);
+                            if (latestWindow && timelineRef.current) {
+                              const windowX = latestWindow.startTime * timeScale;
+                              timelineRef.current.scrollTo({
+                                left: Math.max(0, windowX - 100),
+                                behavior: "smooth",
+                              });
                             }
                           }}
                           onMouseEnter={() => props.setHoveredAgentId(agent.id)}
@@ -528,12 +523,6 @@ export function MonitorDashboard(props: DashboardProps) {
                               <span className="text-sm font-medium text-zinc-200 truncate">
                                 {agent.name}
                               </span>
-                              {agent.workspace && left.size > 180 && (
-                                <span className="text-[9px] px-1 py-0.5 rounded-sm bg-zinc-800/80 text-zinc-400 border border-zinc-700/50 flex-shrink-0 flex items-center gap-1">
-                                  <WorkspaceIcon workspace={agent.workspace} size={10} />
-                                  {agent.workspace}
-                                </span>
-                              )}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-[11px] text-zinc-500 font-mono truncate">

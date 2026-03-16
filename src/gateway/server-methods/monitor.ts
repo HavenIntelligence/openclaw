@@ -115,7 +115,7 @@ interface YieldEvent {
 }
 
 interface ParsedSession {
-  sessionHeader: { id?: string; timestamp?: string } | null;
+  sessionHeader: { id?: string; timestamp?: string; cwd?: string } | null;
   messages: ParsedMessage[];
   subagentSpawns: SubagentSpawn[];
   yieldEvents: YieldEvent[];
@@ -209,6 +209,7 @@ async function parseJsonlFile(filePath: string): Promise<ParsedSession> {
         sessionHeader = {
           id: obj.id as string | undefined,
           timestamp: obj.timestamp as string | undefined,
+          cwd: obj.cwd as string | undefined,
         };
         continue;
       }
@@ -372,6 +373,7 @@ function buildTaskSession(
     domain: parsed.agentId,
     skills: [],
     lifecycle: "persistent",
+    workspace: parsed.sessionHeader?.cwd,
   });
 
   // Subagent lanes
@@ -394,6 +396,7 @@ function buildTaskSession(
       domain: spawn.agentId,
       skills: [],
       lifecycle: "ephemeral",
+      workspace: parsed.sessionHeader?.cwd,
     });
   }
 

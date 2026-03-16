@@ -407,17 +407,26 @@ export function MonitorBottomPanel({
             {/* Col 1: Basic Info */}
             <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
               <div>
+                <div className="text-xs text-zinc-500 font-mono mb-1">AGENT ID</div>
+                <div className="text-xs text-zinc-400 font-mono mb-3 select-all">{agent.id}</div>
                 <div className="text-xs text-zinc-500 font-mono mb-1">NAME & ROLE</div>
                 <div className="text-sm text-zinc-200 flex items-center gap-2">
                   {agent.name} - {agent.role}
-                  {agent.workspace && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-zinc-800/80 text-zinc-400 border border-zinc-700/50 flex items-center gap-1">
-                      <WorkspaceIcon workspace={agent.workspace} size={12} />
-                      {agent.workspace}
-                    </span>
-                  )}
                 </div>
               </div>
+              {agent.workspace && (
+                <div>
+                  <div className="text-xs text-zinc-500 font-mono mb-1">WORKSPACE</div>
+                  <div className="text-xs text-zinc-300 font-mono flex items-center gap-1.5 select-all">
+                    <WorkspaceIcon
+                      workspace={agent.workspace}
+                      size={14}
+                      className="text-zinc-400 flex-shrink-0"
+                    />
+                    {agent.workspace}
+                  </div>
+                </div>
+              )}
               <div className="bg-zinc-800/20 border border-zinc-800/50 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
