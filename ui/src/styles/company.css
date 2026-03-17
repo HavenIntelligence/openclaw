@@ -3640,10 +3640,9 @@
 .cd-office-log-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 8px 10px 4px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 .cd-office-log-save {
   flex-shrink: 0;
@@ -5085,11 +5084,28 @@
    ═══════════════════════════════════════════════════════════════ */
 .cd-log-agent-filter {
   display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 8px 10px;
+  padding: 8px 10px 4px;
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-  flex-shrink: 0;
+  overflow-x: scroll;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+/* Ensure a visible thin scrollbar for the agent filter row */
+.cd-log-agent-filter::-webkit-scrollbar {
+  height: 6px;
+}
+.cd-log-agent-filter::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cd-log-agent-filter::-webkit-scrollbar-thumb {
+  background: var(--border, #555);
+  border-radius: 3px;
+}
+.cd-log-agent-filter::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground, #888);
 }
 
 .cd-log-af-btn {
@@ -5101,6 +5117,8 @@
   font-size: 11px;
   cursor: pointer;
   transition: all 0.12s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .cd-log-af-btn:hover {
