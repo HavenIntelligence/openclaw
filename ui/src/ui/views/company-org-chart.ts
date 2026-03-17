@@ -29,7 +29,6 @@ type OrgAgentUpdatePayload = {
   color?: string;
   runtime?: string;
   description?: string;
-  agentCli?: string;
   systemPrompt?: string;
   reportTo?: string | null;
 };
@@ -42,9 +41,10 @@ type OrgExportAgent = {
   emoji?: string;
   color?: string;
   runtime?: string;
+  model?: string;
   description?: string;
-  agentCli?: string;
   systemPrompt?: string;
+  skills?: string[];
   reportTo?: string | null;
 };
 
@@ -57,9 +57,10 @@ function serializeAgents(agents: ClawDockAgent[]): OrgExportAgent[] {
     emoji: agent.emoji,
     color: agent.color,
     runtime: agent.runtime,
+    model: agent.model,
     description: agent.description,
-    agentCli: agent.agentCli,
     systemPrompt: agent.systemPrompt,
+    skills: agent.skills,
     reportTo: agent.reportTo ?? null,
   }));
 }
@@ -146,9 +147,10 @@ async function importOrgChartFromFile(params: {
       emoji: entry.emoji?.trim(),
       color: entry.color?.trim(),
       runtime: entry.runtime?.trim(),
+      model: (entry as Record<string, unknown>).model as string | undefined,
       description: entry.description?.trim(),
-      agentCli: entry.agentCli?.trim(),
       systemPrompt: entry.systemPrompt?.trim(),
+      skills: Array.isArray(entry.skills) ? entry.skills : undefined,
       reportTo: normalizedReportTo,
     };
     const updatePayload: OrgAgentUpdatePayload = {};
@@ -169,9 +171,6 @@ async function importOrgChartFromFile(params: {
     }
     if (normalized.description) {
       updatePayload.description = normalized.description;
-    }
-    if (normalized.agentCli !== undefined) {
-      updatePayload.agentCli = normalized.agentCli;
     }
     if (normalized.systemPrompt !== undefined) {
       updatePayload.systemPrompt = normalized.systemPrompt;
@@ -196,7 +195,6 @@ async function importOrgChartFromFile(params: {
         color: normalized.color,
         runtime: normalized.runtime,
         description: normalized.description,
-        agentCli: normalized.agentCli,
         systemPrompt: normalized.systemPrompt,
         reportTo: normalized.reportTo ?? null,
       });
