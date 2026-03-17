@@ -119,6 +119,7 @@ let _onUpdateAgent:
     ) => void | Promise<void>)
   | undefined;
 let _onNavigateToMission: ((missionId: string) => void | Promise<void>) | undefined;
+let _onReloadCompany: (() => void | Promise<void>) | undefined;
 let _requestUpdate: (() => void) | undefined;
 let _realTeams: TeamConfig[] = [];
 
@@ -430,7 +431,7 @@ function createCompany() {
     return;
   }
   const id = `company-${Date.now()}`;
-  _companies.push({
+  const newCo: CompanyProfile = {
     id,
     name: _newCompanyName.trim(),
     tagline: "Building the future with AI.",
@@ -446,10 +447,23 @@ function createCompany() {
     ],
     businessModel: "Describe your business model.",
     currentFocus: ["Define your first priority"],
-  });
+  };
+  _companies.push(newCo);
   _activeCompanyId = id;
   _showNewCompanyForm = false;
   _newCompanyName = "";
+  _newCompanyIndustry = "";
+  // Persist the new company profile to backend
+  if (_onSaveProfile) {
+    _onSaveProfile({
+      name: newCo.name,
+      mission: newCo.mission,
+      vision: newCo.vision,
+      businessModel: newCo.businessModel,
+      focusAreas: newCo.currentFocus,
+    });
+  }
+  void _onReloadCompany?.();
 }
 
 // ── Agent detail panel ─────────────────────────────────────────────────────
@@ -1255,8 +1269,21 @@ function renderProfile() {
         (c) => html`
         <button class="cd-co-switch-btn ${_activeCompanyId === c.id ? "cd-co-switch-btn--active" : ""}"
           @click=${() => {
-            _activeCompanyId = c.id;
-            _editing = false;
+            if (_activeCompanyId !== c.id) {
+              _activeCompanyId = c.id;
+              _editing = false;
+              // Save the selected company's profile to backend and reload all data
+              if (_onSaveProfile) {
+                _onSaveProfile({
+                  name: c.name,
+                  mission: c.mission,
+                  vision: c.vision,
+                  businessModel: c.businessModel,
+                  focusAreas: c.currentFocus,
+                });
+              }
+              void _onReloadCompany?.();
+            }
           }}>
           <span class="cd-co-switch-logo">${icons.clawdock}</span> ${c.name}
           <span class="cd-chip cd-chip--xs">${c.stage}</span>
@@ -1512,6 +1539,7 @@ export type CompanyOverviewProps = {
     },
   ) => void | Promise<void>;
   onNavigateToMission?: (missionId: string) => void | Promise<void>;
+  onReloadCompany?: () => void | Promise<void>;
   requestUpdate?: () => void;
 };
 
@@ -1540,6 +1568,7 @@ export function renderCompanyOverview(props: CompanyOverviewProps) {
   _onCreateAgent = props.onCreateAgent;
   _onUpdateAgent = props.onUpdateAgent;
   _onNavigateToMission = props.onNavigateToMission;
+  _onReloadCompany = props.onReloadCompany;
   _requestUpdate = props.requestUpdate;
   const SUB_TABS: { id: OverviewTab; icon: string; label: string }[] = [
     { id: "profile", icon: "🏢", label: "Company" },

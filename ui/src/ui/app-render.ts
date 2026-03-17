@@ -42,6 +42,7 @@ import {
   deleteTeam,
   saveCompanyProfile,
   sendMessageToCompany,
+  loadCompanyAll,
   loadCompanyChatMessages,
   loadCompanyMessages,
 } from "./controllers/company.ts";
@@ -2019,6 +2020,10 @@ export function renderApp(state: AppViewState) {
                     (window as unknown as Record<string, unknown>).__openclawPendingMissionId =
                       missionId;
                     state.setTab("companyMonitor");
+                    requestHostUpdate?.();
+                  },
+                  onReloadCompany: async () => {
+                    await loadCompanyAll(state);
                     requestHostUpdate?.();
                   },
                 }),
