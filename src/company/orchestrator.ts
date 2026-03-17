@@ -436,6 +436,16 @@ export function buildPlanPrompt(
     `YOUR TEAM:\n${subList}\n\n` +
     `DELEGATION RULES:\n` +
     `- In this round, agents run in parallel and cannot talk to each other. All cross-agent context must be passed by you in the subtask text. If a subtask needs another agent's output (e.g. reading_analyst needs literature_scout's paper list), either (1) include that context in the subtask if you already have it from memory or a previous round, or (2) assign only the upstream agent this round and assign the downstream agent in a later round when you have the synthesis.\n` +
+    `- HARD RULE (no same-round dependencies): In the SAME round, NO subtask may depend on another agent's output. Do NOT assign tasks that say or imply: "use results from X", "based on X's output", "read the papers found by X", "compare findings from Y", "use insights from Z", etc.\n` +
+    `- If a downstream step requires upstream output, assign ONLY the upstream agent(s) this round. Then in the NEXT round, assign the downstream step and paste the needed upstream output into the subtask text.\n` +
+    `- If you want parallelism in round 1, assign INDEPENDENT work only. Examples:\n` +
+    `  - literature_scout: find 3–5 sources with links + abstracts.\n` +
+    `  - reading_analyst: independently find and summarize 1–2 sources (do not wait for literature_scout).\n` +
+    `  - comparison_analyst: define comparison rubric + what evidence/metrics to extract.\n` +
+    `  - experiment_designer: draft an experiment template (objective/setup/metrics) without relying on other agents.\n` +
+    `  - report_writer: draft report outline + synthesis checklist; do NOT claim final synthesis until inputs exist.\n` +
+    `- Agents that do literature review or paper/source discovery (e.g. literature_scout) have web search (e.g. Gemini/Google). In their subtask, explicitly instruct them to use web search to find papers, articles, or references when the task involves research or literature.\n` +
+    `- For EVERY assigned subtask, include a one-line assertion at the end: "Dependencies: none (must be solvable without other agents' outputs this round)".\n\n` +
     `- Agents that do literature review or paper/source discovery (e.g. literature_scout) have web search (e.g. Gemini/Google). In their subtask, explicitly instruct them to use web search to find papers, articles, or references when the task involves research or literature.\n\n` +
     `Create a delegation plan. For each team member, describe a specific subtask (include any context they need in the subtask text). Only assign subtasks that are genuinely needed — not every member must be assigned.\n\n` +
     `You MUST respond with ONLY a valid JSON array. Do not use markdown tables or other formats — the system can only parse JSON.\n` +

@@ -1,0 +1,69 @@
+{
+  "_note": "This is a partial example. Merge into ~/.openclaw/openclaw.json. Do not commit real keys.",
+  "agents": {
+    "defaults": {
+      "workspace": "/path/to/your/openclaw-workspace",
+      "model": {
+        "primary": "your-provider/your-model"
+      }
+    },
+    "list": [
+      {
+        "id": "ceo",
+        "name": "Research Orchestrator",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web", "clawhub"]
+      },
+      {
+        "id": "literature_scout",
+        "name": "Literature Scout",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web", "clawhub"]
+      },
+      {
+        "id": "reading_analyst",
+        "name": "Paper Reading Analyst",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web"]
+      },
+      {
+        "id": "comparison_analyst",
+        "name": "Comparison Analyst",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web"]
+      },
+      {
+        "id": "experiment_designer",
+        "name": "Experiment Designer",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web"]
+      },
+      {
+        "id": "report_writer",
+        "name": "Research Report Writer",
+        "model": { "primary": "your-provider/your-model" },
+        "skills": ["academic-deep-research", "in-depth-research", "web"]
+      }
+    ]
+  },
+  "tools": {
+    "profile": "coding",
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "gemini",
+        "gemini": {
+          "apiKey": "<GEMINI_API_KEY>",
+          "model": "gemini-2.5-flash"
+        }
+      },
+      "fetch": {
+        "enabled": true,
+        "firecrawl": {
+          "enabled": true,
+          "apiKey": "<FIRECRAWL_API_KEY>"
+        }
+      }
+    }
+  }
+}
