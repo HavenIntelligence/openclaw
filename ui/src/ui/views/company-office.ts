@@ -1215,7 +1215,7 @@ export function renderCompanyOffice(props: CompanyOfficeProps) {
                         alt=""
                         width="40"
                         height="40"
-                        style="filter:hue-rotate(${avatar.hue}deg) saturate(1.05);"
+                        style=""
                       />
                     </span>
                     <span class="cd-office-agent__name-pill">${agent.name}</span>

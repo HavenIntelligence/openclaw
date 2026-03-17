@@ -788,7 +788,7 @@ function renderNodeSvg(n: LayoutNode, _allNodes: LayoutNode[]) {
           width="34"
           height="34"
           preserveAspectRatio="xMidYMid slice"
-          style="filter:hue-rotate(${avatar.hue}deg) saturate(1.08);"
+          style=""
         />
       </g>
 

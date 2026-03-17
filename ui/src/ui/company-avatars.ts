@@ -4,31 +4,32 @@
  */
 
 const AVATAR_FILES = [
-  "aivatar_hex_01.svg",
-  "aivatar_hex_02.svg",
-  "aivatar_hex_03.svg",
-  "aivatar_hex_04.svg",
-  "aivatar_hex_10.svg",
-  "aivatar_hex_11.svg",
-  "aivatar_hex_12.svg",
-  "aivatar_hex_21.svg",
-  "aivatar_hex_22.svg",
-  "aivatar_hex_23.svg",
-  "aivatar_hex_24.svg",
+  "aivatar_hex_01.png",
+  "aivatar_hex_02.png",
+  "aivatar_hex_03.png",
+  "aivatar_hex_04.png",
+  "aivatar_hex_10.png",
+  "aivatar_hex_11.png",
+  "aivatar_hex_12.png",
+  "aivatar_hex_21.png",
+  "aivatar_hex_22.png",
+  "aivatar_hex_23.png",
 ] as const;
 
 // Public avatars are served from the Vite publicDir (`ui/public/avatars`).
-// Use BASE_URL so it works both in dev and when the control UI is hosted under a sub-path.
+// Always use an absolute path so avatars resolve correctly regardless of the
+// current SPA route (e.g. /company/org-chart).  When a non-trivial basePath is
+// configured the gateway strips it before looking up the file on disk, so we
+// only need to prepend that prefix here.
 const baseEnv = (import.meta as ImportMeta & { env?: { BASE_URL?: string } }).env;
-const base = baseEnv?.BASE_URL || "/";
-const baseTrimmed = base.endsWith("/") ? base.slice(0, -1) : base;
-const AVATAR_BASE_PATH = `${baseTrimmed}/avatars/`;
+const rawBase = baseEnv?.BASE_URL || "/";
+// "./" (Vite default for relative builds) must become "/" for absolute resolution.
+const base = rawBase === "./" || rawBase === "." ? "/" : rawBase;
+const baseNorm = base.endsWith("/") ? base : `${base}/`;
+const AVATAR_BASE_PATH = `${baseNorm}avatars/`;
 
 const AVATAR_URLS = Object.fromEntries(
-  AVATAR_FILES.map((filename) => [
-    filename,
-    new URL(`${AVATAR_BASE_PATH}${filename}`, import.meta.url).href,
-  ]),
+  AVATAR_FILES.map((filename) => [filename, `${AVATAR_BASE_PATH}${filename}`]),
 ) as Record<(typeof AVATAR_FILES)[number], string>;
 
 function simpleHash(s: string): number {
