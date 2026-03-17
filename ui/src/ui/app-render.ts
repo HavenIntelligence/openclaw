@@ -2401,6 +2401,7 @@ export function renderApp(state: AppViewState) {
                 m.renderCompanyTasks({
                   tasks: state.companyTasks,
                   agents: state.companyAgents,
+                  logs: state.companyAgentLogs,
                   onCreateTask: async (params) => {
                     const task = await createTask(state, params);
                     if (task) {

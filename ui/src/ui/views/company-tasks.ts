@@ -1,5 +1,5 @@
 import { html } from "lit";
-import type { ClawDockAgent, Task as RealTask } from "../company-types.ts";
+import type { ClawDockAgent, LogEntry, Task as RealTask } from "../company-types.ts";
 import { icons } from "../icons.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -329,6 +329,7 @@ let _onCreateTask: CompanyTasksProps["onCreateTask"];
 let _onUpdateTask: CompanyTasksProps["onUpdateTask"];
 let _onDeleteTask: CompanyTasksProps["onDeleteTask"];
 let _onNavigateToMission: CompanyTasksProps["onNavigateToMission"];
+let _agentLogs: Map<string, LogEntry[]> = new Map();
 
 function findOpenClawHost(target: EventTarget | null) {
   let node: Node | null = target instanceof Node ? target : null;
@@ -646,6 +647,7 @@ function renderColumn(col: (typeof COLUMNS)[0]) {
 export type CompanyTasksProps = {
   tasks?: RealTask[];
   agents?: ClawDockAgent[];
+  logs?: Map<string, LogEntry[]>;
   onCreateTask?: (params: Omit<RealTask, "id" | "createdAt" | "updatedAt">) => void;
   onUpdateTask?: (id: string, partial: Partial<RealTask>) => void;
   onDeleteTask?: (id: string) => void;
@@ -669,6 +671,7 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
   _onUpdateTask = props.onUpdateTask;
   _onDeleteTask = props.onDeleteTask;
   _onNavigateToMission = props.onNavigateToMission;
+  _agentLogs = props.logs ?? new Map();
 
   const total = filterTasks(_activeTasks);
   const done = total.filter((t) => t.status === "done").length;
@@ -1034,6 +1037,49 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                     : ""
                 }
               </div>
+
+              <!-- Agent execution logs -->
+              ${(() => {
+                const assigneeId = task.assignee;
+                const logs = assigneeId ? (_agentLogs.get(assigneeId) ?? []) : [];
+                if (logs.length === 0) {
+                  return html`
+                    <div class="cd-task-detail__logs-empty">
+                      <span class="cd-task-detail__label">Execution Log</span>
+                      <p style="font-size: 11px; color: var(--muted-foreground); margin: 4px 0 0">
+                        No logs available for this agent yet.
+                      </p>
+                    </div>
+                  `;
+                }
+                const sorted = [...logs].toSorted((a, b) => a.ts - b.ts).slice(-50);
+                const typeIcon: Record<string, string> = {
+                  tool_call: "🔧",
+                  output: "📤",
+                  thinking: "💭",
+                  human: "👤",
+                  error: "❌",
+                  system: "⚙️",
+                  message_out: "📨",
+                  message_in: "📩",
+                };
+                return html`
+                  <div class="cd-task-detail__logs-section">
+                    <span class="cd-task-detail__label">Execution Log <span style="color:var(--muted-foreground);font-weight:400">(${logs.length} entries, latest ${sorted.length})</span></span>
+                    <div class="cd-task-detail__logs-list">
+                      ${sorted.map(
+                        (entry) => html`
+                        <div class="cd-task-log-entry cd-task-log-entry--${entry.type}">
+                          <span class="cd-task-log-entry__icon">${typeIcon[entry.type] ?? "📝"}</span>
+                          <span class="cd-task-log-entry__ts">${new Date(entry.ts).toTimeString().slice(0, 8)}</span>
+                          <span class="cd-task-log-entry__type">${entry.type}</span>
+                          <span class="cd-task-log-entry__content">${entry.content.length > 200 ? entry.content.slice(0, 197) + "..." : entry.content}</span>
+                        </div>
+                      `,
+                      )}
+                    </div>
+                  </div>`;
+              })()}
 
               <!-- Actions -->
               <div class="cd-task-detail__actions">

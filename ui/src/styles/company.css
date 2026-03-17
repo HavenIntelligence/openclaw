@@ -3443,6 +3443,66 @@
 .cd-task-detail__status--done {
   color: #22c55e;
 }
+
+/* ── Task detail: execution logs ── */
+.cd-task-detail__logs-empty,
+.cd-task-detail__logs-section {
+  padding: 8px 20px 12px;
+}
+.cd-task-detail__logs-list {
+  margin-top: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg, #0f1117);
+  font-size: 11px;
+}
+.cd-task-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cd-task-log-entry:last-child {
+  border-bottom: none;
+}
+.cd-task-log-entry__icon {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.cd-task-log-entry__ts {
+  flex-shrink: 0;
+  font-family: monospace;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  min-width: 60px;
+}
+.cd-task-log-entry__type {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  background: rgba(255,255,255,0.05);
+  padding: 0 4px;
+  border-radius: 4px;
+  min-width: 55px;
+  text-align: center;
+}
+.cd-task-log-entry__content {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.cd-task-log-entry--error .cd-task-log-entry__content {
+  color: #f87171;
+}
+.cd-task-log-entry--thinking .cd-task-log-entry__content {
+  color: #a78bfa;
+  font-style: italic;
+}
+
 .cd-task-detail__actions {
   display: flex;
   gap: 8px;
