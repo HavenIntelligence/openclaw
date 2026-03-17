@@ -1074,10 +1074,13 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
   }
 
   const globalStart = Math.min(...allStarts);
-  // Use latest completion time. Only extend to Date.now() if subtasks are still actively running.
+  // Use latest completion time. Extend to Date.now() if the mission is still actively running
+  // (orchestrator in_progress, or subtasks still running).
+  const orchStillRunning = orchTask.status !== "done" && orchTask.status !== "review";
   const subtasksDone = subtasks.every((t) => t.status === "done" || t.status === "review");
-  const globalEnd =
-    allEnds.length > 0
+  const globalEnd = orchStillRunning
+    ? Date.now() // mission still in progress — scan up to now
+    : allEnds.length > 0
       ? subtasksDone
         ? Math.max(...allEnds) // all subtasks finished — use their completion time
         : Math.max(Math.max(...allEnds), Date.now()) // some still running
@@ -1187,7 +1190,9 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     //   mission, so we don't bleed messages from a later mission into this one.
     let upperBound: number;
     if (task.id === orchTask.id) {
-      upperBound = orchTask.endTime ?? globalEnd;
+      // For in-progress missions, endTime may have been set early by onFinish
+      // while processes are still running. Use Date.now() as upper bound.
+      upperBound = orchTask.status !== "done" ? Date.now() : (orchTask.endTime ?? globalEnd);
     } else {
       const allAgentTasks = svc.taskStore
         .list({})
@@ -1545,7 +1550,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
   //    subtasks start, then paused until first JSONL message after delegation)
   // 2. Post-delegation: use JSONL message gaps to detect sessions_yield pauses
   if (orchRawMessages.length > 0) {
-    const GAP_THRESHOLD_MS = 30_000; // 30s gap → pause/resume
+    const GAP_THRESHOLD_MS = 90_000; // 90s gap → pause/resume (LLM generation can take 30-60s)
 
     // Find delegation boundaries from task store
     const delegateStartTs =
@@ -1957,6 +1962,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     startTime: 0,
     endTime: effectiveDuration,
     maxTime: effectiveDuration,
+    globalStartMs: globalStart,
     agents,
     events,
     annotations: phaseAnnotations,

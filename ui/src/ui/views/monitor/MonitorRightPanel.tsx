@@ -15,7 +15,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { marked } from "marked";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { Agent, LifecycleEvent, AgentSnapshot, TaskSessionData } from "./types";
 
 // Configure marked for compact inline rendering
@@ -64,6 +64,18 @@ function AgentAvatar({ name, size = 24 }: { name: string; size?: number }) {
   );
 }
 
+/** Format seconds as mm:ss or h:mm:ss. */
+function formatTimestamp(sec: number): string {
+  const s = Math.round(sec);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  if (h > 0) {
+    return `${h}:${String(m % 60).padStart(2, "0")}:${ss}`;
+  }
+  return `${m}:${ss}`;
+}
+
 interface RightPanelProps {
   agents: Agent[];
   snapshots: AgentSnapshot[];
@@ -73,6 +85,7 @@ interface RightPanelProps {
   currentTime: number;
   maxTime: number;
   taskSession: TaskSessionData;
+  isDark?: boolean;
 }
 
 export function MonitorRightPanel({
@@ -82,9 +95,22 @@ export function MonitorRightPanel({
   currentTime,
   maxTime,
   taskSession,
-}: Omit<RightPanelProps, "selectedAgentId" | "setSelectedAgentId">) {
+}: Omit<RightPanelProps, "selectedAgentId" | "setSelectedAgentId" | "isDark">) {
   const [showLegendModal, setShowLegendModal] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Count visible messages and auto-scroll when new ones appear.
+  const visibleCount = taskSession.chatMessages.filter(
+    (msg) => msg.ts == null || msg.ts <= currentTime,
+  ).length;
+  const prevVisibleCount = useRef(0);
+  useEffect(() => {
+    if (visibleCount > prevVisibleCount.current && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+    prevVisibleCount.current = visibleCount;
+  }, [visibleCount]);
 
   const groupedSnapshots = {
     running: snapshots.filter((s) => s.currentStatus === "running"),
@@ -102,15 +128,27 @@ export function MonitorRightPanel({
           <h2 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
             <Layers size={16} className="text-zinc-400" />
             System Overview
-            {taskSession.endTime == null && taskSession.agents.length > 0 ? (
-              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 animate-pulse">
-                Live
-              </span>
-            ) : taskSession.agents.length > 0 ? (
-              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
-                Completed
-              </span>
-            ) : null}
+            {(() => {
+              if (taskSession.agents.length === 0) {
+                return null;
+              }
+              // Consider "live" if the last activity is within 2 minutes of now.
+              const gStart = taskSession.globalStartMs ?? 0;
+              const lastActivityMs =
+                taskSession.endTime != null && gStart ? gStart + taskSession.endTime * 1000 : 0;
+              const isLive =
+                taskSession.endTime == null ||
+                (lastActivityMs > 0 && Date.now() - lastActivityMs < 120_000);
+              return isLive ? (
+                <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 animate-pulse">
+                  Live
+                </span>
+              ) : (
+                <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-800/50 text-zinc-400 border border-zinc-500/30">
+                  Completed
+                </span>
+              );
+            })()}
           </h2>
           <button
             onClick={() => setShowLegendModal(true)}
@@ -247,9 +285,7 @@ export function MonitorRightPanel({
       <div
         ref={chatRef}
         className="flex-1 flex flex-col overflow-hidden min-h-0"
-        style={{
-          background: "var(--bg-elevated, #191c24)",
-        }}
+        style={{ background: "var(--bg-elevated, #191c24)" }}
       >
         <div
           className="p-3 border-b border-zinc-800/80"
@@ -259,39 +295,56 @@ export function MonitorRightPanel({
             <MessageSquare size={14} /> CHAT
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-          {taskSession.chatMessages.map((msg) => {
-            const isToolOnly =
-              msg.role === "assistant" && msg.content.startsWith("[") && msg.content.endsWith("]");
-            const agentName = msg.agentName || "Agent";
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+          {taskSession.chatMessages
+            .filter((msg) => msg.ts == null || msg.ts <= currentTime)
+            .map((msg) => {
+              const isToolOnly =
+                msg.role === "assistant" &&
+                msg.content.startsWith("[") &&
+                msg.content.endsWith("]");
+              const agentName = msg.agentName || "Agent";
+              const tsLabel = msg.ts != null ? formatTimestamp(msg.ts) : null;
 
-            return msg.role === "user" ? (
-              <div key={msg.id} className="flex justify-end pl-8">
-                <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]">
-                  {msg.content}
-                </div>
-              </div>
-            ) : (
-              <div key={msg.id} className="flex items-start gap-2 pr-8">
-                <AgentAvatar name={agentName} size={22} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[10px] text-zinc-500 font-mono mb-0.5 truncate">
-                    {agentName}
-                  </div>
-                  {isToolOnly ? (
-                    <div className="text-[11px] text-zinc-400 font-mono bg-zinc-700/30 px-2 py-1 rounded border border-zinc-600/30 inline-block">
+              return msg.role === "user" ? (
+                <div key={msg.id}>
+                  {tsLabel != null && (
+                    <div className="text-[9px] font-mono text-zinc-600 text-right mb-1">
+                      {tsLabel}
+                    </div>
+                  )}
+                  <div className="flex justify-end pl-8">
+                    <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]">
                       {msg.content}
                     </div>
-                  ) : (
-                    <div
-                      className="monitor-chat-md text-sm text-zinc-200 leading-relaxed bg-zinc-700/25 px-3 py-2 rounded-2xl rounded-tl-sm border border-zinc-600/25"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                    />
-                  )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              ) : (
+                <div key={msg.id}>
+                  {tsLabel != null && (
+                    <div className="text-[9px] font-mono text-zinc-600 mb-1">{tsLabel}</div>
+                  )}
+                  <div className="flex items-start gap-2 pr-8">
+                    <AgentAvatar name={agentName} size={22} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] text-zinc-500 font-mono mb-0.5 truncate">
+                        {agentName}
+                      </div>
+                      {isToolOnly ? (
+                        <div className="text-[11px] text-zinc-400 font-mono bg-zinc-700/30 px-2 py-1 rounded border border-zinc-600/30 inline-block">
+                          {msg.content}
+                        </div>
+                      ) : (
+                        <div
+                          className="monitor-chat-md text-sm text-zinc-200 leading-relaxed bg-zinc-700/25 px-3 py-2 rounded-2xl rounded-tl-sm border border-zinc-600/25"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
         </div>
         <div
           className="p-4 border-t border-zinc-800/80"

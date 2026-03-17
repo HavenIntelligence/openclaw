@@ -22,11 +22,15 @@ import type {
   MissionSummary,
 } from "./types";
 
+const SPEED_OPTIONS = [0.5, 1, 2, 4, 8, 16, 32, 64] as const;
+
 interface DashboardProps {
   currentTime: number;
   setCurrentTime: (t: number) => void;
   isPlaying: boolean;
   setIsPlaying: (p: boolean) => void;
+  playbackSpeed: number;
+  setPlaybackSpeed: (s: number) => void;
   selectedAgentId: string | null;
   setSelectedAgentId: (id: string | null) => void;
   hoveredAgentId: string | null;
@@ -181,7 +185,7 @@ function formatTimeCompact(seconds: number, unit: TimeUnit): string {
   if (unit === "min") {
     return `${(seconds / 60).toFixed(1)}m`;
   }
-  return `${seconds}s`;
+  return `${Math.round(seconds * 10) / 10}s`;
 }
 
 // ── Main dashboard ──────────────────────────────────────────────────────
@@ -195,7 +199,7 @@ export function MonitorDashboard(props: DashboardProps) {
   const leftHeadersRef = useRef<HTMLDivElement>(null);
   const topAxisRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
-  const [showAnnotations, setShowAnnotations] = useState(true);
+  const [showAnnotations, setShowAnnotations] = useState(false);
   const hasAutoFaded = useRef(false);
   const [timeScale, setTimeScale] = useState(4);
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -381,6 +385,27 @@ export function MonitorDashboard(props: DashboardProps) {
             title="Skip to End"
           >
             <SkipForward size={12} />
+          </button>
+          <button
+            onClick={() => {
+              const idx = SPEED_OPTIONS.indexOf(
+                props.playbackSpeed as (typeof SPEED_OPTIONS)[number],
+              );
+              const next = SPEED_OPTIONS[(idx + 1) % SPEED_OPTIONS.length];
+              props.setPlaybackSpeed(next);
+            }}
+            className="btn btn--sm"
+            style={{
+              padding: "3px 6px",
+              fontSize: 10,
+              fontFamily: "var(--mono)",
+              minWidth: 32,
+              fontWeight: props.playbackSpeed !== 1 ? 700 : 400,
+              color: props.playbackSpeed !== 1 ? "var(--accent, #6366f1)" : undefined,
+            }}
+            title={`Playback speed: ${props.playbackSpeed}x (click to cycle)`}
+          >
+            {props.playbackSpeed}x
           </button>
           <div style={{ width: 1, height: 14, background: "var(--border)", margin: "0 3px" }} />
           <button

@@ -133,6 +133,8 @@ export interface ChatMessage {
   content: string;
   agentId?: string;
   agentName?: string;
+  /** Seconds offset from session/mission start (for timeline-synced playback). */
+  ts?: number;
 }
 
 /** Per-agent config/capability data. */
@@ -170,6 +172,8 @@ export interface TaskSessionData {
   description?: string;
   startTime: number;
   endTime: number | null;
+  /** Absolute epoch ms when the session started (for Live/Completed detection). */
+  globalStartMs?: number;
 
   agents: Agent[];
   events: LifecycleEvent[];

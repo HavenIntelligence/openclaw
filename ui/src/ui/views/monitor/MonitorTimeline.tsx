@@ -283,18 +283,16 @@ export function MonitorTimeline({
             const targetId = batchKey.split("@")[0];
             const targetY = getAgentY(targetId);
 
-            // Find the Merge&Resume icon X on the orchestrator (= resume event timestamp)
+            // Find the next resume event on the orchestrator after the last merge.
+            // In the hybrid pause/resume model, resume may occur well after merge
+            // (e.g. orchestrator waits for all subordinates then resumes on first JSONL msg).
             const latestMergeTs = Math.max(...merges.map((e) => e.timestamp));
             const resumeEvent = events.find(
-              (r) =>
-                r.agentId === targetId &&
-                r.type === "resume" &&
-                r.timestamp >= latestMergeTs &&
-                r.timestamp - latestMergeTs <= 3,
+              (r) => r.agentId === targetId && r.type === "resume" && r.timestamp >= latestMergeTs,
             );
-            // Don't render merge lines until the resume event has occurred
-            // (prevents floating arrows when only some subordinates have completed)
-            if (!resumeEvent) {
+            // Don't render merge lines until the resume event timestamp is reached
+            // (prevents floating arrows before orchestrator actually resumes)
+            if (!resumeEvent || resumeEvent.timestamp > currentTime) {
               continue;
             }
             const mergeIconX = getX(resumeEvent.timestamp);
@@ -348,6 +346,23 @@ export function MonitorTimeline({
                 <polygon
                   points={`${mergeIconX - 4},${targetY + 6} ${mergeIconX + 4},${targetY + 6} ${mergeIconX},${targetY}`}
                   fill="#52525b"
+                />
+                {/* Merge icon circle on the orchestrator row */}
+                <circle
+                  cx={mergeIconX}
+                  cy={targetY}
+                  r={8}
+                  fill="#052e16"
+                  stroke="#22c55e"
+                  strokeWidth={1}
+                  opacity={0.9}
+                />
+                <path
+                  d={`M ${mergeIconX - 3} ${targetY + 2} L ${mergeIconX} ${targetY - 1} L ${mergeIconX + 3} ${targetY + 2} M ${mergeIconX - 3} ${targetY - 2} L ${mergeIconX} ${targetY - 5} L ${mergeIconX + 3} ${targetY - 2}`}
+                  stroke="#4ade80"
+                  strokeWidth={1.2}
+                  fill="none"
+                  strokeLinecap="round"
                 />
               </g>,
             );

@@ -65,8 +65,7 @@ export class Orchestrator {
       try {
         return await this.pm.runTaskAwait(agentId, prompt, {
           timeoutMs: opts.timeoutMs,
-          openclawAgentId:
-            attempt === 1 ? opts.openclawAgentId : `${opts.openclawAgentId}__r${attempt}`,
+          openclawAgentId: opts.openclawAgentId,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -100,7 +99,9 @@ export class Orchestrator {
       opts?.missionId ?? `mission_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const start = Date.now();
     const orchId = `orch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const openclawAgentId = `${agentId}__${orchId}`;
+    // Use the real agent ID — openclaw CLI requires it to exist in config.
+    // Session lock isolation is handled by ProcessManager (sequential runTaskAwait calls).
+    const openclawAgentId = agentId;
 
     const reports = this.registry.getDirectReports(agentId);
 

@@ -74,6 +74,7 @@ async function doFetchSessions(client: {
         agentTelemetry: wire.agentTelemetry ?? {},
         metrics: wire.metrics ?? { avgLatency: "N/A", totalTokens: 0, bottleneckCount: 0 },
         chatMessages: wire.chatMessages ?? [],
+        globalStartMs: wire.globalStartMs ?? undefined,
       },
       maxTime: wire.maxTime ?? 250,
     }));
@@ -132,6 +133,7 @@ async function doFetchMission(
           bottleneckCount: 0,
         },
         chatMessages: (wire.chatMessages as TaskSessionData["chatMessages"]) ?? [],
+        globalStartMs: (wire.globalStartMs as number | undefined) ?? undefined,
       },
       maxTime: (wire.maxTime as number) ?? 250,
     };
@@ -304,6 +306,7 @@ export function MonitorApp(props: MonitorAppProps) {
   // Playback state
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState(16);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
 
@@ -326,19 +329,19 @@ export function MonitorApp(props: MonitorAppProps) {
     if (!isPlaying || !session || MAX_TIME <= 0) {
       return;
     }
-    const tickMs = MAX_TIME > 600 ? 10 : MAX_TIME > 120 ? 50 : 100;
-    const step = MAX_TIME > 600 ? 5 : MAX_TIME > 120 ? 2 : 1;
+    const TICK_MS = 50; // 20 fps — smooth and lightweight
+    const stepPerTick = (TICK_MS / 1000) * playbackSpeed; // seconds of timeline per tick
     const timer = setInterval(() => {
       setCurrentTime((t) => {
         if (t >= MAX_TIME) {
           setIsPlaying(false);
           return t;
         }
-        return Math.min(t + step, MAX_TIME);
+        return Math.min(t + stepPerTick, MAX_TIME);
       });
-    }, tickMs);
+    }, TICK_MS);
     return () => clearInterval(timer);
-  }, [isPlaying, MAX_TIME, session]);
+  }, [isPlaying, MAX_TIME, session, playbackSpeed]);
 
   const derivedState = useMemo(() => {
     if (!session) {
@@ -372,6 +375,8 @@ export function MonitorApp(props: MonitorAppProps) {
         setCurrentTime={setCurrentTime}
         isPlaying={isPlaying}
         setIsPlaying={setIsPlaying}
+        playbackSpeed={playbackSpeed}
+        setPlaybackSpeed={setPlaybackSpeed}
         selectedAgentId={selectedAgentId}
         setSelectedAgentId={setSelectedAgentId}
         hoveredAgentId={hoveredAgentId}
