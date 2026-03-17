@@ -23,6 +23,11 @@ export interface RunOpts extends SpawnOpts {
    * Optional role/persona prefix prepended to the prompt before dispatching.
    */
   systemPrompt?: string;
+  /**
+   * Called when the spawned child process exits.
+   * Useful for updating external state (e.g. task endTime) on process completion.
+   */
+  onFinish?: (info: { agentId: string; exitCode: number; runId: string }) => void;
 }
 
 // ── Parsed output from a runner's stdout line ─────────────────────────────

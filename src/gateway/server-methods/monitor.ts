@@ -180,6 +180,8 @@ interface MonitorChatMessage {
   content: string;
   agentId?: string;
   agentName?: string;
+  /** Seconds offset from session start (for timeline-synced playback). */
+  ts?: number;
 }
 
 interface MonitorToolUsage {
@@ -881,6 +883,7 @@ function buildTaskSession(
           id: `msg-${++msgSeq}`,
           role: "user",
           content: msg.content.slice(0, 1500),
+          ts: msg.timestamp ? offsetSec(msg.timestamp) : 0,
         });
       }
       // Skip subsequent user messages (system prompts / tool results)
@@ -893,6 +896,7 @@ function buildTaskSession(
           content: text.slice(0, 1500),
           agentId: orchestratorLaneId,
           agentName: parsed.agentName,
+          ts: msg.timestamp ? offsetSec(msg.timestamp) : undefined,
         });
       } else if (msg.toolNames?.length) {
         const names = msg.toolNames.map((n) => TOOL_DISPLAY_MAP[n.toLowerCase()] || n);
@@ -1061,13 +1065,25 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
 
   // Global time range
   const allStarts = tasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean);
-  const allEnds = tasks.map((t) => t.endTime).filter((e): e is number => e != null);
+  // Use endTime when available; for review/done tasks without endTime, use updatedAt
+  const allEnds = tasks
+    .map((t) => t.endTime ?? (t.status === "review" || t.status === "done" ? t.updatedAt : null))
+    .filter((e): e is number => e != null);
   if (allStarts.length === 0) {
     return null;
   }
 
   const globalStart = Math.min(...allStarts);
-  const globalEnd = allEnds.length > 0 ? Math.max(...allEnds) : Date.now();
+  // Use latest completion time. Only extend to Date.now() if subtasks are still actively running.
+  const subtasksDone = subtasks.every((t) => t.status === "done" || t.status === "review");
+  const globalEnd =
+    allEnds.length > 0
+      ? subtasksDone
+        ? Math.max(...allEnds) // all subtasks finished — use their completion time
+        : Math.max(Math.max(...allEnds), Date.now()) // some still running
+      : subtasksDone && subtasks.length > 0
+        ? Math.max(...allStarts) + 120_000 // subtasks done but no end times at all — estimate 2min
+        : Date.now();
   const durationSec = Math.ceil((globalEnd - globalStart) / 1000);
   const offsetSec = (ts: number) => Math.max(0, Math.floor((ts - globalStart) / 1000));
 
@@ -1084,8 +1100,135 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     events.push({ id: `e${++seq}`, agentId, timestamp, type, ...opts });
   };
 
-  // Orchestrator lane
   const orchAgentId = orchTask.agentId ?? orchTask.assignee ?? "orchestrator";
+
+  // ── Pre-scan JSONL to get real activity timestamps per task ──
+  // Task store endTime can be stale (set by review/status updates long after actual
+  // completion, or contaminated by later missions reusing the same session).
+  // We scan each agent's JSONL within the task's own time window to find the real
+  // last message, which is the true completion time.
+
+  // Collect unique subordinate agent IDs
+  const subAgentIds = [
+    ...new Set(subtasks.map((t) => t.agentId ?? t.assignee).filter(Boolean)),
+  ] as string[];
+
+  // taskId → last JSONL message timestamp (absolute ms)
+  const taskLastMsgTs = new Map<string, number>();
+
+  // Cache parsed JSONL per agent to avoid re-parsing for each task
+  const agentParsedCache = new Map<string, ParsedMessage[]>();
+
+  for (const agentId of [orchAgentId, ...subAgentIds]) {
+    try {
+      const sessDir = resolveSessionTranscriptsDirForAgent(agentId);
+      const allMessages: ParsedMessage[] = [];
+
+      // Collect JSONL files: active sessions from store + archived .reset. files
+      const fileSet = new Set<string>();
+      try {
+        const storePath = resolveDefaultSessionStorePath(agentId);
+        const store = loadSessionStore(storePath);
+        for (const [, entry] of Object.entries(store)) {
+          const e = entry as Record<string, unknown>;
+          if (!e.sessionFile) {
+            continue;
+          }
+          const rawFile = e.sessionFile as string;
+          fileSet.add(path.isAbsolute(rawFile) ? rawFile : path.join(sessDir, rawFile));
+        }
+      } catch {
+        // best-effort
+      }
+
+      // Also scan for .reset. files (archived sessions that may contain mission data)
+      try {
+        const dirEntries = fs.readdirSync(sessDir);
+        for (const entry of dirEntries) {
+          if (entry.includes(".reset.") && entry.includes(".jsonl")) {
+            fileSet.add(path.join(sessDir, entry));
+          }
+        }
+      } catch {
+        // best-effort
+      }
+
+      for (const filePath of fileSet) {
+        try {
+          const p = await parseJsonlFile(filePath);
+          allMessages.push(...p.messages);
+        } catch {
+          // best-effort
+        }
+      }
+      agentParsedCache.set(agentId, allMessages);
+    } catch {
+      // best-effort
+    }
+  }
+
+  // For each task, find the last JSONL message within [task.startTime, nextTaskStart or orchTask.endTime]
+  const allMissionTasks = [orchTask, ...subtasks];
+  for (const task of allMissionTasks) {
+    const agentId = task.agentId ?? task.assignee;
+    if (!agentId) {
+      continue;
+    }
+    const msgs = agentParsedCache.get(agentId);
+    if (!msgs || msgs.length === 0) {
+      continue;
+    }
+
+    const taskStart = task.startTime ?? task.createdAt;
+    // Upper bound for JSONL scanning:
+    // - For the orchestrator's own task: use its own endTime (it may overlap with other
+    //   missions since orchestrator can accept new tasks while paused/waiting).
+    // - For subordinate tasks: use the next task assigned to the same agent from ANY
+    //   mission, so we don't bleed messages from a later mission into this one.
+    let upperBound: number;
+    if (task.id === orchTask.id) {
+      upperBound = orchTask.endTime ?? globalEnd;
+    } else {
+      const allAgentTasks = svc.taskStore
+        .list({})
+        .filter(
+          (t: Task) =>
+            t.id !== task.id &&
+            (t.agentId ?? t.assignee) === agentId &&
+            (t.startTime ?? t.createdAt) > taskStart,
+        );
+      const nextTaskStart =
+        allAgentTasks.length > 0
+          ? Math.min(...allAgentTasks.map((t: Task) => t.startTime ?? t.createdAt))
+          : undefined;
+      upperBound = nextTaskStart ?? orchTask.endTime ?? globalEnd;
+    }
+
+    let lastTs = 0;
+    for (const m of msgs) {
+      if (m.timestamp >= taskStart && m.timestamp <= upperBound) {
+        if (m.timestamp > lastTs) {
+          lastTs = m.timestamp;
+        }
+      }
+    }
+    if (lastTs > 0) {
+      taskLastMsgTs.set(task.id, lastTs);
+    }
+  }
+
+  /** Return real completion offset for a task: prefer JSONL last-message time, fall back to task endTime. */
+  function realCompleteOffset(task: Task): number | null {
+    const jsonlTs = taskLastMsgTs.get(task.id);
+    if (jsonlTs) {
+      return offsetSec(jsonlTs);
+    }
+    const taskEnd =
+      task.endTime ?? (task.status === "review" || task.status === "done" ? task.updatedAt : null);
+    return taskEnd ? offsetSec(taskEnd) : null;
+  }
+
+  // ── Build agent lanes & timeline events ──
   const orchMeta = svc.registry.getMeta(orchAgentId);
   agents.push({
     id: orchAgentId,
@@ -1096,18 +1239,9 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     lifecycle: "persistent",
   });
 
-  const orchStartEventId = `e${seq + 1}`;
   ev(orchAgentId, 0, "start");
-  let orchResumeEventId: string | null = null;
-  let orchPauseTs: number | null = null;
-  let orchResumeTs: number | null = null;
 
-  // Collect unique subordinate agent IDs
-  const subAgentIds = [
-    ...new Set(subtasks.map((t) => t.agentId ?? t.assignee).filter(Boolean)),
-  ] as string[];
-
-  // Subordinate lanes + events
+  // Subordinate lanes + events (using JSONL-corrected completion times)
   for (const subId of subAgentIds) {
     const meta = svc.registry.getMeta(subId);
     agents.push({
@@ -1120,9 +1254,6 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       lifecycle: "persistent",
     });
 
-    // Events from tasks: split → spawn → start → (error?) → merge → archive
-    // Same pattern as session mode. All subordinates merge (even failed ones)
-    // so the renderer can find the collector anchor near the resume event.
     const agentTasks = subtasks.filter((t) => (t.agentId ?? t.assignee) === subId);
     for (const task of agentTasks) {
       const spawnOffset = offsetSec(task.startTime ?? task.createdAt);
@@ -1130,12 +1261,10 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       ev(subId, spawnOffset, "spawn");
       ev(subId, spawnOffset + 1, "start");
 
-      if (task.endTime) {
-        const completeOffset = offsetSec(task.endTime);
+      const completeOffset = realCompleteOffset(task);
+      if (completeOffset != null) {
         const isFailed = task.reviewNote?.startsWith("Failed");
         if (isFailed) {
-          // Error icon first, then merge (results still flow back to orchestrator)
-          // No archive — so error status is preserved as the final icon
           ev(subId, completeOffset, "error", { details: task.reviewNote ?? "Failed" });
           ev(subId, completeOffset, "merge", { targetId: orchAgentId });
         } else {
@@ -1146,39 +1275,62 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     }
   }
 
-  // Orchestrator pause when spawning, resume when last subordinate completes
-  if (subtasks.length > 0) {
-    const delegateStart = Math.min(
-      ...subtasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean),
-    );
-    const subEndTimes = subtasks.map((t) => t.endTime).filter((e): e is number => e != null);
-    const delegateEnd = subEndTimes.length > 0 ? Math.max(...subEndTimes) : null;
-
-    if (delegateEnd) {
-      const pauseOffset = offsetSec(delegateStart) + 1;
-      const resumeOffset = offsetSec(delegateEnd) + 1;
-      if (resumeOffset > pauseOffset + 2) {
-        orchPauseTs = globalStart + pauseOffset * 1000;
-        orchResumeTs = globalStart + resumeOffset * 1000;
-        ev(orchAgentId, pauseOffset, "pause", { details: "Waiting for subordinates" });
-        orchResumeEventId = `e${seq + 1}`;
-        ev(orchAgentId, resumeOffset, "resume");
-      }
-    }
-  }
+  // Orchestrator pause/resume — derived later from JSONL message gaps (see below).
+  // We defer this until after orchRawMessages are loaded.
 
   // Orchestrator end
   if (orchTask.endTime) {
     ev(orchAgentId, offsetSec(orchTask.endTime), "archive");
   }
 
-  // Build telemetry + chat from agent JSONL sessions (best-effort)
+  // ── Convert persisted phase transitions to annotations + orchestrator events ──
+  const phaseAnnotations: {
+    id: string;
+    timestamp: number;
+    agentId: string;
+    type: "dispatch" | "decision" | "insight";
+    title: string;
+    description: string;
+    placement: "top" | "bottom";
+  }[] = [];
+
+  if (orchTask.phases && orchTask.phases.length > 0) {
+    const PHASE_LABELS: Record<
+      string,
+      { title: string; type: "dispatch" | "decision" | "insight" }
+    > = {
+      planning: { title: "Planning", type: "dispatch" },
+      delegating: { title: "Delegating", type: "dispatch" },
+      executing: { title: "Executing", type: "dispatch" },
+      synthesizing: { title: "Synthesizing", type: "insight" },
+      verifying: { title: "Verifying", type: "decision" },
+      complete: { title: "Complete", type: "insight" },
+    };
+
+    for (let i = 0; i < orchTask.phases.length; i++) {
+      const p = orchTask.phases[i];
+      const label = PHASE_LABELS[p.phase];
+      if (!label || p.phase === "complete") {
+        continue;
+      }
+      const phaseOffset = offsetSec(p.ts);
+      phaseAnnotations.push({
+        id: `phase-${i}`,
+        timestamp: phaseOffset,
+        agentId: orchAgentId,
+        type: label.type,
+        title: label.title,
+        description: `Orchestrator entered ${p.phase} phase`,
+        placement: "top",
+      });
+    }
+  }
+
+  // ── Build telemetry + chat from agent JSONL sessions ──
   const agentTelemetry: MonitorTaskSession["agentTelemetry"] = {};
   const agentConfigs: MonitorTaskSession["agentConfigs"] = {};
   let orchRawMessages: ParsedMessage[] = [];
   const agentParsedSessions = new Map<string, ParsedSession>();
-  const _missionDuration = globalEnd - globalStart;
-  void _missionDuration;
 
   // Collect chat messages from all agents for merging
   const allAgentMsgs: {
@@ -1200,36 +1352,61 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     };
     agentConfigs[agent.id] = buildRealAgentConfig(agent.id) ?? {};
 
-    // Try to load session JSONL for richer telemetry + chat
+    // Load session JSONL for telemetry + chat (use pre-scanned cache when available)
     try {
-      const storePath = resolveDefaultSessionStorePath(agent.id);
-      const store = loadSessionStore(storePath);
-      // Collect all session files for this agent
-      const sessionFiles: string[] = [];
-      for (const [, entry] of Object.entries(store)) {
-        const e = entry as Record<string, unknown>;
-        if (!e.sessionFile) {
-          continue;
+      // Determine this agent's task time window for filtering
+      const agentTask = allMissionTasks.find((t) => (t.agentId ?? t.assignee) === agent.id);
+      const agentTaskStart = agentTask ? (agentTask.startTime ?? agentTask.createdAt) : globalStart;
+      const agentJsonlEnd = agentTask ? (taskLastMsgTs.get(agentTask.id) ?? null) : null;
+      // Upper bound: JSONL-derived end (already scoped per-task), or task endTime, or globalEnd
+      const agentUpperBound = agentJsonlEnd
+        ? agentJsonlEnd + 5000 // small buffer past last message
+        : (agentTask?.endTime ?? globalEnd);
+
+      // Reuse pre-scanned messages; find best ParsedSession for subagent extraction
+      const allMessages = agentParsedCache.get(agent.id);
+      let bestParsed: ParsedSession | null = null;
+
+      // Find the session file with the most message overlap for spawn tracking
+      const sessDir = resolveSessionTranscriptsDirForAgent(agent.id);
+      const candidateFiles = new Set<string>();
+      try {
+        const storePath = resolveDefaultSessionStorePath(agent.id);
+        const store = loadSessionStore(storePath);
+        for (const [, entry] of Object.entries(store)) {
+          const e = entry as Record<string, unknown>;
+          if (e.sessionFile) {
+            const rawFile = e.sessionFile as string;
+            candidateFiles.add(path.isAbsolute(rawFile) ? rawFile : path.join(sessDir, rawFile));
+          }
         }
-        const rawFile = e.sessionFile as string;
-        const resolved = path.isAbsolute(rawFile)
-          ? rawFile
-          : path.join(resolveSessionTranscriptsDirForAgent(agent.id), rawFile);
-        sessionFiles.push(resolved);
+      } catch {
+        /* best-effort */
+      }
+      try {
+        for (const entry of fs.readdirSync(sessDir)) {
+          if (entry.includes(".reset.") && entry.includes(".jsonl")) {
+            candidateFiles.add(path.join(sessDir, entry));
+          }
+        }
+      } catch {
+        /* best-effort */
       }
 
-      // Parse all sessions and filter messages within mission time window
-      let bestParsed: ParsedSession | null = null;
-      let bestOverlap = 0;
-      for (const sf of sessionFiles) {
+      for (const sf of candidateFiles) {
         try {
           const p = await parseJsonlFile(sf);
-          // Count messages within mission time window (with 60s buffer)
           const overlap = p.messages.filter(
-            (m) => m.timestamp >= globalStart - 60_000 && m.timestamp <= globalEnd + 60_000,
+            (m) => m.timestamp >= agentTaskStart && m.timestamp <= agentUpperBound,
           ).length;
-          if (overlap > bestOverlap) {
-            bestOverlap = overlap;
+          if (
+            overlap > 0 &&
+            (!bestParsed ||
+              overlap >
+                bestParsed.messages.filter(
+                  (m) => m.timestamp >= agentTaskStart && m.timestamp <= agentUpperBound,
+                ).length)
+          ) {
             bestParsed = p;
           }
         } catch {
@@ -1237,14 +1414,18 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
         }
       }
 
-      if (bestParsed && bestOverlap > 0) {
+      const hasData = allMessages ? allMessages.length > 0 : bestParsed != null;
+      if (hasData) {
         const parsed = bestParsed;
-        // Only use messages within mission time window
-        const missionMessages = parsed.messages.filter(
-          (m) => m.timestamp >= globalStart - 60_000 && m.timestamp <= globalEnd + 60_000,
+        const sourceMessages = allMessages ?? parsed?.messages ?? [];
+        // Filter to this agent's task window only
+        const missionMessages = sourceMessages.filter(
+          (m) => m.timestamp >= agentTaskStart && m.timestamp <= agentUpperBound,
         );
         // Save parsed session for subagent extraction
-        agentParsedSessions.set(agent.id, parsed);
+        if (parsed) {
+          agentParsedSessions.set(agent.id, parsed);
+        }
         // Save orchestrator raw messages for phase splitting
         if (agent.id === orchAgentId) {
           orchRawMessages = missionMessages;
@@ -1359,9 +1540,79 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     }
   }
 
+  // ── Orchestrator pause/resume: hybrid model ────────────────────────
+  // 1. Delegation period: use task store times (orchestrator active until
+  //    subtasks start, then paused until first JSONL message after delegation)
+  // 2. Post-delegation: use JSONL message gaps to detect sessions_yield pauses
+  if (orchRawMessages.length > 0) {
+    const GAP_THRESHOLD_MS = 30_000; // 30s gap → pause/resume
+
+    // Find delegation boundaries from task store
+    const delegateStartTs =
+      subtasks.length > 0
+        ? Math.min(...subtasks.map((t) => t.startTime ?? t.createdAt).filter(Boolean))
+        : null;
+
+    // First JSONL message strictly after delegation start = orchestrator resumed
+    const firstPostDelegationMsg = delegateStartTs
+      ? orchRawMessages.find((m) => m.timestamp > delegateStartTs + GAP_THRESHOLD_MS)
+      : null;
+
+    if (delegateStartTs && firstPostDelegationMsg) {
+      // Delegation pause: orchestrator hands off to subtasks
+      const pauseOffset = offsetSec(delegateStartTs) + 1;
+      const resumeOffset = offsetSec(firstPostDelegationMsg.timestamp);
+      if (resumeOffset > pauseOffset + 1) {
+        ev(orchAgentId, pauseOffset, "pause", {
+          details: `Waiting for subordinates`,
+        });
+        ev(orchAgentId, resumeOffset, "resume");
+      }
+
+      // Post-delegation JSONL gap detection for sessions_yield pauses
+      const postMsgs = orchRawMessages.filter(
+        (m) => m.timestamp >= firstPostDelegationMsg.timestamp,
+      );
+      let lastMsgTs = postMsgs[0]?.timestamp ?? 0;
+      for (let i = 1; i < postMsgs.length; i++) {
+        const msg = postMsgs[i];
+        const gap = msg.timestamp - lastMsgTs;
+        if (gap > GAP_THRESHOLD_MS) {
+          const gapPauseOffset = offsetSec(lastMsgTs) + 1;
+          const gapResumeOffset = offsetSec(msg.timestamp);
+          if (gapResumeOffset > gapPauseOffset + 1) {
+            ev(orchAgentId, gapPauseOffset, "pause", {
+              details: `Idle for ${Math.round(gap / 1000)}s`,
+            });
+            ev(orchAgentId, gapResumeOffset, "resume");
+          }
+        }
+        lastMsgTs = msg.timestamp;
+      }
+    } else if (orchRawMessages.length >= 2) {
+      // No subtasks — pure JSONL gap detection
+      let lastMsgTs = orchRawMessages[0].timestamp;
+      for (let i = 1; i < orchRawMessages.length; i++) {
+        const msg = orchRawMessages[i];
+        const gap = msg.timestamp - lastMsgTs;
+        if (gap > GAP_THRESHOLD_MS) {
+          const pauseOffset = offsetSec(lastMsgTs) + 1;
+          const resumeOffset = offsetSec(msg.timestamp);
+          if (resumeOffset > pauseOffset + 1) {
+            ev(orchAgentId, pauseOffset, "pause", {
+              details: `Idle for ${Math.round(gap / 1000)}s`,
+            });
+            ev(orchAgentId, resumeOffset, "resume");
+          }
+        }
+        lastMsgTs = msg.timestamp;
+      }
+    }
+  }
+
   // Split orchestrator telemetry into per-activity-window entries
   // so that planning phase and synthesis phase show different data
-  if (orchPauseTs && orchResumeTs && orchResumeEventId && orchRawMessages.length > 0) {
+  if (orchRawMessages.length > 0) {
     const buildPhaseTelemetry = (msgs: ParsedMessage[]) => {
       const tc = new Map<string, number>();
       let tokens = 0;
@@ -1426,11 +1677,39 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       };
     };
 
-    const planMsgs = orchRawMessages.filter((m) => m.timestamp < orchPauseTs);
-    const synthMsgs = orchRawMessages.filter((m) => m.timestamp >= orchResumeTs);
+    // Build per-activity-window telemetry for the orchestrator.
+    // Activity windows are bounded by start/resume → pause/archive events.
+    // Collect boundaries from the events we emitted for the orchestrator.
+    const orchEvents = events
+      .filter((e) => e.agentId === orchAgentId)
+      .toSorted((a, b) => a.timestamp - b.timestamp);
 
-    agentTelemetry[`w_${orchStartEventId}`] = buildPhaseTelemetry(planMsgs);
-    agentTelemetry[`w_${orchResumeEventId}`] = buildPhaseTelemetry(synthMsgs);
+    // Extract activity windows: each start/resume opens a window, each pause/archive closes it
+    const orchWindows: { eventId: string; startTs: number; endTs: number }[] = [];
+    let currentWindow: { eventId: string; startTs: number } | null = null;
+    for (const e of orchEvents) {
+      if (e.type === "start" || e.type === "resume") {
+        currentWindow = { eventId: e.id, startTs: e.timestamp };
+      } else if ((e.type === "pause" || e.type === "archive") && currentWindow) {
+        orchWindows.push({ ...currentWindow, endTs: e.timestamp });
+        currentWindow = null;
+      }
+    }
+    // If still open, close at the end
+    if (currentWindow) {
+      orchWindows.push({ ...currentWindow, endTs: durationSec + 5 });
+    }
+
+    for (const win of orchWindows) {
+      const winStartMs = globalStart + win.startTs * 1000;
+      const winEndMs = globalStart + win.endTs * 1000;
+      const winMsgs = orchRawMessages.filter(
+        (m) => m.timestamp >= winStartMs && m.timestamp <= winEndMs,
+      );
+      if (winMsgs.length > 0) {
+        agentTelemetry[`w_${win.eventId}`] = buildPhaseTelemetry(winMsgs);
+      }
+    }
   }
 
   // ── Add ephemeral subagent lanes from session JSONL ──
@@ -1588,8 +1867,12 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       .filter((a) => a.lifecycle === "persistent" || a.lifecycle === "contract")
       .map((a) => a.id),
   );
+  const missionEnd = globalStart + durationSec * 1000;
   const filteredMsgs = allAgentMsgs.filter(
-    (m) => m.role === "user" || persistentIds.has(m.agentId),
+    (m) =>
+      (m.role === "user" || persistentIds.has(m.agentId)) &&
+      m.timestamp >= globalStart &&
+      m.timestamp <= missionEnd,
   );
   filteredMsgs.sort((a, b) => a.timestamp - b.timestamp);
 
@@ -1599,6 +1882,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     id: "msg_mission",
     role: "user",
     content: orchTask.description ?? orchTask.title,
+    ts: 0,
   });
 
   let msgSeq = 0;
@@ -1615,22 +1899,67 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       content: chat.content.slice(0, 1500),
       agentId: chat.role === "assistant" ? chat.agentId : undefined,
       agentName: chat.role === "assistant" ? chat.agentName : undefined,
+      ts: offsetSec(chat.timestamp),
     });
   }
 
   // Total tokens
   const totalTokens = tasks.reduce((sum, t) => sum + (t.tokensUsed ?? 0), 0);
 
+  // Effective duration: use the latest timeline event or chat message as the real end.
+  // Events now use JSONL-derived timestamps, so they're already accurate.
+  const lastEventTs = events.length > 0 ? Math.max(...events.map((e) => e.timestamp)) : 0;
+  const lastChatTs =
+    filteredMsgs.length > 0 ? offsetSec(filteredMsgs[filteredMsgs.length - 1].timestamp) : 0;
+  const latestActivity = Math.max(lastEventTs, lastChatTs);
+  const effectiveDuration = latestActivity > 0 ? latestActivity + 5 : durationSec;
+
+  // ── Debug log ──
+  console.log(`\n[monitor.mission] ═══ ${missionId} ═══`);
+  console.log(`  globalStart: ${new Date(globalStart).toISOString()}`);
+  console.log(`  durationSec: ${durationSec}s → effectiveDuration: ${effectiveDuration}s`);
+  console.log(`  tasks (${allMissionTasks.length}):`);
+  for (const t of allMissionTasks) {
+    const aid = t.agentId ?? t.assignee ?? "?";
+    const tStart = ((t.startTime ?? t.createdAt) - globalStart) / 1000;
+    const tEnd = t.endTime ? (t.endTime - globalStart) / 1000 : "?";
+    const jsonlEnd = taskLastMsgTs.get(t.id);
+    const jEnd = jsonlEnd ? (jsonlEnd - globalStart) / 1000 : "no-jsonl";
+    console.log(
+      `    ${aid}: task ${tStart.toFixed(0)}s→${typeof tEnd === "number" ? tEnd.toFixed(0) : tEnd}s | jsonl→${typeof jEnd === "number" ? jEnd.toFixed(0) : jEnd}s | realComplete=${realCompleteOffset(t)}s`,
+    );
+  }
+  console.log(
+    `  agents (${agents.length}): ${agents.map((a) => `${a.id}(${a.lifecycle})`).join(", ")}`,
+  );
+  console.log(`  events (${events.length}):`);
+  for (const e of events) {
+    const target = (e as Record<string, unknown>).targetId
+      ? ` →${String((e as Record<string, unknown>).targetId)}`
+      : "";
+    const details = (e as Record<string, unknown>).details
+      ? ` [${String((e as Record<string, unknown>).details)}]`
+      : "";
+    console.log(`    ${e.id}: ${e.agentId} t=${e.timestamp}s ${e.type}${target}${details}`);
+  }
+  console.log(`  chatMessages (${chatMessages.length}):`);
+  for (const m of chatMessages) {
+    console.log(
+      `    ts=${m.ts ?? "?"}s | ${m.role} | ${(m.agentName ?? "").padEnd(13)} | ${m.content.slice(0, 60)}`,
+    );
+  }
+  console.log(`═══ end ${missionId} ═══\n`);
+
   return {
     id: missionId,
     name: orchTask.title,
     description: orchTask.description,
     startTime: 0,
-    endTime: durationSec,
-    maxTime: durationSec,
+    endTime: effectiveDuration,
+    maxTime: effectiveDuration,
     agents,
     events,
-    annotations: [],
+    annotations: phaseAnnotations,
     agentConfigs,
     agentTelemetry,
     metrics: {

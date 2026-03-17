@@ -166,6 +166,8 @@ export interface Task {
   dueAt?: number;
   tokensUsed?: number;
   blockedBy?: string[]; // task ids
+  /** Orchestration phase transitions recorded on mission tasks. */
+  phases?: Array<{ phase: string; ts: number }>;
   createdAt: number;
   updatedAt: number;
 }
@@ -198,7 +200,7 @@ export interface CompanyProfile {
   focusAreas?: string[];
   /** Max orchestration rounds before forcing final synthesis (default 5). */
   maxOrchestrationRounds?: number;
-  /** Per-agent timeout in ms (default 120000). */
+  /** Per-agent timeout in ms (default 1800000 = 30min). */
   agentTimeoutMs?: number;
   updatedAt: number;
 }

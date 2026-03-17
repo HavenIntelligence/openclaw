@@ -152,6 +152,31 @@ export class Orchestrator {
       this.broadcast("company.task.updated", { task: missionTask });
     }
 
+    // Callback to stamp mission endTime on each process exit.
+    // The last process to exit sets the final value.
+    const updateMissionEndTime = missionTaskId
+      ? () => {
+          if (!this.taskStore) {
+            return;
+          }
+          void this.taskStore.update(missionTaskId, { endTime: Date.now() }).catch(() => {});
+        }
+      : undefined;
+
+    const onFinish = updateMissionEndTime ? () => updateMissionEndTime() : undefined;
+
+    // Persist phase transitions on the mission task for the monitor timeline.
+    const recordPhase = missionTaskId
+      ? (phase: OrchestrationPhase) => {
+          if (!this.taskStore) {
+            return;
+          }
+          const task = this.taskStore.get(missionTaskId);
+          const phases = [...(task?.phases ?? []), { phase, ts: Date.now() }];
+          void this.taskStore.update(missionTaskId, { phases }).catch(() => {});
+        }
+      : undefined;
+
     const subordinates = reports
       .map((id) => {
         const m = this.registry.getMeta(id);
@@ -164,6 +189,7 @@ export class Orchestrator {
 
       // Phase 1: Plan
       this.emitPhase(orchId, agentId, "planning", depth);
+      recordPhase?.("planning");
       const context =
         round > 1
           ? `\n\nPREVIOUS ROUND RESULT (Round ${round - 1}):\n${currentSynthesis}\n\nIMPROVEMENT NEEDED: The verifier determined the result needs refinement. Please re-delegate with more specific instructions to fill gaps.`
@@ -172,6 +198,7 @@ export class Orchestrator {
       const planResult = await this.runAgentTaskWithSessionLockRetry(agentId, planPrompt, {
         timeoutMs,
         openclawAgentId,
+        onFinish,
       });
       totalTokens += planResult.tokensUsed;
 
@@ -180,9 +207,11 @@ export class Orchestrator {
       if (plan.length === 0) {
         this.logSystem(agentId, orchId, "No delegation needed — executing directly.");
         this.emitPhase(orchId, agentId, "executing", depth);
+        recordPhase?.("executing");
         const directResult = await this.runAgentTaskWithSessionLockRetry(agentId, prompt, {
           timeoutMs,
           openclawAgentId,
+          onFinish,
         });
         totalTokens += directResult.tokensUsed;
         currentSynthesis = directResult.content;
@@ -191,6 +220,7 @@ export class Orchestrator {
 
       // Phase 2: Delegate — create tasks and dispatch
       this.emitPhase(orchId, agentId, "delegating", depth);
+      recordPhase?.("delegating");
       const subtaskIds: Map<string, string> = new Map(); // agentId → taskId
       for (const entry of plan) {
         this.messageBus.send(agentId, entry.agentId, entry.subtask, "task");
@@ -243,6 +273,7 @@ export class Orchestrator {
               const curRound = (task?.roundCount ?? 0) + 1;
               const updated = await this.taskStore.update(taskId, {
                 status: "review",
+                endTime: Date.now(),
                 tokensUsed: result.tokensUsed,
                 roundCount: curRound,
                 reviewNote: result.content.slice(0, 400).replace(/\s+/g, " ").trim() || undefined,
@@ -299,6 +330,7 @@ export class Orchestrator {
 
       // Phase 3: Synthesize
       this.emitPhase(orchId, agentId, "synthesizing", depth);
+      recordPhase?.("synthesizing");
       const synthesizePrompt = buildSynthesizePrompt({
         role: agentRole,
         originalTask: prompt,
@@ -309,6 +341,7 @@ export class Orchestrator {
       const synthResult = await this.runAgentTaskWithSessionLockRetry(agentId, synthesizePrompt, {
         timeoutMs,
         openclawAgentId,
+        onFinish,
       });
       totalTokens += synthResult.tokensUsed;
       currentSynthesis = synthResult.content;
@@ -316,6 +349,7 @@ export class Orchestrator {
       // Phase 4: Verify — should we do another round?
       if (round < maxRounds) {
         this.emitPhase(orchId, agentId, "verifying", depth);
+        recordPhase?.("verifying");
         this.logSystem(agentId, orchId, `Verifying result quality (Round ${round})…`);
 
         // Coverage gate: avoid "first round ends early" for multi-part research tasks.
@@ -344,6 +378,7 @@ export class Orchestrator {
         const verifyResult = await this.runAgentTaskWithSessionLockRetry(agentId, verifyPrompt, {
           timeoutMs,
           openclawAgentId,
+          onFinish,
         });
         totalTokens += verifyResult.tokensUsed;
 
@@ -357,6 +392,25 @@ export class Orchestrator {
           orchId,
           `🔄 Verifier: needs refinement. Starting round ${round + 1}.`,
         );
+      }
+    }
+
+    // Mark all subtasks still in "review" as done (orchestrator approved them)
+    if (this.taskStore) {
+      const missionTasks = this.taskStore.list({ missionId });
+      for (const task of missionTasks) {
+        if (task.status === "review") {
+          const updated = await this.taskStore.update(task.id, {
+            status: "done",
+            endTime: Date.now(),
+            reviewNote: task.reviewNote
+              ? `${task.reviewNote} [Approved by orchestrator]`
+              : `Approved by orchestrator (round ${round})`,
+          });
+          if (updated) {
+            this.broadcast("company.task.updated", { task: updated });
+          }
+        }
       }
     }
 
@@ -385,6 +439,7 @@ export class Orchestrator {
     }
 
     this.emitPhase(orchId, agentId, "complete", depth, missionId);
+    recordPhase?.("complete");
     return {
       agentId,
       missionId,

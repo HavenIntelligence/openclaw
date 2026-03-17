@@ -224,6 +224,11 @@ export class ProcessManager {
       this.processes.delete(agentId);
       const status: AgentStatus = result.exitCode === 0 ? "idle" : "crashed";
       this.setStatus(agentId, status, { pid: undefined, currentTask: undefined });
+      try {
+        opts?.onFinish?.({ agentId, exitCode: result.exitCode, runId });
+      } catch {
+        // Swallow to avoid breaking process cleanup
+      }
       resolveResult(result);
     };
 

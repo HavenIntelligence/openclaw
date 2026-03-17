@@ -36,6 +36,20 @@ function createFailingChild(message: string): ChildProcess {
   return child;
 }
 
+function createExitingChild(exitCode = 0): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  Object.assign(child, {
+    stdout: null,
+    stderr: null,
+    pid: undefined,
+    kill: vi.fn(() => true),
+  });
+  queueMicrotask(() => {
+    child.emit("exit", exitCode);
+  });
+  return child;
+}
+
 function createChildWithStderr(params: { stderrLines: string[]; exitCode?: number }): ChildProcess {
   const child = new EventEmitter() as ChildProcess;
   const stderr = new PassThrough();
@@ -126,5 +140,47 @@ describe("ProcessManager", () => {
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform });
     }
+  });
+
+  it("calls onFinish with agentId, exitCode, and runId on process exit", async () => {
+    const logStore = new LogStore();
+    const broadcast = vi.fn();
+    const onFinish = vi.fn();
+    const runner: CliAgentRunner = {
+      name: "openclaw",
+      isAvailable: async () => true,
+      runTask: () => createExitingChild(0),
+      parseOutput: () => null,
+    };
+    const pm = new ProcessManager(createRegistry("openclaw"), logStore, broadcast, [runner]);
+
+    const result = await pm.runTaskAwait("engineering", "hello", { onFinish });
+
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(onFinish).toHaveBeenCalledWith({
+      agentId: "engineering",
+      exitCode: 0,
+      runId: result.runId,
+    });
+  });
+
+  it("resolves result even when onFinish throws", async () => {
+    const logStore = new LogStore();
+    const broadcast = vi.fn();
+    const onFinish = vi.fn(() => {
+      throw new Error("callback boom");
+    });
+    const runner: CliAgentRunner = {
+      name: "openclaw",
+      isAvailable: async () => true,
+      runTask: () => createExitingChild(0),
+      parseOutput: () => null,
+    };
+    const pm = new ProcessManager(createRegistry("openclaw"), logStore, broadcast, [runner]);
+
+    const result = await pm.runTaskAwait("engineering", "hello", { onFinish });
+
+    expect(result.exitCode).toBe(0);
+    expect(onFinish).toHaveBeenCalledTimes(1);
   });
 });
