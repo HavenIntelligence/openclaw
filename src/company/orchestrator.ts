@@ -55,6 +55,33 @@ export class Orchestrator {
     private readonly taskStore?: TaskStore,
   ) {}
 
+  private async runAgentTaskWithSessionLockRetry(
+    agentId: string,
+    prompt: string,
+    opts: { timeoutMs: number; openclawAgentId: string },
+  ) {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.pm.runTaskAwait(agentId, prompt, {
+          timeoutMs: opts.timeoutMs,
+          openclawAgentId:
+            attempt === 1 ? opts.openclawAgentId : `${opts.openclawAgentId}__r${attempt}`,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isLock = /session file locked/i.test(msg);
+        if (!isLock || attempt === maxAttempts) {
+          throw err;
+        }
+        // Small backoff; lock usually clears quickly if it was a concurrent run.
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+      }
+    }
+    // Unreachable (loop always returns or throws)
+    throw new Error("Unexpected retry loop fallthrough");
+  }
+
   /**
    * Multi-round orchestration. Each round: plan → delegate → synthesize → verify.
    * The verifier decides if the result is sufficient or another round is needed.
@@ -73,13 +100,17 @@ export class Orchestrator {
       opts?.missionId ?? `mission_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const start = Date.now();
     const orchId = `orch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const openclawAgentId = `${agentId}__${orchId}`;
 
     const reports = this.registry.getDirectReports(agentId);
 
     // Leaf node or max depth reached — execute directly
     if (reports.length === 0 || depth >= maxDepth) {
       this.emitPhase(orchId, agentId, "executing", depth);
-      const result = await this.pm.runTaskAwait(agentId, prompt, { timeoutMs });
+      const result = await this.runAgentTaskWithSessionLockRetry(agentId, prompt, {
+        timeoutMs,
+        openclawAgentId,
+      });
       this.emitPhase(orchId, agentId, "complete", depth);
       return {
         agentId,
@@ -138,7 +169,10 @@ export class Orchestrator {
           ? `\n\nPREVIOUS ROUND RESULT (Round ${round - 1}):\n${currentSynthesis}\n\nIMPROVEMENT NEEDED: The verifier determined the result needs refinement. Please re-delegate with more specific instructions to fill gaps.`
           : "";
       const planPrompt = buildPlanPrompt(agentRole, prompt + context, subordinates);
-      const planResult = await this.pm.runTaskAwait(agentId, planPrompt, { timeoutMs });
+      const planResult = await this.runAgentTaskWithSessionLockRetry(agentId, planPrompt, {
+        timeoutMs,
+        openclawAgentId,
+      });
       totalTokens += planResult.tokensUsed;
 
       const plan = parseDelegationPlan(planResult.content, reports);
@@ -146,7 +180,10 @@ export class Orchestrator {
       if (plan.length === 0) {
         this.logSystem(agentId, orchId, "No delegation needed — executing directly.");
         this.emitPhase(orchId, agentId, "executing", depth);
-        const directResult = await this.pm.runTaskAwait(agentId, prompt, { timeoutMs });
+        const directResult = await this.runAgentTaskWithSessionLockRetry(agentId, prompt, {
+          timeoutMs,
+          openclawAgentId,
+        });
         totalTokens += directResult.tokensUsed;
         currentSynthesis = directResult.content;
         break;
@@ -262,8 +299,17 @@ export class Orchestrator {
 
       // Phase 3: Synthesize
       this.emitPhase(orchId, agentId, "synthesizing", depth);
-      const synthesizePrompt = buildSynthesizePrompt(agentRole, prompt, subtaskResults);
-      const synthResult = await this.pm.runTaskAwait(agentId, synthesizePrompt, { timeoutMs });
+      const synthesizePrompt = buildSynthesizePrompt({
+        role: agentRole,
+        originalTask: prompt,
+        round,
+        roundResults: subtaskResults,
+        allResultsSoFar: allSubtasks,
+      });
+      const synthResult = await this.runAgentTaskWithSessionLockRetry(agentId, synthesizePrompt, {
+        timeoutMs,
+        openclawAgentId,
+      });
       totalTokens += synthResult.tokensUsed;
       currentSynthesis = synthResult.content;
 
@@ -271,11 +317,34 @@ export class Orchestrator {
       if (round < maxRounds) {
         this.emitPhase(orchId, agentId, "verifying", depth);
         this.logSystem(agentId, orchId, `Verifying result quality (Round ${round})…`);
-        const verifyResult = await this.pm.runTaskAwait(
-          agentId,
-          buildVerifierPrompt(agentRole, prompt, currentSynthesis, round, maxRounds),
-          { timeoutMs },
-        );
+
+        // Coverage gate: avoid "first round ends early" for multi-part research tasks.
+        // This keeps the orchestrator delegating until the output is actually sufficient.
+        const forced = shouldForceAnotherRound({
+          originalTask: prompt,
+          subordinates,
+          plan,
+          subtaskResults,
+        });
+        if (forced) {
+          this.logSystem(agentId, orchId, `🔄 Verifier: forced refinement (${forced}).`);
+          continue;
+        }
+
+        const verifyPrompt = buildVerifierPrompt({
+          role: agentRole,
+          originalTask: prompt,
+          currentResult: currentSynthesis,
+          round,
+          maxRounds,
+          subordinates,
+          plan,
+          subtaskResults,
+        });
+        const verifyResult = await this.runAgentTaskWithSessionLockRetry(agentId, verifyPrompt, {
+          timeoutMs,
+          openclawAgentId,
+        });
         totalTokens += verifyResult.tokensUsed;
 
         const verdict = parseVerifierVerdict(verifyResult.content);
@@ -353,9 +422,9 @@ export class Orchestrator {
   }
 }
 
-// ── Prompt builders ──────────────────────────────────────────────────────
+// ── Prompt builders (exported for tests) ───────────────────────────────────
 
-function buildPlanPrompt(
+export function buildPlanPrompt(
   role: string,
   task: string,
   subordinates: Array<{ id: string; role: string; description: string }>,
@@ -365,50 +434,134 @@ function buildPlanPrompt(
     `You are ${role}. You have received a task and must delegate it to your team.\n\n` +
     `TASK:\n${task}\n\n` +
     `YOUR TEAM:\n${subList}\n\n` +
-    `Create a delegation plan. For each team member, describe a specific subtask they should work on. ` +
-    `Only assign subtasks that are genuinely needed — not every member must be assigned.\n\n` +
+    `DELEGATION RULES:\n` +
+    `- In this round, agents run in parallel and cannot talk to each other. All cross-agent context must be passed by you in the subtask text. If a subtask needs another agent's output (e.g. reading_analyst needs literature_scout's paper list), either (1) include that context in the subtask if you already have it from memory or a previous round, or (2) assign only the upstream agent this round and assign the downstream agent in a later round when you have the synthesis.\n` +
+    `- Agents that do literature review or paper/source discovery (e.g. literature_scout) have web search (e.g. Gemini/Google). In their subtask, explicitly instruct them to use web search to find papers, articles, or references when the task involves research or literature.\n\n` +
+    `Create a delegation plan. For each team member, describe a specific subtask (include any context they need in the subtask text). Only assign subtasks that are genuinely needed — not every member must be assigned.\n\n` +
     `You MUST respond with ONLY a valid JSON array. Do not use markdown tables or other formats — the system can only parse JSON.\n` +
     `Format: [{"agentId": "<agent-id-from-team-list>", "subtask": "description"}, ...]\n` +
-    `Use the exact agent ids from YOUR TEAM above (e.g. researcher, legal-counsel, product-mgr, data-scientist).\n\n` +
+    `Use the exact agent ids from YOUR TEAM above.\n\n` +
     `If you can handle this entirely yourself without delegation, respond with: []`
   );
 }
 
-function buildSynthesizePrompt(
-  role: string,
-  originalTask: string,
-  results: OrchestrationResult[],
-): string {
-  const sections = results
-    .map((r) => {
-      const subRole = r.agentId;
-      return `### ${subRole}:\n${r.content}`;
-    })
+function shouldForceAnotherRound(params: {
+  originalTask: string;
+  subordinates: Array<{ id: string; role: string; description: string }>;
+  plan: Array<{ agentId: string; subtask: string }>;
+  subtaskResults: OrchestrationResult[];
+}): string | null {
+  const task = params.originalTask.toLowerCase();
+  const isResearchy =
+    /(literature|paper|survey|research|benchmark|compare|comparison|latency|factual|factuality|accuracy|evaluation|report)/i.test(
+      task,
+    );
+
+  const uniqueAgents = new Set(params.subtaskResults.map((r) => r.agentId).filter(Boolean));
+
+  // If anything failed, try at least one more round to recover.
+  if (params.subtaskResults.some((r) => r.content.startsWith("[FAILED]"))) {
+    return "subtask_failed";
+  }
+
+  // If the task looks like multi-part research and we only asked one agent,
+  // do not finalize after round 1 — gather more perspectives.
+  if (
+    isResearchy &&
+    params.subordinates.length >= 2 &&
+    params.plan.length <= 1 &&
+    uniqueAgents.size <= 1
+  ) {
+    return "insufficient_delegation_for_research_task";
+  }
+
+  return null;
+}
+
+function buildSynthesizePrompt(params: {
+  role: string;
+  originalTask: string;
+  round: number;
+  roundResults: OrchestrationResult[];
+  allResultsSoFar: OrchestrationResult[];
+}): string {
+  const MAX_RESULT_CHARS_PER_AGENT = 8_000;
+
+  const trimForContext = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length <= MAX_RESULT_CHARS_PER_AGENT) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, MAX_RESULT_CHARS_PER_AGENT)}\n\n[TRUNCATED]`;
+  };
+
+  // Keep latest result per agentId (but preserve failures so they don't get overwritten).
+  const byAgent = new Map<string, OrchestrationResult>();
+  for (const r of params.allResultsSoFar) {
+    const prev = byAgent.get(r.agentId);
+    if (!prev) {
+      byAgent.set(r.agentId, r);
+      continue;
+    }
+    const prevFailed = prev.content.startsWith("[FAILED]");
+    const nextFailed = r.content.startsWith("[FAILED]");
+    if (prevFailed && !nextFailed) {
+      // prefer a later success over an earlier failure
+      byAgent.set(r.agentId, r);
+      continue;
+    }
+    if (!prevFailed && nextFailed) {
+      // keep the successful one
+      continue;
+    }
+    // otherwise, keep the later one (by insertion order in allResultsSoFar)
+    byAgent.set(r.agentId, r);
+  }
+
+  const allSections = Array.from(byAgent.values())
+    .map((r) => `### ${r.agentId}:\n${trimForContext(r.content)}`)
+    .join("\n\n");
+
+  const roundSections = params.roundResults
+    .map((r) => `### ${r.agentId}:\n${trimForContext(r.content)}`)
     .join("\n\n");
 
   return (
-    `You are ${role}. You delegated a task to your team and received their results.\n\n` +
-    `ORIGINAL TASK:\n${originalTask}\n\n` +
-    `TEAM RESULTS:\n${sections}\n\n` +
+    `You are ${params.role}. You delegated a task to your team across multiple rounds.\n\n` +
+    `ORIGINAL TASK:\n${params.originalTask}\n\n` +
+    `TEAM RESULTS (ALL ROUNDS, latest per agent):\n${allSections}\n\n` +
+    `TEAM RESULTS (THIS ROUND ${params.round}):\n${roundSections}\n\n` +
     `Synthesize these results into a single, cohesive final response. ` +
     `Integrate key findings, resolve contradictions, and present a clear, actionable answer.`
   );
 }
 
-function buildVerifierPrompt(
-  role: string,
-  originalTask: string,
-  currentResult: string,
-  round: number,
-  maxRounds: number,
-): string {
+function buildVerifierPrompt(params: {
+  role: string;
+  originalTask: string;
+  currentResult: string;
+  round: number;
+  maxRounds: number;
+  subordinates: Array<{ id: string; role: string; description: string }>;
+  plan: Array<{ agentId: string; subtask: string }>;
+  subtaskResults: OrchestrationResult[];
+}): string {
+  const team = params.subordinates.map((s) => `- ${s.id} (${s.role})`).join("\n");
+  const used =
+    Array.from(new Set(params.subtaskResults.map((r) => r.agentId))).join(", ") || "(none)";
+  const planned = params.plan.map((p) => p.agentId).join(", ") || "(none)";
   return (
-    `You are a quality verifier for ${role}. ` +
+    `You are a strict quality verifier for ${params.role}. ` +
     `Review the following result against the original task.\n\n` +
-    `ORIGINAL TASK:\n${originalTask}\n\n` +
-    `CURRENT RESULT (Round ${round}/${maxRounds}):\n${currentResult}\n\n` +
-    `Only request another round when there are SERIOUS problems: major gaps, critical errors, or the result clearly fails the task. ` +
-    `If the result is acceptable, incomplete but usable, or only needs minor polish, approve it.\n\n` +
+    `ORIGINAL TASK:\n${params.originalTask}\n\n` +
+    `TEAM (available specialists):\n${team}\n\n` +
+    `PLANNED AGENTS THIS ROUND:\n${planned}\n\n` +
+    `AGENTS THAT ACTUALLY PRODUCED RESULTS:\n${used}\n\n` +
+    `CURRENT RESULT (Round ${params.round}/${params.maxRounds}):\n${params.currentResult}\n\n` +
+    `VERIFICATION RULES:\n` +
+    `- Approve ("DONE") ONLY if the result fully satisfies the task, including all key dimensions requested (e.g., literature + comparison + implications/next steps when applicable).\n` +
+    `- If the task is research-oriented and only one specialist contributed, you should usually request another round ("REFINE") to delegate missing dimensions to other available specialists.\n` +
+    `- If there are major gaps, missing evidence/citations where expected, or the output is only a partial slice (e.g., only literature scouting without synthesis/comparison), respond "REFINE".\n\n` +
     `Respond with ONLY one word: "DONE" to approve and finish, or "REFINE" only if another round is strictly necessary.`
   );
 }

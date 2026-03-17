@@ -1958,38 +1958,39 @@ export function createWebSearchTool(options?: {
       const supportsStructuredPerplexityFilters =
         provider === "perplexity" && perplexityRuntime?.transport === "search_api";
       const params = args as Record<string, unknown>;
+      const warnings: Array<{ code: string; message: string }> = [];
       const query = readStringParam(params, "query", { required: true });
       const count =
         readNumberParam(params, "count", { integer: true }) ?? search?.maxResults ?? undefined;
-      const country = readStringParam(params, "country");
+      let country = readStringParam(params, "country");
       if (
         country &&
         provider !== "brave" &&
         !(provider === "perplexity" && supportsStructuredPerplexityFilters)
       ) {
-        return jsonResult({
-          error: "unsupported_country",
+        warnings.push({
+          code: "ignored_country",
           message:
             provider === "perplexity"
-              ? "country filtering is only supported by the native Perplexity Search API path. Remove Perplexity baseUrl/model overrides or use a direct PERPLEXITY_API_KEY to enable it."
-              : `country filtering is not supported by the ${provider} provider. Only Brave and Perplexity support country filtering.`,
-          docs: "https://docs.openclaw.ai/tools/web",
+              ? "country filtering is only supported by the native Perplexity Search API path. The country filter was ignored."
+              : `country filtering is not supported by the ${provider} provider. The country filter was ignored.`,
         });
+        country = undefined;
       }
-      const language = readStringParam(params, "language");
+      let language = readStringParam(params, "language");
       if (
         language &&
         provider !== "brave" &&
         !(provider === "perplexity" && supportsStructuredPerplexityFilters)
       ) {
-        return jsonResult({
-          error: "unsupported_language",
+        warnings.push({
+          code: "ignored_language",
           message:
             provider === "perplexity"
-              ? "language filtering is only supported by the native Perplexity Search API path. Remove Perplexity baseUrl/model overrides or use a direct PERPLEXITY_API_KEY to enable it."
-              : `language filtering is not supported by the ${provider} provider. Only Brave and Perplexity support language filtering.`,
-          docs: "https://docs.openclaw.ai/tools/web",
+              ? "language filtering is only supported by the native Perplexity Search API path. The language filter was ignored."
+              : `language filtering is not supported by the ${provider} provider. The language filter was ignored.`,
         });
+        language = undefined;
       }
       if (language && provider === "perplexity" && !/^[a-z]{2}$/i.test(language)) {
         return jsonResult({
@@ -2030,13 +2031,13 @@ export function createWebSearchTool(options?: {
           docs: "https://docs.openclaw.ai/tools/web",
         });
       }
-      const rawFreshness = readStringParam(params, "freshness");
+      let rawFreshness = readStringParam(params, "freshness");
       if (rawFreshness && provider !== "brave" && provider !== "perplexity") {
-        return jsonResult({
-          error: "unsupported_freshness",
-          message: `freshness filtering is not supported by the ${provider} provider. Only Brave and Perplexity support freshness.`,
-          docs: "https://docs.openclaw.ai/tools/web",
+        warnings.push({
+          code: "ignored_freshness",
+          message: `freshness filtering is not supported by the ${provider} provider. The freshness filter was ignored.`,
         });
+        rawFreshness = undefined;
       }
       if (rawFreshness && provider === "brave" && braveMode === "llm-context") {
         return jsonResult({
@@ -2187,7 +2188,7 @@ export function createWebSearchTool(options?: {
         kimiModel: resolveKimiModel(kimiConfig),
         braveMode,
       });
-      return jsonResult(result);
+      return jsonResult(warnings.length > 0 ? { ...result, warnings } : result);
     },
   };
 }
