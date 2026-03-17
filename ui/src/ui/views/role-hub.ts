@@ -4,7 +4,7 @@ import { icons } from "../icons.ts";
 // ── Types ──────────────────────────────────────────────────────────────────
 type RoleLevel = "junior" | "mid" | "senior" | "lead" | "executive";
 
-type RoleDef = {
+export type RoleDef = {
   id: string;
   emoji: string;
   name: string;
@@ -18,7 +18,7 @@ type RoleDef = {
 };
 
 // ── 100 Role definitions ───────────────────────────────────────────────────
-const ALL_ROLES: RoleDef[] = [
+export const ALL_ROLES: RoleDef[] = [
   // ── Executive ──────────────────────────────────────────────────────────
   {
     id: "ceo",

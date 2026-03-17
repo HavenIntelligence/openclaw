@@ -2,6 +2,7 @@ import { html, svg } from "lit";
 import { getAvatarVariantForAgent } from "../company-avatars.ts";
 import type { ClawDockAgent } from "../company-types.ts";
 import { icons } from "../icons.ts";
+import { ALL_ROLES, type RoleDef } from "./role-hub.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OrgNode = {
@@ -544,8 +545,10 @@ let _panStartPanY = 0;
 let _newRoleName = "";
 let _newRoleEmoji = "🤖";
 let _newRoleTitle = "";
+let _roleSearchQuery = "";
+let _roleCategoryFilter = "All";
 
-const QUICK_ROLES: OrgNode[] = [
+const _QUICK_ROLES: OrgNode[] = [
   {
     id: "",
     name: "data-scientist",
@@ -1208,74 +1211,127 @@ export function renderCompanyOrgChart(props: CompanyOrgChartProps) {
             _addTargetId = null;
           }
         }}>
-          <div class="cd-oc-add-modal">
+          <div class="cd-oc-add-modal cd-oc-add-modal--hub">
             <div class="cd-oc-add-modal__header">
               <span>Add role under: <strong>${nodes.find((n) => n.id === _addTargetId)?.name ?? "—"}</strong></span>
               <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
                 _addTargetId = null;
+                _roleSearchQuery = "";
+                _roleCategoryFilter = "All";
               }}>
                 ${icons.x}
               </button>
             </div>
-            <div class="cd-oc-add-panel__quick">
-              ${QUICK_ROLES.map(
-                (preset) => html`
-                <button class="cd-oc-quick-role" @click=${() => {
+
+            <!-- Search + Category filter -->
+            <div class="cd-oc-add-hub__filters">
+              <input class="cd-form-input cd-oc-add-hub__search" placeholder="Search roles..."
+                .value=${_roleSearchQuery}
+                @input=${(e: Event) => {
+                  _roleSearchQuery = (e.target as HTMLInputElement).value;
+                }} />
+              <div class="cd-oc-add-hub__cats">
+                ${["All", ...new Set(ALL_ROLES.map((r) => r.category))].map(
+                  (cat) => html`
+                  <button class="cd-log-af-btn ${_roleCategoryFilter === cat ? "cd-log-af-btn--active" : ""}"
+                    @click=${() => {
+                      _roleCategoryFilter = cat;
+                    }}>
+                    ${cat}
+                  </button>`,
+                )}
+              </div>
+            </div>
+
+            <!-- Role Hub grid -->
+            <div class="cd-oc-add-hub__grid">
+              ${(() => {
+                const q = _roleSearchQuery.toLowerCase();
+                const filtered = ALL_ROLES.filter((r: RoleDef) => {
+                  if (_roleCategoryFilter !== "All" && r.category !== _roleCategoryFilter) {
+                    return false;
+                  }
+                  if (
+                    q &&
+                    !r.name.toLowerCase().includes(q) &&
+                    !r.description.toLowerCase().includes(q) &&
+                    !r.category.toLowerCase().includes(q)
+                  ) {
+                    return false;
+                  }
+                  return true;
+                });
+                return filtered.map(
+                  (role: RoleDef) => html`
+                  <button class="cd-oc-hub-role-card" @click=${() => {
+                    const parentId = _addTargetId;
+                    if (parentId && _onCreateAgent) {
+                      void _onCreateAgent({
+                        name: role.id,
+                        role: role.name,
+                        team: role.category.toLowerCase(),
+                        emoji: role.emoji,
+                        description: role.description,
+                        systemPrompt: role.systemPrompt,
+                        reportTo: parentId,
+                      });
+                    }
+                    _addTargetId = null;
+                    _roleSearchQuery = "";
+                    _roleCategoryFilter = "All";
+                  }}>
+                    <span class="cd-oc-hub-role-card__emoji">${role.emoji}</span>
+                    <span class="cd-oc-hub-role-card__name">${role.name}</span>
+                    <span class="cd-oc-hub-role-card__cat">${role.category} · ${role.level}</span>
+                    <span class="cd-oc-hub-role-card__desc">${role.description.length > 60 ? role.description.slice(0, 57) + "..." : role.description}</span>
+                    ${role.tools.length ? html`<span class="cd-oc-hub-role-card__meta">🔧 ${role.tools.length} tools · 📋 ${role.skills.length} skills</span>` : ""}
+                  </button>`,
+                );
+              })()}
+            </div>
+
+            <!-- Custom role fallback -->
+            <details class="cd-oc-add-hub__custom-section">
+              <summary class="cd-oc-add-hub__custom-toggle">Or create a custom role</summary>
+              <div class="cd-oc-add-panel__custom">
+                <input class="cd-form-input" placeholder="Emoji" style="width:52px"
+                  .value=${_newRoleEmoji}
+                  @input=${(e: Event) => {
+                    _newRoleEmoji = (e.target as HTMLInputElement).value;
+                  }} />
+                <input class="cd-form-input" placeholder="agent-name"
+                  .value=${_newRoleName}
+                  @input=${(e: Event) => {
+                    _newRoleName = (e.target as HTMLInputElement).value;
+                  }} />
+                <input class="cd-form-input" placeholder="Role title"
+                  .value=${_newRoleTitle}
+                  @input=${(e: Event) => {
+                    _newRoleTitle = (e.target as HTMLInputElement).value;
+                  }} />
+                <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
+                  if (!_newRoleName.trim()) {
+                    return;
+                  }
                   const parentId = _addTargetId;
                   if (parentId && _onCreateAgent) {
                     void _onCreateAgent({
-                      name: preset.name,
-                      role: preset.role,
-                      team: preset.team,
-                      emoji: preset.emoji,
+                      name: _newRoleName.trim(),
+                      role: _newRoleTitle || _newRoleName.trim(),
+                      emoji: _newRoleEmoji || "🤖",
                       reportTo: parentId,
                     });
                   }
+                  _newRoleName = "";
+                  _newRoleTitle = "";
+                  _newRoleEmoji = "🤖";
                   _addTargetId = null;
-                }}>
-                  ${preset.emoji} ${preset.role}
-                </button>
-              `,
-              )}
-            </div>
-            <div class="cd-oc-add-panel__custom">
-              <input class="cd-form-input" placeholder="Emoji" style="width:52px"
-                .value=${_newRoleEmoji}
-                @input=${(e: Event) => {
-                  _newRoleEmoji = (e.target as HTMLInputElement).value;
-                }} />
-              <input class="cd-form-input" placeholder="agent-name"
-                .value=${_newRoleName}
-                @input=${(e: Event) => {
-                  _newRoleName = (e.target as HTMLInputElement).value;
-                }} />
-              <input class="cd-form-input" placeholder="Role title"
-                .value=${_newRoleTitle}
-                @input=${(e: Event) => {
-                  _newRoleTitle = (e.target as HTMLInputElement).value;
-                }} />
-              <button class="cd-btn cd-btn--primary cd-btn--sm" @click=${() => {
-                if (!_newRoleName.trim()) {
-                  return;
-                }
-                const parentId = _addTargetId;
-                if (parentId && _onCreateAgent) {
-                  void _onCreateAgent({
-                    name: _newRoleName.trim(),
-                    role: _newRoleTitle || _newRoleName.trim(),
-                    emoji: _newRoleEmoji || "🤖",
-                    reportTo: parentId,
-                  });
-                }
-                _newRoleName = "";
-                _newRoleTitle = "";
-                _newRoleEmoji = "🤖";
-                _addTargetId = null;
-              }}>Add</button>
-              <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
-                _addTargetId = null;
-              }}>Cancel</button>
-            </div>
+                }}>Add</button>
+                <button class="cd-btn cd-btn--ghost cd-btn--sm" @click=${() => {
+                  _addTargetId = null;
+                }}>Cancel</button>
+              </div>
+            </details>
           </div>
         </div>
       `
