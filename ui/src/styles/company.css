@@ -5289,6 +5289,13 @@
   color: var(--muted-foreground);
 }
 
+.cd-chat-entry__type-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
 .cd-chat-entry__ts {
   margin-left: auto;
   font-size: 11px;

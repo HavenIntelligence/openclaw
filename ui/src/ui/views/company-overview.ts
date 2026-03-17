@@ -1062,8 +1062,12 @@ function renderChats() {
   ) {
     _chatComposeTargetAgentId = null;
   }
-  const filtered = _realMessages;
   const isFiltered = _chatFilterAgentIds.length > 0;
+  const filtered = isFiltered
+    ? _realMessages.filter(
+        (msg) => _chatFilterAgentIds.includes(msg.from) || _chatFilterAgentIds.includes(msg.to),
+      )
+    : _realMessages;
   const selectedTarget = selectedChatTargetAgent();
   const composeTargetLabel = selectedTarget?.name ?? "Company";
   const emptyTitle = isFiltered ? "No messages for selected agents" : "No messages yet";
@@ -1131,12 +1135,27 @@ function renderChats() {
             : filtered.map((msg) => {
                 const isHuman = msg.from === "human";
                 const ts = new Date(msg.ts).toTimeString().slice(0, 8);
+                const fromAgent = _realAgents.find((a) => a.id === msg.from);
+                const toAgent = _realAgents.find((a) => a.id === msg.to);
+                const fromLabel = isHuman
+                  ? "👤 You"
+                  : `${fromAgent?.emoji ?? "🤖"} ${fromAgent?.name ?? msg.from}`;
+                const toLabel = `${toAgent?.emoji ?? "📨"} ${toAgent?.name ?? msg.to}`;
+                const typePill =
+                  msg.type === "task"
+                    ? "📋 task"
+                    : msg.type === "result"
+                      ? "✅ result"
+                      : msg.type === "query"
+                        ? "❓ query"
+                        : "📢 notify";
                 return html`
             <div class="cd-chat-entry" style="border-left-color:${isHuman ? "rgba(245,158,11,0.5)" : (typeColor[msg.type] ?? "var(--border)")}">
               <div class="cd-chat-entry__meta">
-                <span class="cd-chat-entry__from">${isHuman ? "👤 You" : msg.from}</span>
+                <span class="cd-chat-entry__from">${fromLabel}</span>
                 <span class="cd-chat-entry__arrow">→</span>
-                <span class="cd-chat-entry__to">${msg.to}</span>
+                <span class="cd-chat-entry__to">${toLabel}</span>
+                <span class="cd-chat-entry__type-pill" style="background:${typeColor[msg.type] ?? "var(--border)"}">${typePill}</span>
                 <span class="cd-chat-entry__ts">${ts}</span>
               </div>
               <div class="cd-chat-entry__content">${msg.content}</div>
