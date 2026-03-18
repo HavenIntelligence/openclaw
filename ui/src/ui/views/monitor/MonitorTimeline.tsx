@@ -156,6 +156,35 @@ export function MonitorTimeline({
           // SUBAGENT_BAR_INSET_PX defined at module level
           const elements: React.ReactNode[] = [];
 
+          // Compute opacity for an edge based on selection/hover state
+          const edgeOpacity = (
+            sourceId: string,
+            targetId: string | undefined,
+            baseOpacity: number,
+            timestamp?: number,
+          ) => {
+            if (selectedActivityId) {
+              const ts = timestamp ?? 0;
+              const srcWin =
+                getWindowForAgentAtTime(sourceId, ts, true) ??
+                activityWindows.find((w) => w.agentId === sourceId);
+              const tgtWin = targetId
+                ? (getWindowForAgentAtTime(targetId, ts, true) ??
+                  activityWindows.find((w) => w.agentId === targetId))
+                : null;
+              const connected =
+                (srcWin && connectedWindows.has(srcWin.id)) ||
+                (tgtWin && connectedWindows.has(tgtWin.id));
+              return connected ? baseOpacity : 0.05;
+            }
+            if (hasHighlight) {
+              const connected =
+                highlightSet.has(sourceId) || (targetId ? highlightSet.has(targetId) : false);
+              return connected ? baseOpacity : 0.05;
+            }
+            return baseOpacity;
+          };
+
           // Classify edges
           const splitEdges: typeof lineageEdges = [];
           const mergeEdges: typeof lineageEdges = [];
@@ -197,7 +226,10 @@ export function MonitorTimeline({
 
             // Vertical trunk from source down to span all targets
             elements.push(
-              <g key={`split-trunk-${sourceId}-${ts}`} style={{ opacity: 0.5 }}>
+              <g
+                key={`split-trunk-${sourceId}-${ts}`}
+                style={{ opacity: edgeOpacity(sourceId, batch[0]?.targetId, 0.5, ts) }}
+              >
                 <path
                   d={`M ${anchorX} ${sourceY} L ${anchorX} ${maxY}`}
                   stroke="#7c3aed"
@@ -221,7 +253,12 @@ export function MonitorTimeline({
                 (targetStart ? getX(targetStart.timestamp) : getX(edge.timestamp)) +
                 SUBAGENT_BAR_INSET_PX;
               elements.push(
-                <g key={edge.id} style={{ opacity: 0.5 }}>
+                <g
+                  key={edge.id}
+                  style={{
+                    opacity: edgeOpacity(edge.sourceId, edge.targetId, 0.5, edge.timestamp),
+                  }}
+                >
                   <path
                     d={`M ${anchorX} ${targetY} L ${barStartX - 5} ${targetY}`}
                     stroke="#7c3aed"
@@ -254,7 +291,10 @@ export function MonitorTimeline({
               pathD += ` L ${x1} ${y2 + 6}`;
             }
             elements.push(
-              <g key={edge.id} style={{ opacity: 0.4 }}>
+              <g
+                key={edge.id}
+                style={{ opacity: edgeOpacity(edge.sourceId, edge.targetId, 0.4, edge.timestamp) }}
+              >
                 <path d={pathD} stroke={strokeColor} strokeWidth={1} fill="none" />
               </g>,
             );
@@ -295,7 +335,10 @@ export function MonitorTimeline({
             if (nextWindow && arrowEndX > mergeX + 2) {
               // L-shaped: horizontal from source to above next active window, then vertical down
               elements.push(
-                <g key={edge.id} style={{ opacity: 0.35 }}>
+                <g
+                  key={edge.id}
+                  style={{ opacity: edgeOpacity(edge.sourceId, targetId, 0.35, edge.timestamp) }}
+                >
                   <path
                     d={`M ${mergeX} ${sourceY} L ${arrowEndX} ${sourceY} L ${arrowEndX} ${arrowBaseY}`}
                     stroke="#52525b"
@@ -315,7 +358,10 @@ export function MonitorTimeline({
             } else {
               // Straight vertical: target is active at merge time
               elements.push(
-                <g key={edge.id} style={{ opacity: 0.35 }}>
+                <g
+                  key={edge.id}
+                  style={{ opacity: edgeOpacity(edge.sourceId, targetId, 0.35, edge.timestamp) }}
+                >
                   <path
                     d={`M ${mergeX} ${sourceY} L ${mergeX} ${arrowBaseY}`}
                     stroke="#52525b"
@@ -479,17 +525,33 @@ export function MonitorTimeline({
           ),
         }));
 
+        // Compute opacity for an icon based on its agent context
+        const iconOpacity = (agentIds: string[], timestamp: number) => {
+          if (selectedActivityId) {
+            const connected = agentIds.some((id) => {
+              const win = getWindowForAgentAtTime(id, timestamp, true);
+              return win && connectedWindows.has(win.id);
+            });
+            return connected ? 1 : 0.1;
+          }
+          if (hasHighlight) {
+            return agentIds.some((id) => highlightSet.has(id)) ? 1 : 0.2;
+          }
+          return 1;
+        };
+
         const splitIcons = batches.map((batch) => {
           const x = getX(batch.iconTimestamp);
           const y = getAgentY(batch.sourceId);
           const Icon = batch.isWait ? GitFork : GitBranch;
           const colorClass = "text-purple-400 border-purple-400/50 bg-purple-950";
           const label = batch.isWait ? `Split & Wait (×${batch.count})` : `Split (×${batch.count})`;
+          const op = iconOpacity([batch.sourceId], batch.timestamp);
           return (
             <div
               key={`split-icon-${batch.sourceId}-${batch.timestamp}`}
               className={`absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border flex items-center justify-center z-40 ${colorClass}`}
-              style={{ left: x, top: y }}
+              style={{ left: x, top: y, opacity: op }}
               title={label}
             >
               <Icon size={10} strokeWidth={3} />
@@ -510,11 +572,12 @@ export function MonitorTimeline({
             );
             const x = resumeEvent ? getX(resumeEvent.timestamp) : getX(batch.resumeTimestamp);
             const y = getAgentY(batch.targetId);
+            const op = iconOpacity([batch.targetId], batch.resumeTimestamp);
             return (
               <div
                 key={`merge-icon-${batch.key}`}
                 className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border flex items-center justify-center z-40 text-emerald-400 border-emerald-400/50 bg-emerald-950"
-                style={{ left: x, top: y }}
+                style={{ left: x, top: y, opacity: op }}
                 title={`Merge & Resume (×${batch.count})`}
               >
                 <GitMerge size={10} strokeWidth={3} />
@@ -533,10 +596,8 @@ export function MonitorTimeline({
           if (e.type === "split") {
             return false;
           }
-          // Skip merge events (rendered as combined merge icons above)
-          if (e.type === "merge") {
-            return false;
-          }
+          // Merge events are rendered at the target agent's row (not source)
+          // — position override is handled in the render section below.
           // Skip pause events that immediately follow a split (part of split+wait)
           if (e.type === "pause") {
             const hasSplitBefore = events.some(
@@ -581,6 +642,51 @@ export function MonitorTimeline({
             const eventWin = getWindowForAgentAtTime(event.agentId, event.timestamp, true);
             opacity = eventWin && connectedWindows.has(eventWin.id) ? 1 : 0.1;
           }
+          // For merge events, position at the target agent's row
+          if (event.type === "merge" && event.targetId) {
+            const mergeTargetY = getAgentY(event.targetId);
+            // Find if target is active at merge time; if not, use next window X
+            const targetActive = activityWindows.some(
+              (w) =>
+                w.agentId === event.targetId &&
+                w.startTime <= event.timestamp &&
+                (w.endTime === null || w.endTime >= event.timestamp),
+            );
+            const nextWin = !targetActive
+              ? activityWindows
+                  .filter((w) => w.agentId === event.targetId && w.startTime > event.timestamp)
+                  .toSorted((a, b) => a.startTime - b.startTime)[0]
+              : null;
+            const iconX = nextWin ? getX(nextWin.startTime) : getX(event.timestamp);
+
+            // Count merges at same target + position (for batch label)
+            const samePosMerges = events.filter(
+              (e) =>
+                e.type === "merge" &&
+                e.targetId === event.targetId &&
+                Math.abs(e.timestamp - event.timestamp) <= 2,
+            );
+            const mergeLabel =
+              samePosMerges.length > 1
+                ? `Merge & Resume (×${samePosMerges.length})`
+                : "Merge & Resume";
+            // Only render one icon per target+timestamp group
+            if (samePosMerges[0]?.id !== event.id) {
+              return null;
+            }
+
+            return (
+              <div
+                key={`merge-icon-${event.id}`}
+                className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border flex items-center justify-center z-40 text-emerald-400 border-emerald-400/50 bg-emerald-950"
+                title={mergeLabel}
+                style={{ left: iconX, top: mergeTargetY, opacity }}
+              >
+                <GitMerge size={10} />
+              </div>
+            );
+          }
+
           if (["pause", "error", "archive", "backtrack", "split", "handoff"].includes(event.type)) {
             let Icon = Pause,
               colorClass = "text-amber-400 border-amber-400/50 bg-amber-950",

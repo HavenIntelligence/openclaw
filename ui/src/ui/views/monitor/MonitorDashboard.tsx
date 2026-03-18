@@ -50,6 +50,7 @@ interface DashboardProps {
   missionSummaries: MissionSummary[];
   selectedMissionId: string | null;
   onMissionChange: (id: string) => void;
+  isLiveMission?: boolean;
 }
 
 // ── Resize constants ────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ function formatTimeCompact(seconds: number, unit: TimeUnit): string {
   if (unit === "min") {
     return `${(seconds / 60).toFixed(1)}m`;
   }
-  return `${Math.round(seconds * 10) / 10}s`;
+  return `${seconds.toFixed(1)}s`;
 }
 
 // ── Main dashboard ──────────────────────────────────────────────────────
@@ -492,7 +493,7 @@ export function MonitorDashboard(props: DashboardProps) {
             type="range"
             min="0"
             max={maxTime}
-            value={currentTime}
+            value={props.isLiveMission && currentTime >= maxTime ? maxTime : currentTime}
             onChange={(e) => {
               setIsPlaying(false);
               setCurrentTime(Number(e.target.value));
@@ -502,7 +503,7 @@ export function MonitorDashboard(props: DashboardProps) {
               minWidth: 60,
               maxWidth: 200,
               height: 3,
-              accentColor: "var(--ok)",
+              accentColor: props.isLiveMission && currentTime >= maxTime ? "#22d3ee" : "var(--ok)",
               cursor: "pointer",
             }}
           />
@@ -797,6 +798,7 @@ export function MonitorDashboard(props: DashboardProps) {
               currentTime={currentTime}
               maxTime={maxTime}
               taskSession={props.taskSession}
+              isLiveMission={props.isLiveMission}
             />
           </div>
         </>

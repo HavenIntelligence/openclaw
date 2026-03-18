@@ -1076,7 +1076,14 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
   const globalStart = Math.min(...allStarts);
   // Use latest completion time. Extend to Date.now() if the mission is still actively running
   // (orchestrator in_progress, or subtasks still running).
-  const orchStillRunning = orchTask.status !== "done" && orchTask.status !== "review";
+  // Consider the orchestrator "still running" only if status is in_progress AND
+  // it was updated recently (within 5 min). Stale in_progress tasks are treated
+  // as completed (e.g. process was killed without updating status).
+  const STALE_MS = 5 * 60_000;
+  const orchStillRunning =
+    orchTask.status !== "done" &&
+    orchTask.status !== "review" &&
+    Date.now() - orchTask.updatedAt < STALE_MS;
   const subtasksDone = subtasks.every((t) => t.status === "done" || t.status === "review");
   const globalEnd = orchStillRunning
     ? Date.now() // mission still in progress — scan up to now
@@ -1192,7 +1199,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     if (task.id === orchTask.id) {
       // For in-progress missions, endTime may have been set early by onFinish
       // while processes are still running. Use Date.now() as upper bound.
-      upperBound = orchTask.status !== "done" ? Date.now() : (orchTask.endTime ?? globalEnd);
+      upperBound = orchStillRunning ? Date.now() : (orchTask.endTime ?? globalEnd);
     } else {
       const allAgentTasks = svc.taskStore
         .list({})

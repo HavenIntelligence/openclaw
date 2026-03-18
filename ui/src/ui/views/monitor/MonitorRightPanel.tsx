@@ -26,6 +26,59 @@ function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(html);
 }
 
+/** Try to parse delegation JSON and return a structured plan, or null. */
+function parseDelegationPlan(
+  text: string,
+): { agentId: string; subtask: string }[] | "empty" | null {
+  const trimmed = text.trim();
+  // Check for [] (empty delegation)
+  if (/^\[\s*\]/.test(trimmed)) {
+    return "empty";
+  }
+  // Try to extract JSON array from the message
+  const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    return null;
+  }
+  try {
+    const arr = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(arr) || arr.length === 0) {
+      return null;
+    }
+    if (
+      arr.every(
+        (item: Record<string, unknown>) =>
+          typeof item.agentId === "string" && typeof item.subtask === "string",
+      )
+    ) {
+      return arr as { agentId: string; subtask: string }[];
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+function renderDelegationPlan(plan: { agentId: string; subtask: string }[]): string {
+  const rows = plan.map((entry) => {
+    const shortTask =
+      entry.subtask.length > 200 ? entry.subtask.slice(0, 200) + "…" : entry.subtask;
+    return `<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--monitor-border-strong);background:var(--monitor-chat-pre-bg, rgba(0,0,0,0.1))">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:11px;font-weight:700;color:var(--monitor-ok);font-family:var(--mono)">→ ${DOMPurify.sanitize(entry.agentId)}</span>
+      </div>
+      <div style="font-size:11px;line-height:1.5;color:var(--monitor-text);white-space:pre-wrap">${DOMPurify.sanitize(shortTask)}</div>
+    </div>`;
+  });
+  return `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--monitor-muted);margin-bottom:6px">📋 Delegation Plan (${plan.length} agent${plan.length > 1 ? "s" : ""})</div>${rows.join("")}`;
+}
+
+function renderEmptyDelegation(): string {
+  return `<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;border:1px solid var(--monitor-border-strong);background:var(--monitor-chat-pre-bg, rgba(0,0,0,0.1))">
+    <span style="font-size:11px;color:var(--monitor-muted)">🚫 No delegation — executing directly</span>
+  </div>`;
+}
+
 // ── Agent avatar colors (deterministic by name) ──────────────────────────
 const AGENT_COLORS = [
   "bg-emerald-500",
@@ -86,6 +139,7 @@ interface RightPanelProps {
   maxTime: number;
   taskSession: TaskSessionData;
   isDark?: boolean;
+  isLiveMission?: boolean;
 }
 
 export function MonitorRightPanel({
@@ -95,6 +149,7 @@ export function MonitorRightPanel({
   currentTime,
   maxTime,
   taskSession,
+  isLiveMission,
 }: Omit<RightPanelProps, "selectedAgentId" | "setSelectedAgentId" | "isDark">) {
   const [showLegendModal, setShowLegendModal] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -246,15 +301,23 @@ export function MonitorRightPanel({
           <div className="flex justify-between items-center">
             <span className="text-xs text-zinc-500 font-mono">PROGRESS</span>
             <div className="flex items-center gap-2 w-24">
-              <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald-500 rounded-full transition-all duration-200"
-                  style={{ width: `${Math.round((currentTime / maxTime) * 100)}%` }}
-                ></div>
-              </div>
-              <span className="text-xs text-zinc-200 font-mono">
-                {Math.round((currentTime / maxTime) * 100)}%
-              </span>
+              {isLiveMission && currentTime >= maxTime ? (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 animate-pulse">
+                  Live
+                </span>
+              ) : (
+                <>
+                  <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-200"
+                      style={{ width: `${Math.round((currentTime / maxTime) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-zinc-200 font-mono">
+                    {Math.round((currentTime / maxTime) * 100)}%
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <div className="flex justify-between items-center">
@@ -295,7 +358,11 @@ export function MonitorRightPanel({
             <MessageSquare size={14} /> CHAT
           </div>
         </div>
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar"
+          style={{ background: "var(--bg, inherit)" }}
+        >
           {taskSession.chatMessages
             .filter((msg) => msg.ts == null || msg.ts <= currentTime)
             .map((msg) => {
@@ -309,12 +376,22 @@ export function MonitorRightPanel({
               return msg.role === "user" ? (
                 <div key={msg.id}>
                   {tsLabel != null && (
-                    <div className="text-[9px] font-mono text-zinc-600 text-right mb-1">
+                    <div
+                      className="text-[9px] font-mono text-right mb-1"
+                      style={{ color: "var(--monitor-muted)" }}
+                    >
                       {tsLabel}
                     </div>
                   )}
                   <div className="flex justify-end pl-8">
-                    <div className="text-sm text-zinc-200 bg-blue-500/15 px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]">
+                    <div
+                      className="text-sm px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]"
+                      style={{
+                        background:
+                          "color-mix(in srgb, var(--monitor-info, #3b82f6) 15%, transparent)",
+                        color: "var(--monitor-text)",
+                      }}
+                    >
                       {msg.content}
                     </div>
                   </div>
@@ -322,24 +399,83 @@ export function MonitorRightPanel({
               ) : (
                 <div key={msg.id}>
                   {tsLabel != null && (
-                    <div className="text-[9px] font-mono text-zinc-600 mb-1">{tsLabel}</div>
+                    <div
+                      className="text-[9px] font-mono mb-1"
+                      style={{ color: "var(--monitor-muted)" }}
+                    >
+                      {tsLabel}
+                    </div>
                   )}
                   <div className="flex items-start gap-2 pr-8">
                     <AgentAvatar name={agentName} size={22} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[10px] text-zinc-500 font-mono mb-0.5 truncate">
+                      <div
+                        className="text-[10px] font-mono mb-0.5 truncate"
+                        style={{ color: "var(--monitor-muted)" }}
+                      >
                         {agentName}
                       </div>
-                      {isToolOnly ? (
-                        <div className="text-[11px] text-zinc-400 font-mono bg-zinc-700/30 px-2 py-1 rounded border border-zinc-600/30 inline-block">
-                          {msg.content}
-                        </div>
-                      ) : (
-                        <div
-                          className="monitor-chat-md text-sm text-zinc-200 leading-relaxed bg-zinc-700/25 px-3 py-2 rounded-2xl rounded-tl-sm border border-zinc-600/25"
-                          dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                        />
-                      )}
+                      {(() => {
+                        const delegation = !isToolOnly ? parseDelegationPlan(msg.content) : null;
+                        if (delegation === "empty") {
+                          return (
+                            <div
+                              className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+                              style={{
+                                color: "var(--monitor-text)",
+                                background: "var(--monitor-hover)",
+                                borderColor: "var(--monitor-border)",
+                              }}
+                              dangerouslySetInnerHTML={{ __html: renderEmptyDelegation() }}
+                            />
+                          );
+                        }
+                        if (delegation && delegation !== "empty") {
+                          // Render remaining text after JSON (if any)
+                          const jsonEnd = msg.content.indexOf("]") + 1;
+                          const afterJson = msg.content.slice(jsonEnd).trim();
+                          return (
+                            <div
+                              className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+                              style={{
+                                color: "var(--monitor-text)",
+                                background: "var(--monitor-hover)",
+                                borderColor: "var(--monitor-border)",
+                              }}
+                              dangerouslySetInnerHTML={{
+                                __html:
+                                  renderDelegationPlan(delegation) +
+                                  (afterJson ? renderMarkdown(afterJson) : ""),
+                              }}
+                            />
+                          );
+                        }
+                        if (isToolOnly) {
+                          return (
+                            <div
+                              className="text-[11px] font-mono px-2 py-1 rounded border inline-block"
+                              style={{
+                                color: "var(--monitor-muted)",
+                                background: "var(--monitor-hover)",
+                                borderColor: "var(--monitor-border)",
+                              }}
+                            >
+                              {msg.content}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div
+                            className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+                            style={{
+                              color: "var(--monitor-text)",
+                              background: "var(--monitor-hover)",
+                              borderColor: "var(--monitor-border)",
+                            }}
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                          />
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

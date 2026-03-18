@@ -451,6 +451,7 @@ export function MonitorApp(props: MonitorAppProps) {
         missionSummaries={missionSummaries}
         selectedMissionId={selectedMissionId}
         onMissionChange={setSelectedMissionId}
+        isLiveMission={isLiveMission}
         {...derivedState}
       />
       {showEmptyHint && (
