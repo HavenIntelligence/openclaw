@@ -25,6 +25,8 @@ type Task = {
   project: string;
   tags: string[];
   createdAt: string;
+  createdAtMs: number; // raw epoch ms for sorting
+  updatedAtMs: number; // raw epoch ms for sorting
   dueAt?: string;
   tokensUsed?: number;
   blockedBy?: string;
@@ -34,7 +36,13 @@ type Task = {
 function demoTask(
   partial: Omit<
     Task,
-    "assignedBy" | "assignedByEmoji" | "reviewedBy" | "roundCount" | "maxRounds"
+    | "assignedBy"
+    | "assignedByEmoji"
+    | "reviewedBy"
+    | "roundCount"
+    | "maxRounds"
+    | "createdAtMs"
+    | "updatedAtMs"
   > &
     Partial<Task>,
 ): Task {
@@ -44,6 +52,8 @@ function demoTask(
     reviewedBy: partial.reviewedBy ?? partial.assignedBy ?? "ai-director",
     roundCount: partial.roundCount ?? (partial.status === "done" ? 1 : 0),
     maxRounds: partial.maxRounds ?? 3,
+    createdAtMs: partial.createdAtMs ?? Date.now(),
+    updatedAtMs: partial.updatedAtMs ?? Date.now(),
     ...partial,
   };
 }
@@ -364,6 +374,8 @@ function navigateToMission(missionId: string, _target: EventTarget | null) {
 
 let _dragging: string | null = null;
 let _detailTaskId: string | null = null; // clicked task to show detail panel
+// Per-column sort: "newest" (desc) | "oldest" (asc) | null (default)
+const _columnSort = new Map<TaskStatus, "newest" | "oldest">();
 
 /** Trigger a Lit re-render by finding the host element from an event target. */
 function requestHostRender(target: EventTarget | null) {
@@ -438,6 +450,17 @@ function fmtDate(ts: number): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 /** Map real Task + agent list to the internal display Task shape. */
 function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
   const agent = agents.find((a) => a.id === rt.assignee);
@@ -462,6 +485,8 @@ function mapRealTask(rt: RealTask, agents: ClawDockAgent[]): Task {
     project: rt.project ?? "Unassigned",
     tags: rt.tags ?? [],
     createdAt: fmtDate(rt.createdAt),
+    createdAtMs: rt.createdAt,
+    updatedAtMs: rt.updatedAt,
     dueAt: rt.dueAt ? fmtDate(rt.dueAt) : undefined,
     tokensUsed: rt.tokensUsed,
     blockedBy: rt.blockedBy?.[0],
@@ -555,9 +580,11 @@ function renderTask(task: Task) {
         ${task.assignedAt ? html`<span class="cd-kb-assign-ts">${task.assignedAt}</span>` : ""}
       </div>
 
-      <!-- Footer: tokens + blocker + review info -->
+      <!-- Footer: tokens + timestamp + blocker + review info -->
       <div class="cd-kb-task__footer">
         ${task.tokensUsed ? html`<span class="cd-kb-tokens">${fmtTokens(task.tokensUsed)}</span>` : ""}
+        <span class="cd-kb-task__ts" title="Created: ${fmtTime(task.createdAtMs)}&#10;Updated: ${fmtTime(task.updatedAtMs)}"
+          style="font-size:9px;color:#71717a;font-family:monospace">${fmtTime(task.updatedAtMs)}</span>
         ${task.blockedBy ? html`<span class="cd-kb-blocked">⛔ ${task.blockedBy}</span>` : ""}
         ${task.reviewNote ? html`<span class="cd-kb-review-note" title="${task.reviewNote}">💬</span>` : ""}
       </div>
@@ -568,7 +595,9 @@ function renderTask(task: Task) {
           task.status === "review"
             ? html`
           <button class="cd-btn cd-btn--ghost cd-btn--xs cd-btn--ok" title="Approve → Done"
-            @click=${() => {
+            @click=${(e: Event) => {
+              e.stopPropagation();
+              console.log("approve click", task.id, "_onUpdateTask:", typeof _onUpdateTask);
               if (_onUpdateTask) {
                 _onUpdateTask(task.id, { status: "done", reviewNote: "Approved" });
               }
@@ -594,9 +623,23 @@ function renderTask(task: Task) {
   `;
 }
 
+function sortTasks(tasks: Task[], colId: TaskStatus): Task[] {
+  const sort = _columnSort.get(colId);
+  if (!sort) {
+    return tasks;
+  }
+  const copy = [...tasks];
+  copy.sort((a, b) =>
+    sort === "newest" ? b.updatedAtMs - a.updatedAtMs : a.updatedAtMs - b.updatedAtMs,
+  );
+  return copy;
+}
+
 function renderColumn(col: (typeof COLUMNS)[0]) {
-  const tasks = filterTasks(_activeTasks.filter((t) => t.status === col.id));
+  const filtered = filterTasks(_activeTasks.filter((t) => t.status === col.id));
+  const tasks = sortTasks(filtered, col.id);
   const totalTokens = tasks.reduce((s, t) => s + (t.tokensUsed ?? 0), 0);
+  const currentSort = _columnSort.get(col.id);
 
   return html`
     <div class="cd-kb-col ${col.headerClass}"
@@ -623,6 +666,18 @@ function renderColumn(col: (typeof COLUMNS)[0]) {
           <span class="cd-kb-col__count">${tasks.length}</span>
         </div>
         ${totalTokens ? html`<span class="cd-kb-col__tokens">${fmtTokens(totalTokens)}</span>` : ""}
+        <button class="cd-btn cd-btn--ghost cd-btn--xs" title="${currentSort === "newest" ? "Newest first" : currentSort === "oldest" ? "Oldest first" : "Sort by time"}"
+          style="font-size:10px;opacity:${currentSort ? 1 : 0.5}"
+          @click=${(e: Event) => {
+            if (!currentSort) {
+              _columnSort.set(col.id, "newest");
+            } else if (currentSort === "newest") {
+              _columnSort.set(col.id, "oldest");
+            } else {
+              _columnSort.delete(col.id);
+            }
+            requestHostRender(e.target);
+          }}>${currentSort === "oldest" ? "↑" : currentSort === "newest" ? "↓" : "↕"}</button>
         <button class="cd-btn cd-btn--ghost cd-btn--xs" @click=${() => {
           _newTask.status = col.id;
           _newTaskOpen = true;
@@ -1086,11 +1141,13 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                 ${
                   task.status === "review"
                     ? html`
-                  <button class="cd-btn cd-btn--sm cd-btn--primary" @click=${() => {
+                  <button class="cd-btn cd-btn--sm cd-btn--primary" @click=${(e: Event) => {
+                    e.stopPropagation();
                     if (_onUpdateTask) {
                       _onUpdateTask(task.id, { status: "done", reviewNote: "Approved" });
                     }
                     _detailTaskId = null;
+                    requestHostRender(e.target);
                   }}>Approve</button>
                   <button class="cd-btn cd-btn--sm cd-btn--outline" @click=${() => {
                     if (_onUpdateTask) {
@@ -1104,11 +1161,15 @@ export function renderCompanyTasks(props: CompanyTasksProps) {
                 `
                     : ""
                 }
-                <button class="cd-btn cd-btn--sm cd-btn--ghost" style="margin-left:auto;color:var(--destructive)" @click=${() => {
+                <button class="cd-btn cd-btn--sm cd-btn--ghost" style="margin-left:auto;color:var(--destructive)" @click=${(
+                  e: Event,
+                ) => {
+                  e.stopPropagation();
                   if (_onDeleteTask) {
                     _onDeleteTask(task.id);
                   }
                   _detailTaskId = null;
+                  requestHostRender(e.target);
                 }}>Delete</button>
               </div>
             </div>

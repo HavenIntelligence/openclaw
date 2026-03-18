@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "./monitor.css";
 import { deriveState } from "./derivation";
 import { MonitorDashboard } from "./MonitorDashboard";
@@ -252,8 +252,19 @@ export function MonitorApp(props: MonitorAppProps) {
     });
   }, [viewMode, missionsLoaded, resolvedClient]);
 
-  // Load mission data when selection changes
+  // Load mission data when selection changes + poll while live
+  const missionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isInitialMissionLoad = useRef(true);
+
   useEffect(() => {
+    if (missionPollRef.current) {
+      clearInterval(missionPollRef.current);
+      missionPollRef.current = null;
+    }
+    isInitialMissionLoad.current = true;
+    hasReachedLiveRef.current = false;
+    setIsLiveMission(false);
+
     if (viewMode !== "missions" || !selectedMissionId) {
       return;
     }
@@ -263,15 +274,49 @@ export function MonitorApp(props: MonitorAppProps) {
     if (!c) {
       return;
     }
-    void doFetchMission(c, selectedMissionId).then((entry) => {
-      if (entry) {
-        setMissionEntry(entry);
-        setCurrentTime(0);
-        setIsPlaying(true);
-        setSelectedAgentId(null);
-        setHoveredAgentId(null);
+
+    const fetchAndUpdate = () => {
+      void doFetchMission(c, selectedMissionId).then((entry) => {
+        if (!entry) {
+          return;
+        }
+        if (isInitialMissionLoad.current) {
+          // First load: reset playback
+          setMissionEntry(entry);
+          setCurrentTime(0);
+          setIsPlaying(true);
+          setSelectedAgentId(null);
+          setHoveredAgentId(null);
+          isInitialMissionLoad.current = false;
+        } else {
+          // Subsequent polls: update data without resetting playback
+          setMissionEntry(entry);
+        }
+
+        // Check if mission is still live — if so, keep polling
+        const gStart = entry.session.globalStartMs ?? 0;
+        const endMs =
+          entry.session.endTime != null && gStart ? gStart + entry.session.endTime * 1000 : 0;
+        const isLive = entry.session.endTime == null || (endMs > 0 && Date.now() - endMs < 120_000);
+        setIsLiveMission(isLive);
+
+        if (isLive && !missionPollRef.current) {
+          missionPollRef.current = setInterval(fetchAndUpdate, 1000);
+        } else if (!isLive && missionPollRef.current) {
+          clearInterval(missionPollRef.current);
+          missionPollRef.current = null;
+        }
+      });
+    };
+
+    fetchAndUpdate();
+
+    return () => {
+      if (missionPollRef.current) {
+        clearInterval(missionPollRef.current);
+        missionPollRef.current = null;
       }
-    });
+    };
   }, [viewMode, selectedMissionId, resolvedClient]);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
@@ -307,6 +352,7 @@ export function MonitorApp(props: MonitorAppProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(16);
+  const [isLiveMission, setIsLiveMission] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
 
@@ -325,6 +371,8 @@ export function MonitorApp(props: MonitorAppProps) {
     }
   }, [session]);
 
+  // When playback catches up to MAX_TIME on a live mission, switch to 1x
+  const hasReachedLiveRef = useRef(false);
   useEffect(() => {
     if (!isPlaying || !session || MAX_TIME <= 0) {
       return;
@@ -334,6 +382,16 @@ export function MonitorApp(props: MonitorAppProps) {
     const timer = setInterval(() => {
       setCurrentTime((t) => {
         if (t >= MAX_TIME) {
+          if (isLiveMission) {
+            // Live: don't pause, stay at MAX_TIME and wait for new data
+            if (!hasReachedLiveRef.current && playbackSpeed > 1) {
+              hasReachedLiveRef.current = true;
+              // Switch to 1x so updates feel natural
+              setTimeout(() => setPlaybackSpeed(1), 0);
+            }
+            return MAX_TIME;
+          }
+          // Completed: stop playback
           setIsPlaying(false);
           return t;
         }
@@ -341,7 +399,7 @@ export function MonitorApp(props: MonitorAppProps) {
       });
     }, TICK_MS);
     return () => clearInterval(timer);
-  }, [isPlaying, MAX_TIME, session, playbackSpeed]);
+  }, [isPlaying, MAX_TIME, session, playbackSpeed, isLiveMission]);
 
   const derivedState = useMemo(() => {
     if (!session) {

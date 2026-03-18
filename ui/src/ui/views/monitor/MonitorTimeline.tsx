@@ -260,7 +260,9 @@ export function MonitorTimeline({
             );
           }
 
-          // ── MERGE: render each merge individually at its own timestamp ──
+          // ── MERGE: render each merge individually ──
+          // If the target agent is inactive at merge time, route the arrow
+          // to the next activity window (L-shaped: vertical then horizontal).
           for (const edge of mergeEdges) {
             if (edge.timestamp > currentTime) {
               continue;
@@ -270,26 +272,67 @@ export function MonitorTimeline({
             const sourceY = getAgentY(edge.sourceId);
             const mergeX = getX(edge.timestamp);
 
-            // Vertical line from source row to target row
-            const isUp = sourceY > targetY;
-            elements.push(
-              <g key={edge.id} style={{ opacity: 0.35 }}>
-                <path
-                  d={`M ${mergeX} ${sourceY} L ${mergeX} ${targetY + (isUp ? 8 : -8)}`}
-                  stroke="#52525b"
-                  strokeWidth={1.5}
-                  fill="none"
-                />
-                <polygon
-                  points={
-                    isUp
-                      ? `${mergeX - 3.5},${targetY + 8} ${mergeX + 3.5},${targetY + 8} ${mergeX},${targetY + 2}`
-                      : `${mergeX - 3.5},${targetY - 8} ${mergeX + 3.5},${targetY - 8} ${mergeX},${targetY - 2}`
-                  }
-                  fill="#52525b"
-                />
-              </g>,
+            // Check if target has an active window at merge time
+            const targetActiveAtMerge = activityWindows.some(
+              (w) =>
+                w.agentId === targetId &&
+                w.startTime <= edge.timestamp &&
+                (w.endTime === null || w.endTime >= edge.timestamp),
             );
+
+            // Find the next activity window start after merge time
+            const nextWindow = !targetActiveAtMerge
+              ? activityWindows
+                  .filter((w) => w.agentId === targetId && w.startTime > edge.timestamp)
+                  .toSorted((a, b) => a.startTime - b.startTime)[0]
+              : null;
+
+            const arrowEndX = nextWindow ? getX(nextWindow.startTime) : mergeX;
+            const isUp = sourceY > targetY;
+            const arrowTipY = targetY + (isUp ? 2 : -2);
+            const arrowBaseY = targetY + (isUp ? 8 : -8);
+
+            if (nextWindow && arrowEndX > mergeX + 2) {
+              // L-shaped: horizontal from source to above next active window, then vertical down
+              elements.push(
+                <g key={edge.id} style={{ opacity: 0.35 }}>
+                  <path
+                    d={`M ${mergeX} ${sourceY} L ${arrowEndX} ${sourceY} L ${arrowEndX} ${arrowBaseY}`}
+                    stroke="#52525b"
+                    strokeWidth={1.5}
+                    fill="none"
+                  />
+                  <polygon
+                    points={
+                      isUp
+                        ? `${arrowEndX - 3.5},${arrowBaseY} ${arrowEndX + 3.5},${arrowBaseY} ${arrowEndX},${arrowTipY}`
+                        : `${arrowEndX - 3.5},${arrowBaseY} ${arrowEndX + 3.5},${arrowBaseY} ${arrowEndX},${arrowTipY}`
+                    }
+                    fill="#52525b"
+                  />
+                </g>,
+              );
+            } else {
+              // Straight vertical: target is active at merge time
+              elements.push(
+                <g key={edge.id} style={{ opacity: 0.35 }}>
+                  <path
+                    d={`M ${mergeX} ${sourceY} L ${mergeX} ${arrowBaseY}`}
+                    stroke="#52525b"
+                    strokeWidth={1.5}
+                    fill="none"
+                  />
+                  <polygon
+                    points={
+                      isUp
+                        ? `${mergeX - 3.5},${arrowBaseY} ${mergeX + 3.5},${arrowBaseY} ${mergeX},${arrowTipY}`
+                        : `${mergeX - 3.5},${arrowBaseY} ${mergeX + 3.5},${arrowBaseY} ${mergeX},${arrowTipY}`
+                    }
+                    fill="#52525b"
+                  />
+                </g>,
+              );
+            }
           }
 
           // ── SPLIT+WAIT combined icons (rendered as HTML overlay, not SVG) ──
