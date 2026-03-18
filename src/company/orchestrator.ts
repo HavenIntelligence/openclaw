@@ -58,14 +58,19 @@ export class Orchestrator {
   private async runAgentTaskWithSessionLockRetry(
     agentId: string,
     prompt: string,
-    opts: { timeoutMs: number; openclawAgentId: string },
+    opts: { timeoutMs: number; openclawAgentId: string; onFinish?: () => void },
   ) {
+    // Use a unique session ID per call to avoid lock contention with the
+    // gateway's own agent session and with other concurrent orchestrator calls.
+    const sessionId = `orch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         return await this.pm.runTaskAwait(agentId, prompt, {
           timeoutMs: opts.timeoutMs,
           openclawAgentId: opts.openclawAgentId,
+          sessionId,
+          onFinish: opts.onFinish,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -73,11 +78,9 @@ export class Orchestrator {
         if (!isLock || attempt === maxAttempts) {
           throw err;
         }
-        // Small backoff; lock usually clears quickly if it was a concurrent run.
         await new Promise((r) => setTimeout(r, 400 * attempt));
       }
     }
-    // Unreachable (loop always returns or throws)
     throw new Error("Unexpected retry loop fallthrough");
   }
 

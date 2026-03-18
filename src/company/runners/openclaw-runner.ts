@@ -38,6 +38,7 @@ export class OpenClawRunner implements CliAgentRunner {
       "--json",
       "--agent",
       openclawAgent,
+      ...(opts?.sessionId ? ["--session-id", opts.sessionId] : []),
       "-m",
       fullPrompt,
     ];

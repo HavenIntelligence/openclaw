@@ -249,7 +249,9 @@ export function MonitorBottomPanel({
     if (!agent) {
       return null;
     }
-    return taskSession.agentConfigs[agent.id] ?? EMPTY_AGENT_CONFIG;
+    const raw = taskSession.agentConfigs[agent.id];
+    // Ensure all required fields exist (backend may return {} for ephemeral agents)
+    return raw?.capabilities ? (raw as AgentRuntimeConfig) : EMPTY_AGENT_CONFIG;
   }, [agent, taskSession]);
   const agentTelemetry = useMemo(() => {
     if (!agent) {
@@ -291,9 +293,9 @@ export function MonitorBottomPanel({
       </div>
       <div className="flex-1 min-h-0 overflow-hidden p-4 flex gap-0">
         {selectedActivityId && activity && agent && agentTelemetry ? (
-          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-y-auto xl:overflow-hidden custom-scrollbar">
             {/* Col 1: Identity */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="text-xs text-zinc-500 font-mono mb-1">AGENT</div>
@@ -341,7 +343,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 2: Tasks & Completion */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">TASKS & COMPLETION</div>
                 <div className="space-y-2">
@@ -366,7 +368,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 3: Output & Artifacts */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2 flex items-center gap-2">
                   <FileText size={12} /> OUTPUT & ARTIFACTS
@@ -406,7 +408,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 4: Tool Usage + System Metrics + Context Window */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-3 px-3">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1">TOOL USAGE DISTRIBUTION</div>
                 <div
@@ -558,9 +560,9 @@ export function MonitorBottomPanel({
             </div>
           </div>
         ) : agent && agentConfig ? (
-          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-0 overflow-y-auto xl:overflow-hidden custom-scrollbar">
             {/* Col 1: Basic Info */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-1">AGENT ID</div>
                 <div className="text-xs text-zinc-400 font-mono mb-3 select-all">{agent.id}</div>
@@ -617,7 +619,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 2: File Access */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-6 px-3 border-r border-zinc-800/30">
               <div className="bg-zinc-800/20 border border-zinc-800/50 rounded-lg p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">
@@ -663,7 +665,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 3: Radar */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col items-center justify-start px-3 border-r border-zinc-800/30">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col items-center justify-start px-3 border-r border-zinc-800/30">
               <div className="text-xs text-zinc-500 font-mono mb-2 w-full text-left">
                 AGENT CAPABILITIES
               </div>
@@ -703,7 +705,7 @@ export function MonitorBottomPanel({
               </div>
             </div>
             {/* Col 4: Skills & Tools */}
-            <div className="w-full xl:w-0 xl:flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-6 px-3">
+            <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-6 px-3">
               <div className="bg-zinc-800/20 border border-zinc-800/50 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-xs text-zinc-400 font-mono flex items-center gap-1.5">

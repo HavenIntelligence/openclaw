@@ -24,6 +24,12 @@ export interface RunOpts extends SpawnOpts {
    */
   systemPrompt?: string;
   /**
+   * Optional session ID override for the openclaw runner.
+   * When set, passed as `--session-id <value>` to isolate session state
+   * and avoid lock contention with the gateway's own agent session.
+   */
+  sessionId?: string;
+  /**
    * Called when the spawned child process exits.
    * Useful for updating external state (e.g. task endTime) on process completion.
    */

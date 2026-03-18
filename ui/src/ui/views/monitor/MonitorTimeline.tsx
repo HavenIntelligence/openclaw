@@ -260,109 +260,33 @@ export function MonitorTimeline({
             );
           }
 
-          // ── MERGE: group by spawn batch, not by targetId ──
-          // Find the spawn batch each merge belongs to by matching sourceId to split edges
-          const sourceToSpawnTs = new Map<string, number>();
-          for (const edge of splitEdges) {
-            if (edge.targetId) {
-              sourceToSpawnTs.set(edge.targetId, edge.timestamp);
-            }
-          }
-
-          // Group merges by their spawn batch timestamp + targetId
-          const mergeBatches = new Map<string, typeof lineageEdges>();
+          // ── MERGE: render each merge individually at its own timestamp ──
           for (const edge of mergeEdges) {
-            const spawnTs = sourceToSpawnTs.get(edge.sourceId) ?? edge.timestamp;
-            const batchKey = `${edge.targetId}@${spawnTs}`;
-            const batch = mergeBatches.get(batchKey) || [];
-            batch.push(edge);
-            mergeBatches.set(batchKey, batch);
-          }
-
-          for (const [batchKey, merges] of mergeBatches) {
-            const targetId = batchKey.split("@")[0];
-            const targetY = getAgentY(targetId);
-
-            // Find the next resume event on the orchestrator after the last merge.
-            // In the hybrid pause/resume model, resume may occur well after merge
-            // (e.g. orchestrator waits for all subordinates then resumes on first JSONL msg).
-            const latestMergeTs = Math.max(...merges.map((e) => e.timestamp));
-            const resumeEvent = events.find(
-              (r) => r.agentId === targetId && r.type === "resume" && r.timestamp >= latestMergeTs,
-            );
-            // Don't render merge lines until the resume event timestamp is reached
-            // (prevents floating arrows before orchestrator actually resumes)
-            if (!resumeEvent || resumeEvent.timestamp > currentTime) {
+            if (edge.timestamp > currentTime) {
               continue;
             }
-            const mergeIconX = getX(resumeEvent.timestamp);
+            const targetId = edge.targetId ?? "";
+            const targetY = getAgentY(targetId);
+            const sourceY = getAgentY(edge.sourceId);
+            const mergeX = getX(edge.timestamp);
 
-            // Each source: line starts from archive icon center (= archive timestamp, no offset)
-            for (const edge of merges) {
-              const sourceY = getAgentY(edge.sourceId);
-              // Archive is 1s after merge; use the archive event's timestamp for icon alignment
-              const archiveEvent = events.find(
-                (a) =>
-                  a.agentId === edge.sourceId &&
-                  a.type === "archive" &&
-                  a.timestamp >= edge.timestamp &&
-                  a.timestamp - edge.timestamp <= 2,
-              );
-              const sourceX = archiveEvent ? getX(archiveEvent.timestamp) : getX(edge.timestamp);
-
-              // Horizontal line from archive icon center to merge icon X
-              elements.push(
-                <g key={edge.id} style={{ opacity: 0.3 }}>
-                  <path
-                    d={`M ${sourceX} ${sourceY} L ${mergeIconX} ${sourceY}`}
-                    stroke="#52525b"
-                    strokeWidth={1.5}
-                    fill="none"
-                  />
-                </g>,
-              );
-            }
-
-            // Vertical collector at mergeIconX + arrow up to Merge&Resume icon
-            const allSourceYs = merges.map((e) => getAgentY(e.sourceId));
-            const minSourceY = Math.min(...allSourceYs);
-            const maxSourceY = Math.max(...allSourceYs);
+            // Vertical line from source row to target row
+            const isUp = sourceY > targetY;
             elements.push(
-              <g key={`merge-batch-${batchKey}`} style={{ opacity: 0.4 }}>
-                {minSourceY !== maxSourceY && (
-                  <path
-                    d={`M ${mergeIconX} ${minSourceY} L ${mergeIconX} ${maxSourceY}`}
-                    stroke="#52525b"
-                    strokeWidth={1.5}
-                    fill="none"
-                  />
-                )}
+              <g key={edge.id} style={{ opacity: 0.35 }}>
                 <path
-                  d={`M ${mergeIconX} ${minSourceY} L ${mergeIconX} ${targetY + 6}`}
+                  d={`M ${mergeX} ${sourceY} L ${mergeX} ${targetY + (isUp ? 8 : -8)}`}
                   stroke="#52525b"
                   strokeWidth={1.5}
                   fill="none"
                 />
                 <polygon
-                  points={`${mergeIconX - 4},${targetY + 6} ${mergeIconX + 4},${targetY + 6} ${mergeIconX},${targetY}`}
+                  points={
+                    isUp
+                      ? `${mergeX - 3.5},${targetY + 8} ${mergeX + 3.5},${targetY + 8} ${mergeX},${targetY + 2}`
+                      : `${mergeX - 3.5},${targetY - 8} ${mergeX + 3.5},${targetY - 8} ${mergeX},${targetY - 2}`
+                  }
                   fill="#52525b"
-                />
-                {/* Merge icon circle on the orchestrator row */}
-                <circle
-                  cx={mergeIconX}
-                  cy={targetY}
-                  r={8}
-                  fill="#052e16"
-                  stroke="#22c55e"
-                  strokeWidth={1}
-                  opacity={0.9}
-                />
-                <path
-                  d={`M ${mergeIconX - 3} ${targetY + 2} L ${mergeIconX} ${targetY - 1} L ${mergeIconX + 3} ${targetY + 2} M ${mergeIconX - 3} ${targetY - 2} L ${mergeIconX} ${targetY - 5} L ${mergeIconX + 3} ${targetY - 2}`}
-                  stroke="#4ade80"
-                  strokeWidth={1.2}
-                  fill="none"
-                  strokeLinecap="round"
                 />
               </g>,
             );

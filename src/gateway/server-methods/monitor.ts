@@ -1398,12 +1398,18 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
         /* best-effort */
       }
 
+      console.log(
+        `  [telemetry] ${agent.id}: candidateFiles=${candidateFiles.size}, agentTaskStart=${agentTaskStart}, agentUpperBound=${agentUpperBound}`,
+      );
       for (const sf of candidateFiles) {
         try {
           const p = await parseJsonlFile(sf);
           const overlap = p.messages.filter(
             (m) => m.timestamp >= agentTaskStart && m.timestamp <= agentUpperBound,
           ).length;
+          console.log(
+            `  [telemetry] ${agent.id}: file=${path.basename(sf)} msgs=${p.messages.length} spawns=${p.subagentSpawns.length} overlap=${overlap}`,
+          );
           if (
             overlap > 0 &&
             (!bestParsed ||
@@ -1564,7 +1570,7 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
       : null;
 
     if (delegateStartTs && firstPostDelegationMsg) {
-      // Delegation pause: orchestrator hands off to subtasks
+      // Delegation pause + resume: orchestrator hands off then resumes
       const pauseOffset = offsetSec(delegateStartTs) + 1;
       const resumeOffset = offsetSec(firstPostDelegationMsg.timestamp);
       if (resumeOffset > pauseOffset + 1) {
@@ -1594,6 +1600,12 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
         }
         lastMsgTs = msg.timestamp;
       }
+    } else if (delegateStartTs && !firstPostDelegationMsg && subtasks.length > 0) {
+      // Delegation started but orchestrator hasn't resumed yet (still waiting)
+      const pauseOffset = offsetSec(delegateStartTs) + 1;
+      ev(orchAgentId, pauseOffset, "pause", {
+        details: `Waiting for subordinates`,
+      });
     } else if (orchRawMessages.length >= 2) {
       // No subtasks — pure JSONL gap detection
       let lastMsgTs = orchRawMessages[0].timestamp;
@@ -1718,9 +1730,16 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
   }
 
   // ── Add ephemeral subagent lanes from session JSONL ──
+  console.log(
+    `  [ephemeral] agentParsedSessions keys: [${[...agentParsedSessions.keys()].join(", ")}]`,
+  );
   for (const [parentAgentId, parsed] of agentParsedSessions) {
+    console.log(`  [ephemeral] ${parentAgentId}: ${parsed.subagentSpawns.length} total spawns`);
     const missionSpawns = parsed.subagentSpawns.filter(
       (s) => s.spawnTimestamp >= globalStart - 60_000 && s.spawnTimestamp <= globalEnd + 60_000,
+    );
+    console.log(
+      `  [ephemeral] ${parentAgentId}: ${missionSpawns.length} mission spawns (window ${new Date(globalStart - 60_000).toISOString()} - ${new Date(globalEnd + 60_000).toISOString()})`,
     );
     if (missionSpawns.length === 0) {
       continue;
