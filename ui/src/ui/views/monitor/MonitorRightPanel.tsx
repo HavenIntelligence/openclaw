@@ -21,9 +21,43 @@ import type { Agent, LifecycleEvent, AgentSnapshot, TaskSessionData } from "./ty
 // Configure marked for compact inline rendering
 marked.setOptions({ breaks: true, gfm: true });
 
+const mdCache = new Map<string, string>();
 function renderMarkdown(text: string): string {
+  let cached = mdCache.get(text);
+  if (cached !== undefined) {
+    return cached;
+  }
   const html = marked.parse(text, { async: false });
-  return DOMPurify.sanitize(html);
+  cached = DOMPurify.sanitize(html);
+  mdCache.set(text, cached);
+  // Evict oldest when cache grows too large
+  if (mdCache.size > 300) {
+    const first = mdCache.keys().next().value;
+    if (first) {
+      mdCache.delete(first);
+    }
+  }
+  return cached;
+}
+
+const delegationCache = new Map<string, { agentId: string; subtask: string }[] | "empty" | null>();
+/** Try to parse delegation JSON and return a structured plan, or null. */
+function parseDelegationPlanCached(
+  text: string,
+): { agentId: string; subtask: string }[] | "empty" | null {
+  let cached = delegationCache.get(text);
+  if (cached !== undefined) {
+    return cached;
+  }
+  cached = parseDelegationPlan(text);
+  delegationCache.set(text, cached);
+  if (delegationCache.size > 200) {
+    const first = delegationCache.keys().next().value;
+    if (first) {
+      delegationCache.delete(first);
+    }
+  }
+  return cached;
 }
 
 /** Try to parse delegation JSON and return a structured plan, or null. */
@@ -35,42 +69,120 @@ function parseDelegationPlan(
   if (/^\[\s*\]/.test(trimmed)) {
     return "empty";
   }
-  // Try to extract JSON array from the message
-  const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    return null;
-  }
-  try {
-    const arr = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(arr) || arr.length === 0) {
+  // Must start with [ to be a candidate
+  if (!trimmed.startsWith("[")) {
+    // Also check for ``` code block wrapping
+    const codeMatch = trimmed.match(/```(?:json)?\s*(\[[\s\S]*)/);
+    if (!codeMatch) {
       return null;
     }
-    if (
-      arr.every(
-        (item: Record<string, unknown>) =>
-          typeof item.agentId === "string" && typeof item.subtask === "string",
-      )
-    ) {
-      return arr as { agentId: string; subtask: string }[];
-    }
-  } catch {
-    // not JSON
+    return parseDelegationPlan(codeMatch[1]);
   }
-  return null;
+  // Try complete JSON array first
+  const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+  if (jsonMatch) {
+    try {
+      const arr = JSON.parse(jsonMatch[0]);
+      if (
+        Array.isArray(arr) &&
+        arr.length > 0 &&
+        arr.every(
+          (item: Record<string, unknown>) =>
+            typeof item.agentId === "string" && typeof item.subtask === "string",
+        )
+      ) {
+        return arr as { agentId: string; subtask: string }[];
+      }
+    } catch {
+      // fall through to truncated parsing
+    }
+  }
+  // Truncated JSON: extract individual {"agentId":..., "subtask":...} objects
+  const entries: { agentId: string; subtask: string }[] = [];
+  const objPattern = /\{\s*"agentId"\s*:\s*"([^"]+)"\s*,\s*"subtask"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  let match;
+  while ((match = objPattern.exec(trimmed)) !== null) {
+    entries.push({
+      agentId: match[1],
+      subtask: match[2].replace(/\\n/g, "\n").replace(/\\"/g, '"'),
+    });
+  }
+  return entries.length > 0 ? entries : null;
 }
 
-function renderDelegationPlan(plan: { agentId: string; subtask: string }[]): string {
-  const rows = plan.map((entry) => {
-    const shortTask =
-      entry.subtask.length > 200 ? entry.subtask.slice(0, 200) + "…" : entry.subtask;
-    return `<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--monitor-border-strong);background:var(--monitor-chat-pre-bg, rgba(0,0,0,0.1))">
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-        <span style="font-size:11px;font-weight:700;color:var(--monitor-ok);font-family:var(--mono)">→ ${DOMPurify.sanitize(entry.agentId)}</span>
+function DelegationPlanCard({ entry }: { entry: { agentId: string; subtask: string } }) {
+  const [expanded, setExpanded] = useState(false);
+  const truncated = entry.subtask.length > 200;
+  const display = expanded
+    ? entry.subtask
+    : truncated
+      ? entry.subtask.slice(0, 200) + "…"
+      : entry.subtask;
+  return (
+    <div
+      style={{
+        marginBottom: 8,
+        padding: "8px 10px",
+        borderRadius: 8,
+        border: "1px solid var(--monitor-border-strong)",
+        background: "var(--monitor-chat-pre-bg, rgba(0,0,0,0.1))",
+        cursor: truncated ? "pointer" : undefined,
+      }}
+      onClick={truncated ? () => setExpanded((v) => !v) : undefined}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: "var(--monitor-ok)",
+            fontFamily: "var(--mono)",
+          }}
+        >
+          → {entry.agentId}
+        </span>
+        {truncated && (
+          <span style={{ fontSize: 9, color: "var(--monitor-muted)", marginLeft: "auto" }}>
+            {expanded ? "▲ collapse" : "▼ expand"}
+          </span>
+        )}
       </div>
-      <div style="font-size:11px;line-height:1.5;color:var(--monitor-text);white-space:pre-wrap">${DOMPurify.sanitize(shortTask)}</div>
-    </div>`;
-  });
-  return `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--monitor-muted);margin-bottom:6px">📋 Delegation Plan (${plan.length} agent${plan.length > 1 ? "s" : ""})</div>${rows.join("")}`;
+      <div
+        style={{
+          fontSize: 11,
+          lineHeight: 1.5,
+          color: "var(--monitor-text)",
+          whiteSpace: "pre-wrap",
+          maxHeight: expanded ? "none" : 120,
+          overflow: "hidden",
+        }}
+      >
+        {display}
+      </div>
+    </div>
+  );
+}
+
+function DelegationPlan({ plan }: { plan: { agentId: string; subtask: string }[] }) {
+  return (
+    <>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          color: "var(--monitor-muted)",
+          marginBottom: 6,
+        }}
+      >
+        📋 Delegation Plan ({plan.length} agent{plan.length > 1 ? "s" : ""})
+      </div>
+      {plan.map((entry, i) => (
+        <DelegationPlanCard key={`${entry.agentId}-${i}`} entry={entry} />
+      ))}
+    </>
+  );
 }
 
 function renderEmptyDelegation(): string {
@@ -78,6 +190,158 @@ function renderEmptyDelegation(): string {
     <span style="font-size:11px;color:var(--monitor-muted)">🚫 No delegation — executing directly</span>
   </div>`;
 }
+
+// ── Memoized chat message (avoids re-render when only currentTime changes) ──
+function findJsonArrayEnd(src: string): number {
+  let depth = 0;
+  let inStr = false;
+  for (let ci = src.indexOf("["); ci < src.length && ci >= 0; ci++) {
+    const ch = src[ci];
+    if (inStr) {
+      if (ch === "\\") {
+        ci++;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "[") {
+      depth++;
+    }
+    if (ch === "]") {
+      depth--;
+      if (depth === 0) {
+        return ci + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+const ChatMessageItem = React.memo(function ChatMessageItem({
+  msg,
+}: {
+  msg: import("./types").ChatMessage;
+}) {
+  const agentName = msg.agentName || "Agent";
+  const tsLabel = msg.ts != null ? formatTimestamp(msg.ts) : null;
+  const delegation = msg.role === "assistant" ? parseDelegationPlanCached(msg.content) : null;
+  const isToolOnly =
+    !delegation &&
+    msg.role === "assistant" &&
+    msg.content.startsWith("[") &&
+    msg.content.endsWith("]");
+
+  if (msg.role === "user") {
+    return (
+      <div>
+        {tsLabel != null && (
+          <div
+            className="text-[9px] font-mono text-right mb-1"
+            style={{ color: "var(--monitor-muted)" }}
+          >
+            {tsLabel}
+          </div>
+        )}
+        <div className="flex justify-end pl-8">
+          <div
+            className="text-sm px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]"
+            style={{
+              background: "color-mix(in srgb, var(--monitor-info, #3b82f6) 15%, transparent)",
+              color: "var(--monitor-text)",
+            }}
+          >
+            {msg.content}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  let body: React.ReactNode;
+  if (delegation === "empty") {
+    body = (
+      <div
+        className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+        style={{
+          color: "var(--monitor-text)",
+          background: "var(--monitor-hover)",
+          borderColor: "var(--monitor-border)",
+        }}
+        dangerouslySetInnerHTML={{ __html: renderEmptyDelegation() }}
+      />
+    );
+  } else if (delegation && delegation !== "empty") {
+    const jsonEnd = findJsonArrayEnd(msg.content);
+    const afterJson = jsonEnd > 0 ? msg.content.slice(jsonEnd).trim() : "";
+    body = (
+      <div
+        className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+        style={{
+          color: "var(--monitor-text)",
+          background: "var(--monitor-hover)",
+          borderColor: "var(--monitor-border)",
+        }}
+      >
+        <DelegationPlan plan={delegation} />
+        {afterJson && <div dangerouslySetInnerHTML={{ __html: renderMarkdown(afterJson) }} />}
+      </div>
+    );
+  } else if (isToolOnly) {
+    body = (
+      <div
+        className="text-[11px] font-mono px-2 py-1 rounded border inline-block"
+        style={{
+          color: "var(--monitor-muted)",
+          background: "var(--monitor-hover)",
+          borderColor: "var(--monitor-border)",
+        }}
+      >
+        {msg.content}
+      </div>
+    );
+  } else {
+    body = (
+      <div
+        className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
+        style={{
+          color: "var(--monitor-text)",
+          background: "var(--monitor-hover)",
+          borderColor: "var(--monitor-border)",
+        }}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+      />
+    );
+  }
+
+  return (
+    <div>
+      {tsLabel != null && (
+        <div className="text-[9px] font-mono mb-1" style={{ color: "var(--monitor-muted)" }}>
+          {tsLabel}
+        </div>
+      )}
+      <div className="flex items-start gap-2 pr-8">
+        <AgentAvatar name={agentName} size={22} />
+        <div className="flex-1 min-w-0">
+          <div
+            className="text-[10px] font-mono mb-0.5 truncate"
+            style={{ color: "var(--monitor-muted)" }}
+          >
+            {agentName}
+          </div>
+          {body}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 // ── Agent avatar colors (deterministic by name) ──────────────────────────
 const AGENT_COLORS = [
@@ -365,122 +629,9 @@ export function MonitorRightPanel({
         >
           {taskSession.chatMessages
             .filter((msg) => msg.ts == null || msg.ts <= currentTime)
-            .map((msg) => {
-              const isToolOnly =
-                msg.role === "assistant" &&
-                msg.content.startsWith("[") &&
-                msg.content.endsWith("]");
-              const agentName = msg.agentName || "Agent";
-              const tsLabel = msg.ts != null ? formatTimestamp(msg.ts) : null;
-
-              return msg.role === "user" ? (
-                <div key={msg.id}>
-                  {tsLabel != null && (
-                    <div
-                      className="text-[9px] font-mono text-right mb-1"
-                      style={{ color: "var(--monitor-muted)" }}
-                    >
-                      {tsLabel}
-                    </div>
-                  )}
-                  <div className="flex justify-end pl-8">
-                    <div
-                      className="text-sm px-3 py-2 rounded-2xl rounded-tr-sm inline-block shadow-sm max-w-[85%]"
-                      style={{
-                        background:
-                          "color-mix(in srgb, var(--monitor-info, #3b82f6) 15%, transparent)",
-                        color: "var(--monitor-text)",
-                      }}
-                    >
-                      {msg.content}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div key={msg.id}>
-                  {tsLabel != null && (
-                    <div
-                      className="text-[9px] font-mono mb-1"
-                      style={{ color: "var(--monitor-muted)" }}
-                    >
-                      {tsLabel}
-                    </div>
-                  )}
-                  <div className="flex items-start gap-2 pr-8">
-                    <AgentAvatar name={agentName} size={22} />
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className="text-[10px] font-mono mb-0.5 truncate"
-                        style={{ color: "var(--monitor-muted)" }}
-                      >
-                        {agentName}
-                      </div>
-                      {(() => {
-                        const delegation = !isToolOnly ? parseDelegationPlan(msg.content) : null;
-                        if (delegation === "empty") {
-                          return (
-                            <div
-                              className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
-                              style={{
-                                color: "var(--monitor-text)",
-                                background: "var(--monitor-hover)",
-                                borderColor: "var(--monitor-border)",
-                              }}
-                              dangerouslySetInnerHTML={{ __html: renderEmptyDelegation() }}
-                            />
-                          );
-                        }
-                        if (delegation && delegation !== "empty") {
-                          // Render remaining text after JSON (if any)
-                          const jsonEnd = msg.content.indexOf("]") + 1;
-                          const afterJson = msg.content.slice(jsonEnd).trim();
-                          return (
-                            <div
-                              className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
-                              style={{
-                                color: "var(--monitor-text)",
-                                background: "var(--monitor-hover)",
-                                borderColor: "var(--monitor-border)",
-                              }}
-                              dangerouslySetInnerHTML={{
-                                __html:
-                                  renderDelegationPlan(delegation) +
-                                  (afterJson ? renderMarkdown(afterJson) : ""),
-                              }}
-                            />
-                          );
-                        }
-                        if (isToolOnly) {
-                          return (
-                            <div
-                              className="text-[11px] font-mono px-2 py-1 rounded border inline-block"
-                              style={{
-                                color: "var(--monitor-muted)",
-                                background: "var(--monitor-hover)",
-                                borderColor: "var(--monitor-border)",
-                              }}
-                            >
-                              {msg.content}
-                            </div>
-                          );
-                        }
-                        return (
-                          <div
-                            className="monitor-chat-md text-sm leading-relaxed px-3 py-2 rounded-2xl rounded-tl-sm border"
-                            style={{
-                              color: "var(--monitor-text)",
-                              background: "var(--monitor-hover)",
-                              borderColor: "var(--monitor-border)",
-                            }}
-                            dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                          />
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            .map((msg) => (
+              <ChatMessageItem key={msg.id} msg={msg} />
+            ))}
         </div>
         <div
           className="p-4 border-t border-zinc-800/80"

@@ -97,6 +97,8 @@ export interface ArtifactEntry {
 export interface TaskEntry {
   id: string;
   label: string;
+  /** Full untruncated text (only set when label was truncated). */
+  fullLabel?: string;
   completed: boolean;
 }
 

@@ -16,6 +16,7 @@ import {
   File,
   Server,
   Cloud,
+  ChevronDown,
 } from "lucide-react";
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import {
@@ -74,6 +75,7 @@ import type {
   LifecycleEvent,
   ActivityWindow,
   TaskSessionData,
+  TaskEntry,
   AgentRuntimeConfig,
   AgentTelemetry,
 } from "./types";
@@ -106,6 +108,50 @@ const EMPTY_AGENT_TELEMETRY: AgentTelemetry = {
   toolUsage: [],
   systemMetrics: [],
 };
+
+// ── Task list with expandable details ──────────────────────────────────
+function TaskList({ tasks }: { tasks: TaskEntry[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (tasks.length === 0) {
+    return <div className="text-xs text-zinc-600 italic">No tasks detected.</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {tasks.map((task) => {
+        const canExpand = !!task.fullLabel;
+        const isExpanded = expandedId === task.id;
+        return (
+          <div key={task.id}>
+            <div
+              className={`flex items-start gap-2 text-sm text-zinc-300 ${canExpand ? "cursor-pointer hover:text-zinc-100" : ""}`}
+              onClick={canExpand ? () => setExpandedId(isExpanded ? null : task.id) : undefined}
+            >
+              {task.completed ? (
+                <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+              ) : (
+                <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+              )}
+              <span className="leading-snug flex-1">{task.label}</span>
+              {canExpand && (
+                <ChevronDown
+                  size={12}
+                  className={`text-zinc-500 mt-1 flex-shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                />
+              )}
+            </div>
+            {isExpanded && task.fullLabel && (
+              <div className="ml-6 mt-1 text-xs text-zinc-400 bg-zinc-800/40 border border-zinc-700/40 rounded p-2 whitespace-pre-wrap break-words max-h-60 overflow-y-auto custom-scrollbar">
+                {task.fullLabel}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // ── Icon registry (maps string keys from data to lucide components) ─────
 
@@ -346,25 +392,7 @@ export function MonitorBottomPanel({
             <div className="w-full xl:w-0 xl:flex-1 xl:overflow-y-auto xl:custom-scrollbar flex flex-col gap-4 px-3 border-r border-zinc-800/30">
               <div>
                 <div className="text-xs text-zinc-500 font-mono mb-2">TASKS & COMPLETION</div>
-                <div className="space-y-2">
-                  {agentTelemetry.tasks.length > 0 ? (
-                    agentTelemetry.tasks.map((task) => (
-                      <div key={task.id} className="flex items-start gap-2 text-sm text-zinc-300">
-                        {task.completed ? (
-                          <CheckCircle2
-                            size={14}
-                            className="text-emerald-500 mt-0.5 flex-shrink-0"
-                          />
-                        ) : (
-                          <Circle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
-                        )}
-                        <span className="leading-snug">{task.label}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-xs text-zinc-600 italic">No tasks detected.</div>
-                  )}
-                </div>
+                <TaskList tasks={agentTelemetry.tasks} />
               </div>
             </div>
             {/* Col 3: Output & Artifacts */}

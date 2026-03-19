@@ -450,7 +450,7 @@ async function parseJsonlFile(filePath: string): Promise<ParsedSession> {
         messages.push({
           role,
           timestamp,
-          content: contentText.slice(0, 1500),
+          content: contentText.slice(0, 8000),
           usage: msg.usage as ParsedMessage["usage"],
           durationMs: msg.durationMs as number | undefined,
           stopReason: msg.stopReason as string | undefined,
@@ -871,18 +871,22 @@ function buildTaskSession(
   const chatMessages: MonitorChatMessage[] = [];
   let msgSeq = 0;
   let seenFirstUser = false;
+  // Content limit: delegation plans can be large; use 8000 (consistent with mission path).
+  const CHAT_CONTENT_LIMIT = 8000;
+  const CHAT_MSG_LIMIT = 500;
   for (const msg of messages) {
-    if (chatMessages.length >= 100) {
+    if (chatMessages.length >= CHAT_MSG_LIMIT) {
       break;
     }
 
     if (msg.role === "user" && msg.content) {
       if (!seenFirstUser) {
         seenFirstUser = true;
+        const raw = msg.content;
         chatMessages.push({
           id: `msg-${++msgSeq}`,
           role: "user",
-          content: msg.content.slice(0, 1500),
+          content: raw.length > CHAT_CONTENT_LIMIT ? raw.slice(0, CHAT_CONTENT_LIMIT) + "…" : raw,
           ts: msg.timestamp ? offsetSec(msg.timestamp) : 0,
         });
       }
@@ -893,7 +897,8 @@ function buildTaskSession(
         chatMessages.push({
           id: `msg-${++msgSeq}`,
           role: "assistant",
-          content: text.slice(0, 1500),
+          content:
+            text.length > CHAT_CONTENT_LIMIT ? text.slice(0, CHAT_CONTENT_LIMIT) + "…" : text,
           agentId: orchestratorLaneId,
           agentName: parsed.agentName,
           ts: msg.timestamp ? offsetSec(msg.timestamp) : undefined,
@@ -1542,12 +1547,18 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
         // Telemetry: tasks from user messages
         const userMsgs = parsed.messages.filter((m) => m.role === "user" && m.content);
         agentTelemetry[agent.id].tasks = userMsgs.slice(0, 10).map((m, i) => {
-          const label = m.content.length > 80 ? m.content.slice(0, 77) + "..." : m.content;
+          const truncated = m.content.length > 80;
+          const label = truncated ? m.content.slice(0, 77) + "..." : m.content;
           const nextOk = parsed.messages.find(
             (nm) =>
               nm.role === "assistant" && nm.timestamp > m.timestamp && nm.stopReason !== "error",
           );
-          return { id: `t${i}`, label, completed: !!nextOk };
+          return {
+            id: `t${i}`,
+            label,
+            fullLabel: truncated ? m.content.slice(0, 2000) : undefined,
+            completed: !!nextOk,
+          };
         });
 
         agentTelemetry[agent.id].summary =
@@ -1927,7 +1938,10 @@ async function buildMissionSession(missionId: string): Promise<MonitorTaskSessio
     chatMessages.push({
       id: `msg-${++msgSeq}`,
       role: chat.role,
-      content: chat.content.slice(0, 1500),
+      content:
+        chat.content.includes('"agentId"') && chat.content.includes('"subtask"')
+          ? chat.content.slice(0, 8000) // delegation plans can be large
+          : chat.content.slice(0, 1500),
       agentId: chat.role === "assistant" ? chat.agentId : undefined,
       agentName: chat.role === "assistant" ? chat.agentName : undefined,
       ts: offsetSec(chat.timestamp),

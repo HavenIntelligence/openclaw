@@ -268,6 +268,15 @@ export function toSanitizedMarkdownHtml(markdown: string): string {
       return cached;
     }
   }
+  // If the content looks like a JSON delegation plan, convert to readable markdown
+  // before rendering so chat doesn't show raw JSON for orchestrator delegation.
+  const jsonData = parseJsonForDisplay(input);
+  if (jsonData !== null) {
+    const delegationMd = jsonToDelegationMarkdown(jsonData) ?? jsonToStructuredMarkdown(jsonData);
+    if (delegationMd) {
+      return toSanitizedMarkdownHtml(delegationMd);
+    }
+  }
   const truncated = truncateText(input, MARKDOWN_CHAR_LIMIT);
   const suffix = truncated.truncated
     ? `\n\n… truncated (${truncated.total} chars, showing first ${truncated.text.length}).`
